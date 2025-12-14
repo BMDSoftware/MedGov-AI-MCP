@@ -1,0 +1,3 @@
+[submodule "fhir-mcp-server"]
+	path = fhir-mcp-server
+	url = git@github.com:wso2/fhir-mcp-server.git

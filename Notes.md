@@ -9,3 +9,13 @@ I've defined 3 major things to gather and implement:
 
 **A few notes** - Do not make it a chat model
 (Other notes are on my other computer)
+
+
+
+
+### LINKS
+
+- [Health Database](https://ec.europa.eu/eurostat/web/health/database)
+- [HL7 MCP SERVER](https://github.com/wso2/fhir-mcp-server)
+
+

@@ -16,6 +16,12 @@ BUT, sometimes certain informations are necessary, age for example, could be ano
 
 
 
+
+### Folder POC
+Where it will be implemented
+
+- Don't forget the .env file with API keys
+
 ### LINKS
 
 - [Health Database](https://ec.europa.eu/eurostat/web/health/database)

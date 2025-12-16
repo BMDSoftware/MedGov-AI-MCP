@@ -17,17 +17,79 @@ FHIR_SERVER_URL = os.getenv("FHIR_SERVER_URL", "http://localhost:8080/fhir")
 MCP_SERVER_URL = "http://localhost:8000"
 
 
+
+# we're creating a wrapper of the tool existing in MCP
+# we only have the arguments needed for searching patients
+# not the full search params
+# also ill put these functions later on another file for reuse
 def mcp_search_patients(count=1):
-    response = requests.get(f"{FHIR_SERVER_URL}/Patient?_count={count}")
-    return response.json() if response.status_code == 200 else None
+    response = requests.post(
+        f"{MCP_SERVER_URL}/mcp/tools/call",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream"
+        },
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "search",
+                "arguments": {
+                    "type": "Patient",
+                    "searchParam": {"_count": str(count)}
+                }
+            },
+            "id": 1
+        }
+    )
+    if response.status_code == 200:
+        result = response.json()
+        # MCP wraps result in content[0].text as JSON string
+        mcp_result = result.get("result", {})
+        content = mcp_result.get("content", [])
+        if content and len(content) > 0:
+            text = content[0].get("text", "")
+            if text:
+                return json.loads(text)
+        return None
+    else:
+        # debug this error
+        print(f"DEBUG Error: {response.status_code} - {response.text}")
+    return None
+
+# we're creating a wrapper of the tool existing in MCP
 
 def mcp_create_patient(patient_resource):
     response = requests.post(
-        f"{FHIR_SERVER_URL}/Patient",
-        json=patient_resource,
-        headers={"Content-Type": "application/fhir+json"}
+        f"{MCP_SERVER_URL}/mcp/tools/call",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream"
+        },
+        json={
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "create",
+                "arguments": {
+                    "type": "Patient",
+                    "payload": patient_resource
+                }
+            },
+            "id": 2
+        }
     )
-    return response.json() if response.status_code in [200, 201] else None
+    if response.status_code == 200:
+        result = response.json()
+        # MCP wraps result in content[0].text as JSON string
+        mcp_result = result.get("result", {})
+        content = mcp_result.get("content", [])
+        if content and len(content) > 0:
+            text = content[0].get("text", "")
+            if text:
+                return json.loads(text)  # Parse JSON string to dict
+        return None
+    return None
 
 
 # set models rules for anonymization
@@ -159,3 +221,6 @@ if __name__ == "__main__":
 # curl http://localhost:8080/fhir/Patient/{new_id}
 # or access via FHIR client
 # or I could put a print XD or write onto a local file but it's fine
+
+
+# * Python function → HTTP POST → MCP Server → Executes tool (search/create) → FHIR API *

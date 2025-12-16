@@ -4,13 +4,30 @@ from dotenv import load_dotenv
 import json
 import requests
 
+# Right now im connecting directly to the api and not going through the mcp server
+# also install better comments in vs code extensions
+# ! UPDATE: Adding MCP integration
+
 load_dotenv()
 
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 # server running locally
 FHIR_SERVER_URL = os.getenv("FHIR_SERVER_URL", "http://localhost:8080/fhir")
+MCP_SERVER_URL = "http://localhost:8000"
 
+
+def mcp_search_patients(count=1):
+    response = requests.get(f"{FHIR_SERVER_URL}/Patient?_count={count}")
+    return response.json() if response.status_code == 200 else None
+
+def mcp_create_patient(patient_resource):
+    response = requests.post(
+        f"{FHIR_SERVER_URL}/Patient",
+        json=patient_resource,
+        headers={"Content-Type": "application/fhir+json"}
+    )
+    return response.json() if response.status_code in [200, 201] else None
 
 
 # set models rules for anonymization
@@ -87,10 +104,14 @@ if __name__ == "__main__":
 
     print("Fetching real patient from FHIR server...")
 
-    response = requests.get(f"{FHIR_SERVER_URL}/Patient?_count=1")
+    # OLD: Direct API call
+    # response = requests.get(f"{FHIR_SERVER_URL}/Patient?_count=1")
+    # if response.status_code == 200:
+    #     bundle = response.json()
 
-    if response.status_code == 200:
-        bundle = response.json()
+    # NEW: Using MCP abstraction layer
+    bundle = mcp_search_patients(count=1)
+    if bundle:
         if bundle.get("entry") and len(bundle["entry"]) > 0:
             original_patient = bundle["entry"][0]["resource"]
             patient_id = original_patient["id"]
@@ -105,22 +126,24 @@ if __name__ == "__main__":
             if 'id' in anonymized:
                 del anonymized['id']
 
-            # just save to the FHIR server
-            create_response = requests.post(
-                f"{FHIR_SERVER_URL}/Patient",
-                json=anonymized,
-                headers={"Content-Type": "application/fhir+json"}
-            )
+            # OLD: Direct API call to save
+            # create_response = requests.post(
+            #     f"{FHIR_SERVER_URL}/Patient",
+            #     json=anonymized,
+            #     headers={"Content-Type": "application/fhir+json"}
+            # )
+            # if create_response.status_code in [200, 201]:
+            #     new_patient = create_response.json()
 
-            if create_response.status_code in [200, 201]:
-                new_patient = create_response.json()
+            # NEW: Using MCP abstraction layer
+            new_patient = mcp_create_patient(anonymized)
+            if new_patient:
                 new_id = new_patient.get("id")
                 print(f"Anonymized patient created: {new_id}")
                 print(f"\nOriginal: {FHIR_SERVER_URL}/Patient/{patient_id}")
                 print(f"Anonymized: {FHIR_SERVER_URL}/Patient/{new_id}")
             else:
-                print(f"Error: {create_response.status_code}")
-                print(create_response.text)
+                print("Error: Failed to create anonymized patient")
         else:
             # right now because we're using the upload_patients.py 
             # we need to upload due to it being synthetic data
@@ -128,8 +151,7 @@ if __name__ == "__main__":
             # so we're simulating it
             print("No patients found in FHIR server!")
     else:
-        print(f"Error fetching from FHIR server: {response.status_code}")
-        print(response.text)
+        print("Error fetching from FHIR server")
 
 
 

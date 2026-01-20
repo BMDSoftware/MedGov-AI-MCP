@@ -65,3 +65,5 @@ Made times.py with AI just to compare direct API calls with MCP and i'm still co
 Okay after further consideration I understand what the problem was.
 I had to load the model each time, and when testing API calls was coming first, so most of the time was the model loading, thats why MCP was being faster.
 But still I don't understand why it's being so slow now.
+
+The results from the agent seem to not be very correct at times, specially because they are getting scrambled (the fields of the document)

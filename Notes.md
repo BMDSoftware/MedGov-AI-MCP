@@ -16,6 +16,12 @@ BUT, sometimes certain informations are necessary, age for example, could be ano
 
 
 
+
+### Folder POC
+Where it will be implemented
+
+- Don't forget the .env file with API keys
+
 ### LINKS
 
 - [Health Database](https://ec.europa.eu/eurostat/web/health/database)
@@ -36,3 +42,28 @@ BUT, sometimes certain informations are necessary, age for example, could be ano
 - [eICU Database](https://physionet.org/content/eicu-crd/)
 
 
+
+
+
+
+
+### Work so far
+
+
+- First I was doing API calls directly to FHIR now I'm using MCP calls, and it becamse like 5x faster
+
+Made times.py with AI just to compare direct API calls with MCP and i'm still confused
+
+```
+  Why MCP might be faster:
+
+  1. Docker internal networking - MCP server talks to FHIR using Docker's internal network (hapi-r4-postgresql:8080) which is faster than going through localhost port mapping
+  2. Connection pooling - MCP server might keep persistent connections to FHIR, while direct API creates new connections each time
+  3. Async handling - The MCP server uses async FHIR client (FastMCP + fhirpy AsyncFHIRClient)
+```
+
+Okay after further consideration I understand what the problem was.
+I had to load the model each time, and when testing API calls was coming first, so most of the time was the model loading, thats why MCP was being faster.
+But still I don't understand why it's being so slow now.
+
+The results from the agent seem to not be very correct at times, specially because they are getting scrambled (the fields of the document)

@@ -6,3 +6,4 @@
 - Logs monitoring and auditing instead of console output
 - Instead of manual testing we would have frontend, llm or schedule jobs calling the tools
 - We could never develop a frontend to add MCP servers because headers would change, the supported MCP servers have to be in the code?
+- Focus on tasks and then adapt to use cases or focus on use cases first

@@ -60,7 +60,10 @@ class MCPClient:
         try:
             response = requests.post(
                 f"{service.url}/mcp/tools/list",
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
                 json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
                 timeout=10,
             )

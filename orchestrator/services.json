@@ -11,8 +11,8 @@
     ],
     "tools": [],
     "status": "online",
-    "registered_at": "2026-01-20T23:51:58.225299",
-    "last_health_check": "2026-01-20T23:51:58.248746",
+    "registered_at": "2026-01-21T12:54:56.046546",
+    "last_health_check": "2026-01-21T12:54:56.594421",
     "metadata": {
       "version": "1.0",
       "protocol": "FHIR R4"
@@ -31,8 +31,8 @@
     ],
     "tools": [],
     "status": "offline",
-    "registered_at": "2026-01-20T23:51:58.225627",
-    "last_health_check": "2026-01-20T23:51:58.233218",
+    "registered_at": "2026-01-21T12:54:56.048426",
+    "last_health_check": "2026-01-21T12:54:56.063071",
     "metadata": {
       "version": "1.0",
       "models": [
@@ -52,8 +52,8 @@
     ],
     "tools": [],
     "status": "offline",
-    "registered_at": "2026-01-20T23:51:58.225775",
-    "last_health_check": "2026-01-20T23:51:58.234707",
+    "registered_at": "2026-01-21T12:54:56.048714",
+    "last_health_check": "2026-01-21T12:54:56.064724",
     "metadata": {
       "version": "1.0",
       "ontology": "RadLex"

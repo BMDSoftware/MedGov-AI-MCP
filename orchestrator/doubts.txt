@@ -1,3 +1,7 @@
-Should we worry with authentication
-Database for the registry?
-Async actions so we could call multiple mcp servers at the same time
+- Should we worry with authentication
+- Database for the registry?
+- Async actions so we could call multiple mcp servers at the same time
+- Develop backend API that calls these?
+- Instead of hardcoded services we would have services from config/env/discovery
+- Logs monitoring and auditing instead of console output
+- Instead of manual testing we would have frontend, llm or schedule jobs calling the tools

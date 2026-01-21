@@ -99,45 +99,76 @@ def main():
         status = "ONLINE" if is_healthy else "OFFLINE"
         print(f"  {name}: {status}")
 
-    # 7. Discover tools (if FHIR server is running)
+    # 7. Discover tools for all online services
     print_header("Discovering Tools")
-    try:
-        tools = client.discover_tools("fhir")
-        print(f"Found {len(tools)} tools:")
-        for tool in tools:
-            print(f"  - {tool.get('name')}: {tool.get('description', '')[:60]}...")
-    except Exception as e:
-        print(f"Could not discover tools (is FHIR MCP server running?): {e}")
+    for service in registry.list():
+        if health.get(service.name):  # Only if online
+            try:
+                tools = client.discover_tools(service.name)
+                print(f"[{service.name}] Found {len(tools)} tools:")
+                for tool in tools:
+                    print(f"  - {tool.get('name')}: {tool.get('description', '')[:50]}...")
+                print()
+            except Exception as e:
+                print(f"[{service.name}] Error: {e}")
 
-    # 8. Try calling a tool (search for patients)
-    print_header("Calling Tool: search")
+    # 8. Try calling FHIR tool (search for patients)
+    print_header("Calling FHIR: search")
     try:
         result = client.call_tool(
             service_name="fhir",
             tool_name="search",
             arguments={"type": "Patient", "searchParam": {"_count": "2"}}
         )
-        print(f"Result type: {type(result).__name__}")
-        if isinstance(result, dict):
-            if result.get("resourceType") == "Bundle":
-                entries = result.get("entry", [])
-                print(f"Found {len(entries)} patients")
-                for entry in entries[:2]:
-                    resource = entry.get("resource", {})
-                    name = resource.get("name", [{}])[0]
-                    full_name = f"{name.get('given', [''])[0]} {name.get('family', '')}"
-                    print(f"  - {full_name} (ID: {resource.get('id')})")
+        if isinstance(result, dict) and result.get("resourceType") == "Bundle":
+            entries = result.get("entry", [])
+            print(f"Found {len(entries)} patients")
+            for entry in entries[:2]:
+                resource = entry.get("resource", {})
+                name = resource.get("name", [{}])[0]
+                full_name = f"{name.get('given', [''])[0]} {name.get('family', '')}"
+                print(f"  - {full_name} (ID: {resource.get('id')})")
     except Exception as e:
         print(f"Could not call tool: {e}")
 
-    # 9. Show updated service status
-    print_header("Updated Service Status")
-    service = registry.get("fhir")
-    if service:
-        print(f"  Name: {service.name}")
-        print(f"  Status: {service.status}")
-        print(f"  Last check: {service.last_health_check}")
-        print(f"  Tools: {service.tools}")
+    # 9. Try calling MONAI tool (get info)
+    print_header("Calling MONAI: get_monai_info")
+    try:
+        result = client.call_tool(
+            service_name="monai",
+            tool_name="get_monai_info",
+            arguments={}
+        )
+        if isinstance(result, dict):
+            print(f"  MONAI version: {result.get('version')}")
+            print(f"  PyTorch version: {result.get('pytorch_version')}")
+            print(f"  CUDA available: {result.get('cuda_available')}")
+            print(f"  GPU count: {result.get('gpu_count')}")
+    except Exception as e:
+        print(f"Could not call tool: {e}")
+
+    # 10. Try calling MONAI tool (list models)
+    print_header("Calling MONAI: list_models (segmentation)")
+    try:
+        result = client.call_tool(
+            service_name="monai",
+            tool_name="list_models",
+            arguments={"category": "segmentation"}
+        )
+        if isinstance(result, dict):
+            print(f"Found {result.get('total')} segmentation models:")
+            for model in result.get("models", []):
+                print(f"  - {model.get('name')}: {model.get('description')}")
+    except Exception as e:
+        print(f"Could not call tool: {e}")
+
+    # 11. Show updated service status for all
+    print_header("All Services Status")
+    for service in registry.list():
+        print(f"  [{service.name}]")
+        print(f"    Status: {service.status}")
+        print(f"    Tools: {service.tools}")
+        print()
 
     print_header("Demo Complete")
 

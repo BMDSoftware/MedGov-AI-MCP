@@ -9,10 +9,18 @@
       "observation",
       "condition"
     ],
-    "tools": [],
+    "tools": [
+      "get_capabilities",
+      "search",
+      "read",
+      "create",
+      "update",
+      "delete",
+      "get_user"
+    ],
     "status": "online",
-    "registered_at": "2026-01-21T12:54:56.046546",
-    "last_health_check": "2026-01-21T12:54:56.594421",
+    "registered_at": "2026-01-21T13:31:54.965349",
+    "last_health_check": "2026-01-21T13:31:55.057139",
     "metadata": {
       "version": "1.0",
       "protocol": "FHIR R4"
@@ -29,10 +37,15 @@
       "mri",
       "ct"
     ],
-    "tools": [],
-    "status": "offline",
-    "registered_at": "2026-01-21T12:54:56.048426",
-    "last_health_check": "2026-01-21T12:54:56.063071",
+    "tools": [
+      "get_monai_info",
+      "list_models",
+      "load_image",
+      "list_transforms"
+    ],
+    "status": "online",
+    "registered_at": "2026-01-21T13:31:54.965926",
+    "last_health_check": "2026-01-21T13:31:57.231284",
     "metadata": {
       "version": "1.0",
       "models": [
@@ -52,8 +65,8 @@
     ],
     "tools": [],
     "status": "offline",
-    "registered_at": "2026-01-21T12:54:56.048714",
-    "last_health_check": "2026-01-21T12:54:56.064724",
+    "registered_at": "2026-01-21T13:31:54.966204",
+    "last_health_check": "2026-01-21T13:31:54.995946",
     "metadata": {
       "version": "1.0",
       "ontology": "RadLex"

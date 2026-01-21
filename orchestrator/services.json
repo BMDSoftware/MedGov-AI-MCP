@@ -1,0 +1,62 @@
+{
+  "fhir": {
+    "name": "fhir",
+    "url": "http://localhost:8000",
+    "description": "FHIR MCP Server - Access to FHIR resources",
+    "data_types": [
+      "fhir",
+      "patient",
+      "observation",
+      "condition"
+    ],
+    "tools": [],
+    "status": "online",
+    "registered_at": "2026-01-20T23:51:58.225299",
+    "last_health_check": "2026-01-20T23:51:58.248746",
+    "metadata": {
+      "version": "1.0",
+      "protocol": "FHIR R4"
+    }
+  },
+  "monai": {
+    "name": "monai",
+    "url": "http://localhost:8001",
+    "description": "MONAI MCP Server - Medical imaging AI models",
+    "data_types": [
+      "image",
+      "dicom",
+      "segmentation",
+      "mri",
+      "ct"
+    ],
+    "tools": [],
+    "status": "offline",
+    "registered_at": "2026-01-20T23:51:58.225627",
+    "last_health_check": "2026-01-20T23:51:58.233218",
+    "metadata": {
+      "version": "1.0",
+      "models": [
+        "DeepEdit",
+        "AbdomenMRI"
+      ]
+    }
+  },
+  "radlex": {
+    "name": "radlex",
+    "url": "http://localhost:8002",
+    "description": "RadLex MCP Server - Radiology lexicon and templates",
+    "data_types": [
+      "terminology",
+      "template",
+      "report"
+    ],
+    "tools": [],
+    "status": "offline",
+    "registered_at": "2026-01-20T23:51:58.225775",
+    "last_health_check": "2026-01-20T23:51:58.234707",
+    "metadata": {
+      "version": "1.0",
+      "ontology": "RadLex"
+    }
+  }
+}

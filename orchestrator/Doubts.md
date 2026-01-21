@@ -31,3 +31,4 @@ Notes:
 8 - Ler as referencias
 9 - Aproveitar MCP e a onda
 10 - Definir milestones, meter tarefas
+11 - Take notes on new technologies

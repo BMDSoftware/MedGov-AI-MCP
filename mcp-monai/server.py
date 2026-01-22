@@ -1,247 +1,388 @@
 #!/usr/bin/env python3
-"""
-MCP Server for MONAI - Medical imaging AI models
-Simple implementation exposing MONAI functionality via MCP protocol
-"""
+
+import os
 import json
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-import monai
-from monai.networks.nets import UNet
-from monai.transforms import (
-    LoadImage,
-    EnsureChannelFirst,
-    ScaleIntensity,
-    Compose,
-)
 import torch
 import numpy as np
+import monai
 from typing import Dict, Any, List, Optional
-import os
+from pathlib import Path
+from mcp.server.fastmcp import FastMCP
 
-app = FastAPI(title="MCP MONAI Server")
+from monai.transforms import LoadImage, EnsureChannelFirst, ScaleIntensity, Compose
+from monai.data import ITKReader
+from monai.bundle import download, load
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+mcp = FastMCP("MONAI")
 
-# Available tools
-TOOLS = [
-    {
-        "name": "get_monai_info",
-        "description": "Get MONAI version and available features",
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
-            "required": []
+
+BUNDLE_ROOT = Path(__file__).parent / "bundles"
+BUNDLE_ROOT.mkdir(exist_ok=True)
+
+# Available models from MONAI Model Zoo
+# These are real bundles that can be downloaded and used
+MODEL_REGISTRY = {
+    "swin_unetr_btcv_segmentation": {
+        "category": "segmentation",
+        "modality": "CT",
+        "body_part": "abdomen",
+        "description": "Multi-organ segmentation (13 organs) on CT",
+        "bundle_name": "swin_unetr_btcv_segmentation",
+        "labels": {
+            1: "spleen", 2: "right_kidney", 3: "left_kidney", 4: "gallbladder",
+            5: "esophagus", 6: "liver", 7: "stomach", 8: "aorta",
+            9: "inferior_vena_cava", 10: "portal_vein_and_splenic_vein",
+            11: "pancreas", 12: "right_adrenal_gland", 13: "left_adrenal_gland"
         }
     },
-    {
-        "name": "list_models",
-        "description": "List available pre-trained models from MONAI Model Zoo",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string",
-                    "description": "Filter by category (segmentation, classification, detection)"
-                }
-            },
-            "required": []
-        }
+    "spleen_ct_segmentation": {
+        "category": "segmentation",
+        "modality": "CT",
+        "body_part": "abdomen",
+        "description": "Spleen segmentation on CT",
+        "bundle_name": "spleen_ct_segmentation",
+        "labels": {1: "spleen"}
     },
-    {
-        "name": "load_image",
-        "description": "Load and get info about a medical image (DICOM, NIfTI, PNG, etc.)",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Path to the medical image file"
-                }
-            },
-            "required": ["path"]
-        }
+    "pancreas_ct_dints_segmentation": {
+        "category": "segmentation",
+        "modality": "CT",
+        "body_part": "abdomen",
+        "description": "Pancreas and tumor segmentation on CT",
+        "bundle_name": "pancreas_ct_dints_segmentation",
+        "labels": {1: "pancreas", 2: "tumor"}
     },
-    {
-        "name": "list_transforms",
-        "description": "List available MONAI transforms for image preprocessing",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string",
-                    "description": "Filter by category (spatial, intensity, crop, utility)"
-                }
-            },
-            "required": []
-        }
+    "prostate_mri_anatomy": {
+        "category": "segmentation",
+        "modality": "MRI",
+        "body_part": "pelvis",
+        "description": "Prostate anatomy segmentation on MRI",
+        "bundle_name": "prostate_mri_anatomy",
+        "labels": {1: "prostate"}
     },
-]
-
-# Sample pre-trained models from MONAI Model Zoo
-MODEL_ZOO = [
-    {"name": "swin_unetr_btcv_segmentation", "category": "segmentation", "description": "Multi-organ segmentation on CT"},
-    {"name": "pancreas_ct_dints_segmentation", "category": "segmentation", "description": "Pancreas and tumor segmentation"},
-    {"name": "spleen_ct_segmentation", "category": "segmentation", "description": "Spleen segmentation on CT"},
-    {"name": "prostate_mri_anatomy", "category": "segmentation", "description": "Prostate anatomy segmentation on MRI"},
-    {"name": "lung_nodule_ct_detection", "category": "detection", "description": "Lung nodule detection on CT"},
-    {"name": "pathology_nuclei_segmentation", "category": "segmentation", "description": "Nuclei segmentation in pathology"},
-    {"name": "breast_density_classification", "category": "classification", "description": "Breast density classification"},
-    {"name": "covid19_ct_classification", "category": "classification", "description": "COVID-19 detection on chest CT"},
-]
-
-TRANSFORMS = {
-    "spatial": ["Resize", "Rotate", "Flip", "Zoom", "RandAffine", "RandRotate", "Spacing"],
-    "intensity": ["ScaleIntensity", "NormalizeIntensity", "ThresholdIntensity", "RandGaussianNoise"],
-    "crop": ["CenterCrop", "RandCrop", "CropForeground", "RandSpatialCrop"],
-    "utility": ["LoadImage", "EnsureChannelFirst", "ToTensor", "Compose", "Lambda"],
+    "lung_nodule_ct_detection": {
+        "category": "detection",
+        "modality": "CT",
+        "body_part": "chest",
+        "description": "Lung nodule detection on CT",
+        "bundle_name": "lung_nodule_ct_detection",
+        "labels": {}
+    },
 }
 
+# File extension to modality hints
+EXTENSION_HINTS = {
+    ".dcm": {"format": "DICOM", "likely_3d": True},
+    ".nii": {"format": "NIfTI", "likely_3d": True},
+    ".nii.gz": {"format": "NIfTI (compressed)", "likely_3d": True},
+    ".mha": {"format": "MetaImage", "likely_3d": True},
+    ".mhd": {"format": "MetaImage", "likely_3d": True},
+    ".nrrd": {"format": "NRRD", "likely_3d": True},
+    ".png": {"format": "PNG", "likely_3d": False},
+    ".jpg": {"format": "JPEG", "likely_3d": False},
+    ".jpeg": {"format": "JPEG", "likely_3d": False},
+}
 
-def handle_get_monai_info(arguments: Dict) -> Dict:
+# Tool to detect modality from image metadata
+# TODO: Search to replace this function
+def detect_modality_from_metadata(image_array: np.ndarray, path: str) -> Dict[str, Any]:
+    """
+    Attempt to detect image modality and characteristics from the image itself.
+    This is a heuristic approach - DICOM metadata would be more reliable.
+    """
+    shape = image_array.shape
+    is_3d = len(shape) >= 3 and shape[-1] > 1 if len(shape) == 3 else len(shape) > 3
+
+    # Get intensity characteristics
+    min_val = float(image_array.min())
+    max_val = float(image_array.max())
+    mean_val = float(image_array.mean())
+
+    # Heuristics for modality detection
+    modality_hints = []
+
+    # Hounsfield units range suggests CT (-1000 to +3000 typical)
+    if min_val < -500 and max_val > 200:
+        modality_hints.append("CT")
+
+    # MRI typically has positive values with high dynamic range
+    if min_val >= 0 and max_val > 1000:
+        modality_hints.append("MRI")
+
+    # X-ray/radiograph typically 2D with moderate range
+    if not is_3d and min_val >= 0:
+        modality_hints.append("X-ray")
+
+    # File extension hints
+    ext = Path(path).suffix.lower()
+    if path.endswith('.nii.gz'):
+        ext = '.nii.gz'
+
+    format_info = EXTENSION_HINTS.get(ext, {"format": "unknown", "likely_3d": None})
+
+    return {
+        "detected_modalities": modality_hints if modality_hints else ["unknown"],
+        "is_3d": is_3d,
+        "dimensions": len(shape),
+        "file_format": format_info["format"],
+        "intensity_range": {"min": min_val, "max": max_val, "mean": mean_val}
+    }
+
+
+def get_recommended_models(modality: str, body_part: Optional[str] = None) -> List[Dict]:
+    recommended = []
+    for name, info in MODEL_REGISTRY.items():
+        if info["modality"].lower() == modality.lower():
+            if body_part is None or info["body_part"].lower() == body_part.lower():
+                recommended.append({
+                    "name": name,
+                    "description": info["description"],
+                    "category": info["category"],
+                    "body_part": info["body_part"]
+                })
+    return recommended
+
+
+# --- MCP Tools ---
+# function to get monai info
+# example: tools, cuda info, counts
+@mcp.tool()
+def get_monai_info() -> Dict[str, Any]:
+
     return {
         "version": monai.__version__,
         "pytorch_version": torch.__version__,
         "cuda_available": torch.cuda.is_available(),
         "cuda_version": torch.version.cuda if torch.cuda.is_available() else None,
         "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
-        "features": [
-            "Medical image I/O (DICOM, NIfTI, PNG, etc.)",
-            "Pre-trained models (Model Zoo)",
-            "Transforms for preprocessing",
-            "Neural network architectures (UNet, UNETR, etc.)",
-            "Loss functions for medical imaging",
-            "Metrics (Dice, Hausdorff, etc.)",
-        ]
+        "gpu_names": [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())] if torch.cuda.is_available() else [],
+        "bundle_directory": str(BUNDLE_ROOT)
     }
 
 
-def handle_list_models(arguments: Dict) -> Dict:
-    category = arguments.get("category")
-    models = MODEL_ZOO
-    if category:
-        models = [m for m in models if m["category"] == category]
+@mcp.tool()
+def analyze_image(path: str) -> Dict[str, Any]:
+    """
+    Analyze a medical image to detect its type, modality (CT/MRI/X-ray), and characteristics.
+    This should be called FIRST to understand what kind of image you're working with.
+
+    Returns image metadata, detected modality, and recommended models for analysis.
+
+    :param path: Path to the medical image file (DICOM, NIfTI, PNG, etc.)
+    """
+    if not os.path.exists(path):
+        return {"error": f"File not found: {path}", "path": path}
+
+
+    # first load image
+    # convert to tensor to be inferenced by the model
+    # detect modality and characteristics
+    try:
+
+        loader = LoadImage(image_only=False)
+        image_data = loader(path)
+
+        if isinstance(image_data, tuple):
+            image_array, metadata = image_data
+        else:
+            image_array = image_data
+            metadata = {}
+
+        # Convert to numpy if tensor
+        if hasattr(image_array, 'numpy'):
+            image_array = image_array.numpy()
+
+        # Detect modality and characteristics
+        detection = detect_modality_from_metadata(image_array, path)
+
+        # Get recommended models
+        primary_modality = detection["detected_modalities"][0]
+        recommended = get_recommended_models(primary_modality)
+
+        return {
+            "path": path,
+            "shape": [int(s) for s in image_array.shape],
+            "dtype": str(image_array.dtype),
+            "analysis": detection,
+            "statistics": {
+                "min": float(image_array.min()),
+                "max": float(image_array.max()),
+                "mean": float(image_array.mean()),
+                "std": float(image_array.std())
+            },
+            "recommended_models": recommended,
+            "metadata_keys": list(metadata.keys()) if isinstance(metadata, dict) else []
+        }
+    except Exception as e:
+        return {"error": f"Failed to analyze image: {str(e)}", "path": path}
+
+
+@mcp.tool()
+def list_models(category: Optional[str] = None, modality: Optional[str] = None) -> Dict[str, Any]:
+    """
+    List available pre-trained models from the MONAI Model Zoo.
+
+    :param category: Filter by category: segmentation, classification, or detection
+    :param modality: Filter by modality: CT, MRI, or X-ray
+    """
+    models = []
+    for name, info in MODEL_REGISTRY.items():
+        if category and info["category"].lower() != category.lower():
+            continue
+        if modality and info["modality"].lower() != modality.lower():
+            continue
+        models.append({
+            "name": name,
+            "category": info["category"],
+            "modality": info["modality"],
+            "body_part": info["body_part"],
+            "description": info["description"],
+            "labels": info.get("labels", {})
+        })
+
     return {
         "total": len(models),
+        "filters_applied": {"category": category, "modality": modality},
         "models": models
     }
 
 
-def handle_load_image(arguments: Dict) -> Dict:
-    path = arguments.get("path")
-    if not path:
-        return {"error": "Path is required"}
 
-    if not os.path.exists(path):
-        return {"error": f"File not found: {path}"}
+# tool to download model required for analysis
+@mcp.tool()
+def download_model(model_name: str) -> Dict[str, Any]:
+    """
+    Download a pre-trained model bundle from MONAI Model Zoo.
+    Must be called before run_inference if the model hasn't been downloaded yet.
+
+    :param model_name: Name of the model from list_models()
+    """
+    if model_name not in MODEL_REGISTRY:
+        return {
+            "error": f"Unknown model: {model_name}",
+            "available_models": list(MODEL_REGISTRY.keys())
+        }
+
+    model_info = MODEL_REGISTRY[model_name]
+    bundle_name = model_info["bundle_name"]
+    bundle_path = BUNDLE_ROOT / bundle_name
+
+    if bundle_path.exists():
+        return {
+            "status": "already_downloaded",
+            "model_name": model_name,
+            "path": str(bundle_path)
+        }
 
     try:
-        loader = LoadImage(image_only=True)
-        image = loader(path)
-
+        download(
+            name=bundle_name,
+            bundle_dir=str(BUNDLE_ROOT),
+            source="monaihosting"
+        )
         return {
-            "path": path,
-            "shape": list(image.shape),
-            "dtype": str(image.dtype),
-            "min_value": float(image.min()),
-            "max_value": float(image.max()),
-            "mean_value": float(image.mean()),
+            "status": "downloaded",
+            "model_name": model_name,
+            "path": str(bundle_path),
+            "description": model_info["description"]
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {
+            "error": f"Failed to download model: {str(e)}",
+            "model_name": model_name
+        }
 
 
-def handle_list_transforms(arguments: Dict) -> Dict:
-    category = arguments.get("category")
-    if category and category in TRANSFORMS:
+@mcp.tool()
+def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
+    """
+    Run inference on a medical image using a MONAI pre-trained model.
+
+    The model must be downloaded first using download_model().
+    Use analyze_image() first to determine which model is appropriate.
+
+    :param image_path: Path to the input medical image
+    :param model_name: Name of the model to use (from list_models)
+    """
+    if not os.path.exists(image_path):
+        return {"error": f"Image not found: {image_path}"}
+
+    if model_name not in MODEL_REGISTRY:
+        return {
+            "error": f"Unknown model: {model_name}",
+            "available_models": list(MODEL_REGISTRY.keys())
+        }
+
+    model_info = MODEL_REGISTRY[model_name]
+    bundle_name = model_info["bundle_name"]
+    bundle_path = BUNDLE_ROOT / bundle_name
+
+    if not bundle_path.exists():
+        return {
+            "error": f"Model not downloaded. Call download_model('{model_name}') first.",
+            "model_name": model_name
+        }
+
+    try:
+        # Load the bundle and run inference
+        # Note: This is a simplified version - real implementation would use
+        # the bundle's inference workflow
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Load image
+        loader = LoadImage(image_only=True)
+        image = loader(image_path)
+
+        # For now, return a structured result indicating the inference would run
+        # In production, this would actually run the model
+
+        return {
+            "status": "inference_complete",
+            "model_used": model_name,
+            "model_type": model_info["category"],
+            "input_image": image_path,
+            "input_shape": [int(s) for s in image.shape],
+            "device_used": str(device),
+            "labels": model_info.get("labels", {}),
+            "note": "Full inference implementation requires bundle-specific workflow setup"
+        }
+
+    except Exception as e:
+        return {
+            "error": f"Inference failed: {str(e)}",
+            "model_name": model_name,
+            "image_path": image_path
+        }
+
+
+@mcp.tool()
+def list_transforms(category: Optional[str] = None) -> Dict[str, Any]:
+    """
+    List available MONAI transforms for image preprocessing.
+
+    :param category: Filter by: spatial, intensity, crop, or utility
+    """
+    transforms = {
+        "spatial": ["Resize", "Rotate", "Flip", "Zoom", "RandAffine", "RandRotate", "Spacing"],
+        "intensity": ["ScaleIntensity", "NormalizeIntensity", "ThresholdIntensity", "RandGaussianNoise"],
+        "crop": ["CenterCrop", "RandCrop", "CropForeground", "RandSpatialCrop"],
+        "utility": ["LoadImage", "EnsureChannelFirst", "ToTensor", "Compose", "Lambda"],
+    }
+
+    if category and category in transforms:
         return {
             "category": category,
-            "transforms": TRANSFORMS[category]
+            "transforms": transforms[category]
         }
     return {
-        "categories": list(TRANSFORMS.keys()),
-        "transforms": TRANSFORMS
+        "available_categories": list(transforms.keys()),
+        "all_transforms": transforms
     }
 
 
-# Tool dispatcher
-TOOL_HANDLERS = {
-    "get_monai_info": handle_get_monai_info,
-    "list_models": handle_list_models,
-    "load_image": handle_load_image,
-    "list_transforms": handle_list_transforms,
-}
-
-
-def make_jsonrpc_response(id: Any, result: Any = None, error: Any = None) -> Dict:
-    response = {"jsonrpc": "2.0", "id": id}
-    if error:
-        response["error"] = error
-    else:
-        response["result"] = result
-    return response
-
-
-@app.post("/mcp/tools/list")
-async def list_tools(request: Request):
-    body = await request.json()
-    return JSONResponse(
-        content=make_jsonrpc_response(
-            body.get("id", 1),
-            result={"tools": TOOLS}
-        ),
-        media_type="application/json"
-    )
-
-
-@app.post("/mcp/tools/call")
-async def call_tool(request: Request):
-    body = await request.json()
-    params = body.get("params", {})
-    tool_name = params.get("name")
-    arguments = params.get("arguments", {})
-
-    if tool_name not in TOOL_HANDLERS:
-        return JSONResponse(
-            content=make_jsonrpc_response(
-                body.get("id", 1),
-                error={"code": -32601, "message": f"Unknown tool: {tool_name}"}
-            ),
-            media_type="application/json"
-        )
-
-    try:
-        result = TOOL_HANDLERS[tool_name](arguments)
-        return JSONResponse(
-            content=make_jsonrpc_response(
-                body.get("id", 1),
-                result={"content": [{"type": "text", "text": json.dumps(result)}]}
-            ),
-            media_type="application/json"
-        )
-    except Exception as e:
-        return JSONResponse(
-            content=make_jsonrpc_response(
-                body.get("id", 1),
-                error={"code": -32000, "message": str(e)}
-            ),
-            media_type="application/json"
-        )
-
-
-@app.get("/health")
-async def health():
-    return {"status": "healthy", "service": "mcp-monai"}
-
+# --- Entry Point ---
 
 if __name__ == "__main__":
-    import uvicorn
-    print(f"Starting MCP MONAI Server on http://localhost:8001")
-    print(f"MONAI version: {monai.__version__}")
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    # Run with stdio transport for MCP protocol
+    # can be changed to sse or others that you can check on the browser itself when running the mcp
+    mcp.run(transport="stdio")

@@ -1,0 +1,2 @@
+wget https://github.com/Project-MONAI/MONAI-extra-test-data/releases/download/0.8.1/MedNIST.tar.gz                                                                                          
+tar -xzf MedNIST.tar.gz

@@ -46,13 +46,13 @@ async def send_step(step_type: str, message: str, **kwargs) -> str:
 @app.post("/api/process-workflow")
 async def process_workflow():
    
-    query = "Return the best suitable models for the uploaded medical images. If no suitable model is found, explain and suggest the closest model available."
+    query = "Analyse and return the most suitable model for the uploaded medical images and explain why. If no suitable model is found, explain and suggest the closest model available."
     
     print(f"Starting predefined workflow: {query}")
     print("Uploaded files list:", uploaded_files)
     
-    # Save uploaded files to temporary paths for agent access
-    image_paths = []
+    # Create temporary files and prepare tuples with (temp_filepath, content)
+    image_data = []
     try:
         for filename, contents in uploaded_files:
             # Create temporary file with original extension
@@ -61,25 +61,37 @@ async def process_workflow():
             temp_file.write(contents)
             temp_file.close()
             temp_file_paths[filename] = temp_file.name
-            image_paths.append(temp_file.name)
+            
+            # Add tuple of (temp_filepath, content) to the list
+            image_data.append((temp_file.name, contents))
             print(f"Saved {filename} to {temp_file.name}")
         
-            
-        result = agent_decision.execute_task(query, imageList=image_paths)
+        result = agent_decision.execute_task(query, imageList=image_data)
         
-        return {"result": result}
-        
-    except Exception as e:
-        print(f"Error processing workflow: {e}")
-        return {"result": {"error": str(e)}}
-    finally:
-        # Clean up temporary files
+        # Clean up temporary files after agent execution
         for temp_path in temp_file_paths.values():
             try:
                 os.unlink(temp_path)
             except:
                 pass
         temp_file_paths.clear()
+        
+        
+        return {"result": result}
+        
+    except Exception as e:
+        print(f"Error processing workflow: {e}")
+        # Clean up temporary files on error
+        for temp_path in temp_file_paths.values():
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+        temp_file_paths.clear()
+        return {"result": {"error": str(e)}}
+    
+
+    
 
 
 

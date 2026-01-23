@@ -61,6 +61,8 @@ class ToolRegistry:
         """Discover tools from a stdio-based MCP server"""
         command = server_config.get("command")
         args = server_config.get("args", [])
+        cwd = server_config.get("cwd")
+        env_vars = server_config.get("env", {})
         
         if not command:
             print(f"{server_name}: No command specified")
@@ -69,13 +71,17 @@ class ToolRegistry:
         try:
             # Start the MCP server process
             full_command = [command] + args
+
+            
             process = subprocess.Popen(
                 full_command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1
+                bufsize=1,
+                cwd=cwd,
+                env=env_vars if env_vars else None
             )
             
             # Store the process for later cleanup
@@ -198,17 +204,25 @@ class ToolRegistry:
     
     def cleanup(self):
         """Cleanup stdio server processes"""
-        for server_name, process in self.server_processes.items():
+        for server_name, process in list(self.server_processes.items()):
             try:
-                process.terminate()
-                process.wait(timeout=2)
-            except:
-                process.kill()
+                if process.poll() is None:  # Only if still running
+                    process.terminate()
+                    process.wait(timeout=2)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
         self.server_processes.clear()
     
     def __del__(self):
         """Cleanup on deletion"""
-        self.cleanup()
+        try:
+            self.cleanup()
+        except (ImportError, AttributeError):
+            # Python is shutting down, ignore cleanup errors
+            pass
     
 
             

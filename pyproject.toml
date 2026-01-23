@@ -1,0 +1,22 @@
+[project]
+name = "agentic_agent"
+version = "0.1.0"
+description = "AI agent for healthcare automation"
+authors = [
+]
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi",
+    "dotenv",
+    "requests",
+    "google-genai",
+    "python-multipart",
+    "uvicorn",
+    "torch", 
+    "numpy",
+    "mcp",
+    "Pillow",
+    "monai",
+]

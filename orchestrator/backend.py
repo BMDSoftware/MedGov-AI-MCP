@@ -43,13 +43,43 @@ async def send_step(step_type: str, message: str, **kwargs) -> str:
 
 
 
-@app.get("/api/process-query")
-async def process_query(query: str):
-    print(f"Processing query: {query}")
-
+@app.post("/api/process-workflow")
+async def process_workflow():
+   
+    query = "Return the best suitable models for the uploaded medical images. If no suitable model is found, explain and suggest the closest model available."
+    
+    print(f"Starting predefined workflow: {query}")
     print("Uploaded files list:", uploaded_files)
-    result = agent_decision.execute_task(query, imageList=uploaded_files)
-    return {"result": result}
+    
+    # Save uploaded files to temporary paths for agent access
+    image_paths = []
+    try:
+        for filename, contents in uploaded_files:
+            # Create temporary file with original extension
+            file_extension = os.path.splitext(filename)[1] or '.tmp'
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_extension)
+            temp_file.write(contents)
+            temp_file.close()
+            temp_file_paths[filename] = temp_file.name
+            image_paths.append(temp_file.name)
+            print(f"Saved {filename} to {temp_file.name}")
+        
+            
+        result = agent_decision.execute_task(query, imageList=image_paths)
+        
+        return {"result": result}
+        
+    except Exception as e:
+        print(f"Error processing workflow: {e}")
+        return {"result": {"error": str(e)}}
+    finally:
+        # Clean up temporary files
+        for temp_path in temp_file_paths.values():
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+        temp_file_paths.clear()
 
 
 

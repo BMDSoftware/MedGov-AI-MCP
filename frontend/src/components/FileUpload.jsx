@@ -3,7 +3,6 @@ import './FileUpload.css'
 
 function FileUpload({ onFileUpload, isProcessing }) {
   const [dragActive, setDragActive] = useState(false)
-  const [selectedFile, setSelectedFile] = useState(null)
   const fileInputRef = useRef(null)
 
   const handleDrag = (e) => {
@@ -34,13 +33,7 @@ function FileUpload({ onFileUpload, isProcessing }) {
   }
 
   const handleFile = (file) => {
-    setSelectedFile(file)
-  }
-
-  const handleUpload = (file) => {
-    if (!isProcessing) {
-      onFileUpload(file)
-    }
+    onFileUpload(file)
   }
 
   const onButtonClick = () => {
@@ -49,8 +42,6 @@ function FileUpload({ onFileUpload, isProcessing }) {
 
   return (
     <div className="file-upload-card">
-      <h2>Upload Patient Data</h2>
-
       <div
         className={`upload-area ${dragActive ? 'drag-active' : ''}`}
         onDragEnter={handleDrag}
@@ -65,38 +56,15 @@ function FileUpload({ onFileUpload, isProcessing }) {
           className="file-input"
           onChange={handleChange}
           accept=".jpg,.jpeg,.png"
+          disabled={isProcessing}
         />
 
-        {!selectedFile ? (
-          <div className="upload-prompt">
-            <div className="upload-icon">+</div>
-            <p className="upload-text">Drop file here or click to browse</p>
-            <p className="upload-subtext">Supports: Images</p>
-          </div>
-        ) : (
-          <div className="file-selected">
-            <div className="file-icon">✓</div>
-            <div className="file-info">
-              <p className="file-name">{selectedFile.name}</p>
-              <p className="file-size">{(selectedFile.size / 1024).toFixed(2)} KB</p>
-            </div>
-          </div>
-        )}
+        <div className="upload-prompt">
+          <div className="upload-icon"></div>
+          <p className="upload-text">Drop medical image here or click to browse</p>
+          <p className="upload-subtext">Supports: .jpg, .png, .jpeg</p>
+        </div>
       </div>
-
-      <button
-        className="upload-button"
-        onClick={() => handleUpload(selectedFile)}
-        disabled={isProcessing}
-      >
-        {isProcessing ? 'Processing...' : selectedFile ? 'Anonymize File' : 'Anonymize from FHIR'}
-      </button>
-
-      {!selectedFile && (
-        <p style={{ textAlign: 'center', marginTop: '1rem', color: '#999', fontSize: '0.9rem' }}>
-          Click button to fetch and anonymize a patient from FHIR server
-        </p>
-      )}
     </div>
   )
 }

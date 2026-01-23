@@ -4,6 +4,13 @@ import './ResultsDisplay.css'
 function ResultsDisplay({ results }) {
   const [activeTab, setActiveTab] = useState('answer')
 
+  // Debug logging
+  console.log('ResultsDisplay received:', results)
+  if (results && results.type === 'agent_response') {
+    console.log('Tools used:', results.tools_used)
+    console.log('Execution history:', results.execution_history)
+  }
+
   if (!results) {
     return (
       <div className="results-display-card">
@@ -27,28 +34,23 @@ function ResultsDisplay({ results }) {
     )
   }
 
-  // Handle new agent response format
+  // Handle new agent response format first
   if (results.type === 'agent_response') {
     return (
       <div className="results-display-card">
         <div className="results-header">
-          <h2>Agent Response</h2>
+          <h2>Agent Analysis</h2>
           <button
             className="download-btn"
-            onClick={() => downloadJSON(results, 'agent_response.json')}
+            onClick={() => downloadJSON(results, 'agent_analysis.json')}
           >
             Download Full Response
           </button>
         </div>
 
         <div className="agent-response">
-          <div className="user-query">
-            <h3>Your Question:</h3>
-            <p>"{results.original_query}"</p>
-          </div>
-          
           <div className="agent-answer">
-            <h3>Answer:</h3>
+            <h3>Analysis Result:</h3>
             <div className="answer-content">
               {results.answer.split('\n').map((line, index) => (
                 <p key={index}>{line}</p>
@@ -67,28 +69,50 @@ function ResultsDisplay({ results }) {
             </div>
           )}
 
-          {results.raw_results && results.raw_results.length > 0 && (
-            <div className="raw-data-section">
-              <button
-                className="toggle-raw-data"
-                onClick={() => setActiveTab(activeTab === 'answer' ? 'raw' : 'answer')}
-              >
-                {activeTab === 'answer' ? 'View Raw Data' : 'Hide Raw Data'}
-              </button>
-              
-              {activeTab === 'raw' && (
-                <div className="raw-data">
-                  <h4>Raw Tool Results:</h4>
-                  {results.raw_results.map((result, index) => (
-                    <details key={index} className="raw-result">
-                      <summary>{result.tool} - {result.summary}</summary>
-                      <pre className="raw-json">{JSON.stringify(result.result, null, 2)}</pre>
-                    </details>
-                  ))}
-                </div>
-              )}
+          {results.execution_history && results.execution_history.length > 0 && (
+            <div className="execution-history">
+              <h4>Execution Details:</h4>
+              <div className="history-steps">
+                {results.execution_history.map((step, index) => (
+                  <div key={index} className={`history-step ${step.success ? 'success' : 'failed'}`}>
+                    <div className="step-header">
+                      <span className="step-number">{index + 1}</span>
+                      <span className="tool-name">{step.tool}</span>
+                      <span className={`status ${step.success ? 'success' : 'failed'}`}>
+                        {step.success ? '✓' : '✗'}
+                      </span>
+                    </div>
+                    {step.success && step.result_summary && (
+                      <div className="step-result">{step.result_summary}</div>
+                    )}
+                    {step.success && step.result && (
+                      <details className="step-json">
+                        <summary className="json-toggle">View Tool Result JSON</summary>
+                        <pre className="tool-result-json">{JSON.stringify(step.result, null, 2)}</pre>
+                      </details>
+                    )}
+                    {!step.success && step.error && (
+                      <div className="step-error">{step.error}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
+        </div>
+      </div>
+    )
+  }
+
+  // Handle legacy response format
+  if (results.type === 'legacy_response') {
+    return (
+      <div className="results-display-card">
+        <div className="results-header">
+          <h2>Analysis Result</h2>
+        </div>
+        <div className="legacy-response">
+          <p>{results.answer}</p>
         </div>
       </div>
     )

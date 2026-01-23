@@ -40,17 +40,55 @@
   gap: 1.5rem;
 }
 
-.query-section {
+.upload-section {
   background: white;
   border-radius: 12px;
   padding: 1.5rem;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
-.query-section h2 {
+.upload-section h2 {
   margin: 0 0 1rem 0;
   font-size: 1.25rem;
   color: #333;
+}
+
+.selected-file-info {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #f0f7ff;
+  border: 1px solid #b3d9ff;
+  border-radius: 8px;
+}
+
+.selected-file-info p {
+  margin: 0 0 1rem 0;
+  color: #333;
+  font-size: 0.9rem;
+}
+
+.workflow-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  width: 100%;
+}
+
+.workflow-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.workflow-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .attached-file {

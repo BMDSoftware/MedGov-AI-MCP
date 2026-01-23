@@ -179,15 +179,19 @@ You are autonomous - think critically about which tools achieve the goal most ef
                 if data:
                     data_context = f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)}" if len(json.dumps(data)) > 500 else f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)}"
                 
+                image_context = ""
+                if imageList:
+                    image_context = f"\n\nIMAGES AVAILABLE:\nImage paths: {', '.join(imageList) if isinstance(imageList, list) else str(imageList)}"
+                
                 if not execution_history:
                     # First iteration - let agent decide what to do
-                    prompt = f"""GOAL: {goal}{data_context}
+                    prompt = f"""GOAL: {goal}{data_context}{image_context}
 
 Analyze the goal and decide your next action."""
                 else:
                     # Subsequent iterations - evaluate previous result
                     last_event = execution_history[-1]
-                    prompt = f"""GOAL: {goal}{data_context}
+                    prompt = f"""GOAL: {goal}{data_context}{image_context}
 {history_text}
 
 The last tool returned: {last_event.get('result_summary', 'a result')}
@@ -214,8 +218,17 @@ Your decision:"""
                             text_content = part.text.strip().upper()
                             if "GOAL_ACHIEVED" in text_content or "GOAL ACHIEVED" in text_content:
                                 print(f"Agent declares: Goal achieved!")
-                                # Extract and return the meaningful answer instead of raw MCP result
-                                return self._extract_answer_from_results(part.text, execution_history, final_result)
+                                # Return detailed response with execution history
+                                answer = self._extract_answer_from_results(part.text, execution_history, final_result)
+                                tools_used = [event['tool'] for event in execution_history if event['success']]
+                                
+                                return {
+                                    "type": "agent_response",
+                                    "answer": answer,
+                                    "tools_used": tools_used,
+                                    "execution_history": execution_history,
+                                    "success": True
+                                }
                         
                         if hasattr(part, 'function_call') and part.function_call:
                             has_function_call = True

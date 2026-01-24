@@ -165,7 +165,7 @@ class ToolRegistry:
         import requests
         
         response = requests.post(
-            f"{mcp_server_url}/tools/list",
+            f"{mcp_server_url}/mcp/tools/list",
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream"

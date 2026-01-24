@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "monai": {
-      "command": "/Users/hemapefe/Desktop/AgenticHealthMCP/.venv/bin/python",
-      "args": ["/Users/hemapefe/Desktop/AgenticHealthMCP/mcp-monai/server.py"],
+      "command": "/home/gabriel/Desktop/AgenticHealthMCP/mcp-monai/venv/bin/python",
+      "args": ["/home/gabriel/Desktop/AgenticHealthMCP/mcp-monai/server.py"],
       "transport": "stdio",
       "env": {
         "PYTHONUNBUFFERED": "1"

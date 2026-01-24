@@ -45,11 +45,15 @@ async def send_step(step_type: str, message: str, **kwargs) -> str:
 
 @app.post("/api/process-workflow")
 async def process_workflow():
-   
+    global uploaded_files
+
     query = "Analyse and return the most suitable model for the uploaded medical images and explain why. If no suitable model is found, explain and suggest the closest model available."
-    
+
     print(f"Starting predefined workflow: {query}")
     print("Uploaded files list:", uploaded_files)
+
+    if not uploaded_files:
+        return {"result": {"error": "No files uploaded. Please upload an image first."}}
     
     # Create temporary files and prepare tuples with (temp_filepath, content)
     image_data = []
@@ -75,8 +79,8 @@ async def process_workflow():
             except:
                 pass
         temp_file_paths.clear()
-        
-        
+        uploaded_files.clear()  # Clear uploaded files after processing
+
         return {"result": result}
         
     except Exception as e:

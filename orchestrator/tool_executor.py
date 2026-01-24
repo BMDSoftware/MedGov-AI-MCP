@@ -85,7 +85,7 @@ class ToolExecutor:
         except Exception as e:
             if logs:
                 print(f"\n{'='*80}")
-                print(f"💥 EXCEPTION")
+                print(f"EXCEPTION") # emojis
                 print(f"{'='*80}")
                 print(f"Tool execution failed: {e}")
                 print(f"Exception type: {type(e).__name__}")

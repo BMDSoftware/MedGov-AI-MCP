@@ -7,6 +7,14 @@
       "env": {
         "PYTHONUNBUFFERED": "1"
       }
+    },
+    "radlex": {
+      "command": "/home/gabriel/Desktop/AgenticHealthMCP/mcp-radlex/venv/bin/python",
+      "args": ["/home/gabriel/Desktop/AgenticHealthMCP/mcp-radlex/server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
     }
   }
 }

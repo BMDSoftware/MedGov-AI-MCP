@@ -1,8 +1,11 @@
-import { useState, useRef, useEffect } from 'react'
-import { API_CONFIG, getApiUrl } from './config'
-import './App.css'
+import { useState, useRef, useEffect } from 'react';
+import { API_CONFIG, getApiUrl } from './config';
+import './App.css';
+import Settings from './components/Settings';
+import { useState as useReactRouterState } from 'react';
 
 function App() {
+  const [page, setPage] = useState('analysis');
   const [messages, setMessages] = useState([
     {
       type: 'bot',
@@ -258,9 +261,9 @@ function App() {
           <span className="logo-text">HealthMCP</span>
         </div>
         <nav className="nav">
-          <a href="#" className="nav-item active">Analysis</a>
-          <a href="#" className="nav-item">History</a>
-          <a href="#" className="nav-item">Settings</a>
+          <a href="#" className={`nav-item${page === 'analysis' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('analysis'); }}>Analysis</a>
+          <a href="#" className={`nav-item${page === 'history' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('history'); }}>History</a>
+          <a href="#" className={`nav-item${page === 'settings' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('settings'); }}>Settings</a>
         </nav>
         <div className="sidebar-footer">
           <p className="version">v1.0.0</p>
@@ -273,110 +276,114 @@ function App() {
           <p>Multi-Agent Orchestrator for Healthcare</p>
         </header>
 
-        <div className="chat">
-          <div className="messages">
-            {messages.map((msg, i) => (
-              <div key={i} className={`message ${msg.type}`}>
-                <div className="message-avatar">{msg.type === 'bot' ? 'AI' : 'U'}</div>
-                <div className="message-body">
-                  {msg.isLoading ? (
-                    <div className="loading">
-                      <span></span><span></span><span></span>
-                    </div>
-                  ) : (
-                    <>
-                      <p>{msg.content}</p>
-                      {msg.actions?.length > 0 && (
-                        <div className="actions">
-                          {msg.actions.map(a => (
-                            <button key={a.id} onClick={() => handleAction(a.id)} disabled={isProcessing}>
-                              {a.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
+        {page === 'settings' ? (
+          <Settings />
+        ) : (
+          <div className="chat">
+            <div className="messages">
+              {messages.map((msg, i) => (
+                <div key={i} className={`message ${msg.type}`}>
+                  <div className="message-avatar">{msg.type === 'bot' ? 'AI' : 'U'}</div>
+                  <div className="message-body">
+                    {msg.isLoading ? (
+                      <div className="loading">
+                        <span></span><span></span><span></span>
+                      </div>
+                    ) : (
+                      <>
+                        <p>{msg.content}</p>
+                        {msg.actions?.length > 0 && (
+                          <div className="actions">
+                            {msg.actions.map(a => (
+                              <button key={a.id} onClick={() => handleAction(a.id)} disabled={isProcessing}>
+                                {a.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
 
-          <div className="input-area">
-            {showModalitySelect ? (
-              <div className="modality-select">
-                <div className="modality-group">
-                  <label>Image Modality</label>
-                  <div className="modality-options">
-                    {['CT', 'MRI', 'X-ray', 'Ultrasound'].map(mod => (
-                      <button
-                        key={mod}
-                        className={`modality-btn ${sessionContext.modality === mod ? 'selected' : ''}`}
-                        onClick={() => setSessionContext(prev => ({ ...prev, modality: mod }))}
-                      >
-                        {mod}
-                      </button>
-                    ))}
+            <div className="input-area">
+              {showModalitySelect ? (
+                <div className="modality-select">
+                  <div className="modality-group">
+                    <label>Image Modality</label>
+                    <div className="modality-options">
+                      {['CT', 'MRI', 'X-ray', 'Ultrasound'].map(mod => (
+                        <button
+                          key={mod}
+                          className={`modality-btn ${sessionContext.modality === mod ? 'selected' : ''}`}
+                          onClick={() => setSessionContext(prev => ({ ...prev, modality: mod }))}
+                        >
+                          {mod}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-                <div className="modality-group">
-                  <label>Body Part</label>
-                  <div className="modality-options">
-                    {['Head', 'Chest', 'Abdomen', 'Pelvis', 'Spine', 'Extremity'].map(part => (
-                      <button
-                        key={part}
-                        className={`modality-btn ${sessionContext.bodyPart === part ? 'selected' : ''}`}
-                        onClick={() => setSessionContext(prev => ({ ...prev, bodyPart: part }))}
-                      >
-                        {part}
-                      </button>
-                    ))}
+                  <div className="modality-group">
+                    <label>Body Part</label>
+                    <div className="modality-options">
+                      {['Head', 'Chest', 'Abdomen', 'Pelvis', 'Spine', 'Extremity'].map(part => (
+                        <button
+                          key={part}
+                          className={`modality-btn ${sessionContext.bodyPart === part ? 'selected' : ''}`}
+                          onClick={() => setSessionContext(prev => ({ ...prev, bodyPart: part }))}
+                        >
+                          {part}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                  <button
+                    className="confirm-btn"
+                    disabled={!sessionContext.modality || !sessionContext.bodyPart}
+                    onClick={() => handleModalitySelect(sessionContext.modality, sessionContext.bodyPart)}
+                  >
+                    Confirm Selection
+                  </button>
                 </div>
-                <button
-                  className="confirm-btn"
-                  disabled={!sessionContext.modality || !sessionContext.bodyPart}
-                  onClick={() => handleModalitySelect(sessionContext.modality, sessionContext.bodyPart)}
+              ) : !sessionContext.fileUploaded ? (
+                <div
+                  className={`dropzone ${dragActive ? 'active' : ''}`}
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
                 >
-                  Confirm Selection
-                </button>
-              </div>
-            ) : !sessionContext.fileUploaded ? (
-              <div
-                className={`dropzone ${dragActive ? 'active' : ''}`}
-                onDragEnter={handleDrag}
-                onDragLeave={handleDrag}
-                onDragOver={handleDrag}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={handleFileSelect}
-                  accept=".jpg,.jpeg,.png,.dcm,.nii,.nii.gz"
-                  hidden
-                />
-                <div className="dropzone-content">
-                  <svg className="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                  </svg>
-                  <p>Drop medical image here or click to browse</p>
-                  <small>Supports JPG, PNG, DICOM, NIfTI formats</small>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    onChange={handleFileSelect}
+                    accept=".jpg,.jpeg,.png,.dcm,.nii,.nii.gz"
+                    hidden
+                  />
+                  <div className="dropzone-content">
+                    <svg className="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                    </svg>
+                    <p>Drop medical image here or click to browse</p>
+                    <small>Supports JPG, PNG, DICOM, NIfTI formats</small>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="file-info">
-                <span>{uploadedFile?.name}</span>
-                <button onClick={handleNewAnalysis} disabled={isProcessing}>Change file</button>
-              </div>
-            )}
+              ) : (
+                <div className="file-info">
+                  <span>{uploadedFile?.name}</span>
+                  <button onClick={handleNewAnalysis} disabled={isProcessing}>Change file</button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </main>
     </div>
-  )
+  );
 }
 
 export default App

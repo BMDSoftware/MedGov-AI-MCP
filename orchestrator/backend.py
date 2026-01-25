@@ -136,6 +136,38 @@ async def upload_file(file: UploadFile = File(...)):
 
 
 
+@app.get("/api/available-tools")
+async def get_available_tools():
+    # Returns all available tools, grouped by tool name
+    return agent_decision.available_tools
+
+@app.get("/api/enabled-tools")
+async def get_enabled_tools():
+    # Returns a list of enabled tool names
+    return list(agent_decision.agent_tools)
+
+@app.post("/api/enable-tool")
+async def enable_tool(data: dict = Body(...)):
+    tool_name = data.get("tool_name")
+    if not tool_name:
+        return {"error": "tool_name required"}
+    agent_decision.enable_tool(tool_name)
+    return {"status": "enabled", "tool": tool_name}
+
+@app.post("/api/disable-tool")
+async def disable_tool(data: dict = Body(...)):
+    tool_name = data.get("tool_name")
+    if not tool_name:
+        return {"error": "tool_name required"}
+    agent_decision.disable_tool(tool_name)
+    return {"status": "disabled", "tool": tool_name}
+
+
+@app.post("/api/refresh-config")
+async def refresh_config():
+    agent_decision.refresh_available_tools()
+    return {"status": "refreshed", "available_tools": list(agent_decision.available_tools.keys())}
+
 
 @app.get("/api/health")
 async def health_check():

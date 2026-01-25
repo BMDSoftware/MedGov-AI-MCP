@@ -20,6 +20,12 @@ class OllamaClient:
         self.system_prompt = self._get_system_prompt()
         print(f"Ollama client initialized with model: {self.model}")
 
+    
+    def update_tools(self, available_tools: Dict[str, Any]):
+        """Update Ollama's available tools and sync config."""
+        self.available_tools = available_tools
+        self.system_prompt = self._get_system_prompt()
+
     def _get_system_prompt(self) -> str:
         """Get system prompt for the AI agent"""
         tool_descriptions = "\n".join([

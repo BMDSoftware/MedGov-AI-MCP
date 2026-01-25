@@ -15,6 +15,12 @@ class ToolRegistry:
         self.config_path = os.path.join(os.path.dirname(__file__), "mcp-config.json")
         self.server_processes: Dict[str, subprocess.Popen] = {}
     
+
+    def reload_config_and_refresh(self) -> Dict[str, Dict]:
+        """Reload config file and refresh available tools/servers"""
+        print("Reloading MCP config and refreshing tools...")
+        return self.discover_tools()
+    
     def _load_mcp_config(self) -> Dict:
         """Load MCP configuration from config file"""
         try:
@@ -29,6 +35,7 @@ class ToolRegistry:
         try:
             # Load config to get all servers
             config = self._load_mcp_config()
+            self.available_tools = {}
             mcp_servers = config.get("mcpServers", {})
             
             if not mcp_servers:

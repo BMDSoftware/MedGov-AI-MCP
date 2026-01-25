@@ -11,27 +11,28 @@ load_dotenv()
 
 class GeminiClient:
     """Handles Gemini AI client setup, tool schema conversion, and content generation"""
-    
+
     def __init__(self, available_tools: Dict[str, Any]):
         self.genai_client = None
         self.available_tools = available_tools
         self.model_id = "gemini-2.5-flash"
         self.agent_config = None
+        self.gemini_tools_list = []
         self._initialize_gemini()
-    
+
     def _initialize_gemini(self):
         """Initialize Gemini with function calling capabilities using new google.genai Client"""
-        # Initialize new genai client
         self.genai_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        
-        # Convert MCP tools to Gemini function format
-        gemini_tools_list = self._convert_tools_to_gemini_format()
+        self.update_tools(self.available_tools)
 
-        # Initialize the model with the converted tools
+    def update_tools(self, available_tools: Dict[str, Any]):
+        """Update Gemini's available tools and sync config."""
+        self.available_tools = available_tools
+        self.gemini_tools_list = self._convert_tools_to_gemini_format()
         self.agent_config = types.GenerateContentConfig(
-            tools=[types.Tool(function_declarations=gemini_tools_list)],
+            tools=[types.Tool(function_declarations=self.gemini_tools_list)],
             system_instruction=self._get_system_prompt(),
-            temperature=0.0 
+            temperature=0.0
         )
     
     def _convert_tools_to_gemini_format(self) -> List[types.FunctionDeclaration]:
@@ -171,6 +172,8 @@ You are autonomous - think critically about which tools achieve the goal most ef
                     print(f"Added image to content from: {os.path.basename(temp_filepath)}")
                 except Exception as e:
                     print(f"Error loading image from {temp_filepath}: {e}")
+
+        print("Tools available to Gemini:", list(self.available_tools.keys()))
         
         return self.genai_client.models.generate_content(
             model=self.model_id,

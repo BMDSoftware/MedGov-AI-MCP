@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
+from ast import Set
 import os
 import json
+from re import S
 from typing import Dict, List, Optional, Any
 
 from tool_registry import tool_registry
 from tool_executor import ToolExecutor
 
 # LLM Backend selection: "ollama" (local) or "gemini" (API)
-LLM_BACKEND = os.getenv("LLM_BACKEND", "ollama")
+LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
 
 # Workflow state machine for medical imaging analysis
 # This enforces the correct sequence of tool calls
@@ -24,28 +26,83 @@ class AgenticAgent:
 
     def __init__(self, callback=None):
         self.available_tools = {}
+        self.agent_tools: Set[str] = set()
         self.callback = callback  # Callback function for real-time event tracking
         self.llm_client = None
         self.tool_executor = None
         self.workflow_state = {}  # Track workflow progress
         self._initialize_components()
-
+    
     def _initialize_components(self):
         """Initialize LLM client and tool executor with discovered tools"""
         # Discover available tools
         self.available_tools = tool_registry.discover_tools()
+        # Initialize agent_tools with all available tool names
+        self.agent_tools = set(self.available_tools.keys())
 
         # Initialize LLM client based on backend selection
+        enabled_tools = self.get_enabled_agent_tools()
         if LLM_BACKEND.lower() == "ollama":
             print("Using Ollama (local) for orchestration")
             from ollama_client import OllamaClient
-            self.llm_client = OllamaClient(self.available_tools)
+            self.llm_client = OllamaClient(enabled_tools)
         else:
             print("Using Gemini (API) for orchestration")
             from gemini_client import GeminiClient
-            self.llm_client = GeminiClient(self.available_tools)
+            self.llm_client = GeminiClient(enabled_tools)
 
-        self.tool_executor = ToolExecutor(self.available_tools, self.callback)
+        self.tool_executor = ToolExecutor(enabled_tools, self.callback)
+
+    def get_enabled_agent_tools(self) -> Dict[str, Dict]:
+        return {name: info for name, info in self.available_tools.items() if name in self.agent_tools}
+
+    def enable_tool(self, tool_name: str):
+        if tool_name in self.available_tools and tool_name not in self.agent_tools:
+            self.agent_tools.add(tool_name)
+            self._refresh_agent_components()
+        elif tool_name in self.agent_tools:
+            print(f"Tool already enabled: {tool_name}")
+        else:
+            print(f"Tool not found in available_tools: {tool_name}")
+
+    def disable_tool(self, tool_name: str):
+        if tool_name in self.agent_tools:
+            self.agent_tools.remove(tool_name)
+            self._refresh_agent_components()
+        else:
+            print(f"Tool not enabled: {tool_name}")
+
+    def _refresh_agent_components(self):
+        enabled_tools = self.get_enabled_agent_tools()
+        if self.llm_client:
+            self.llm_client.available_tools = enabled_tools
+        if self.tool_executor:
+            self.tool_executor.available_tools = enabled_tools
+
+
+    def refresh_available_tools(self):
+        """Reload tool registry and refresh available tools"""
+
+        previous_tools = set(self.available_tools.keys())
+        previous_enabled = set(self.agent_tools)
+
+        # Reload tools
+        self.available_tools = tool_registry.reload_config_and_refresh()
+        current_tools = set(self.available_tools.keys())
+
+        # Keep enabled tools that still exist
+        still_enabled = previous_enabled & current_tools
+
+        # Enable newly discovered tools
+        new_tools = current_tools - previous_tools
+
+        # Update enabled tools
+        self.agent_tools = still_enabled | new_tools
+
+        # Absolute safety: remove ghosts
+        self.agent_tools &= current_tools
+
+        self._refresh_agent_components()
 
     def _get_workflow_state(self, execution_history: List[Dict]) -> Dict:
         """Analyze execution history to determine workflow state"""

@@ -94,34 +94,43 @@ class GeminiClient:
 Your tools:
 {tool_descriptions}
 
-WORKFLOW FOR MEDICAL IMAGE ANALYSIS:
-1. ALWAYS call monai.analyze_image FIRST with the image path to get technical metadata
-2. The analyze_image tool returns: modality (CT/MRI/X-ray), shape, intensity range, and recommended models
-3. TRUST the analyze_image results over visual appearance - it uses DICOM/NIfTI metadata
-4. Use the recommended_models from analyze_image to select the appropriate model
-5. If analysis is complete, SUGGEST generating a report using radlex tools
+WORKFLOW FOR MEDICAL IMAGE ANALYSIS (FULL INFERENCE):
+1. Call monai.analyze_image FIRST with the image path to get metadata and check if image is ready for inference
+2. Call monai.list_models with modality AND body_part filters to find suitable models
+3. If a suitable model exists but is not downloaded, call monai.download_model to download it
+4. Call monai.run_inference with the image path and model name to run REAL AI inference
+5. The inference results will show detected structures, segmentation results, or detection findings
+6. After inference, SUGGEST generating a report using radlex tools
 
 WORKFLOW FOR REPORT GENERATION:
 1. Use radlex.list_templates to find appropriate template based on modality and body part
-2. Use radlex.convert_findings_to_report_format to convert AI analysis to report format
+2. Use radlex.convert_findings_to_report_format to convert AI inference results to report format
 3. Use radlex.generate_report to create the final report
 4. Use radlex.get_impression_suggestions to help write the impression section
 
 IMPORTANT RULES:
-- Do NOT guess the image modality visually - always use analyze_image first
-- The image files are at the paths provided in IMAGES AVAILABLE
-- CT images have Hounsfield units (negative values like -1000 to +3000)
-- MRI images have positive intensity values with high dynamic range
-- After image analysis, ALWAYS suggest: "Analysis complete. Would you like me to generate a radiology report?"
+- ALWAYS filter models by BOTH modality AND body_part (e.g., CT + abdomen)
+- Check if model is "downloaded: true" before running inference
+- If model is not downloaded, download it first with download_model
+- For JPEG/PNG images from the user, trust the modality they specified (CT, MRI, etc.)
+- 3D medical images (NIfTI, DICOM) work best with MONAI models
+- 2D images (JPEG, PNG) will be converted to pseudo-3D but results may be less accurate
+- After successful inference, report the detected structures and their volumes
+
+EXAMPLE FULL WORKFLOW:
+1. analyze_image("/path/to/ct.nii.gz") -> shows CT, abdomen, recommends spleen_ct_segmentation
+2. list_models(modality="CT", body_part="abdomen") -> shows available models, check if downloaded
+3. download_model("spleen_ct_segmentation") -> downloads if needed
+4. run_inference("/path/to/ct.nii.gz", "spleen_ct_segmentation") -> returns segmentation results with detected organs
 
 DATA TYPES YOU CAN HANDLE:
-- Medical images (DICOM, NIfTI, PNG, JPEG) → use monai.* tools
-- Report generation → use radlex.* tools
-- Patient data (FHIR) → use fhir.* tools (if available)
+- Medical images (DICOM, NIfTI, PNG, JPEG) -> use monai.* tools for real AI inference
+- Report generation -> use radlex.* tools
+- Patient data (FHIR) -> use fhir.* tools (if available)
 
 Principles:
-- Focus on OUTCOMES, not just actions
-- Use tools that directly accomplish the goal
+- RUN ACTUAL INFERENCE using run_inference - don't just list models
+- Focus on OUTCOMES - provide real AI analysis results
 - If a tool fails, analyze why and try a different approach
 - Validate results match the goal before declaring success
 - ALWAYS offer next steps after completing an action
@@ -143,8 +152,15 @@ You are autonomous - think critically about which tools achieve the goal most ef
     def generate_content(self, content_parts: List, imageList: Any = None) -> Any:
         """Generate content using Gemini with optional image handling"""
         # Prepare content with actual images for Gemini
+        # Only send 2D images (JPEG, PNG) - skip 3D medical formats (NIfTI, DICOM)
         if imageList:
             for temp_filepath, content in imageList:
+                # Skip 3D medical formats - Gemini can't visualize these
+                ext = temp_filepath.lower()
+                if ext.endswith(('.nii', '.nii.gz', '.dcm', '.mha', '.mhd', '.nrrd')):
+                    print(f"Skipping 3D medical file (not sendable to Gemini): {os.path.basename(temp_filepath)}")
+                    continue
+
                 try:
                     # content is already bytes, use it directly
                     from io import BytesIO

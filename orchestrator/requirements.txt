@@ -12,3 +12,6 @@ Pillow>=10.0.0
 
 # HTTP requests (for tool_executor)
 requests>=2.31.0
+
+
+google-genai

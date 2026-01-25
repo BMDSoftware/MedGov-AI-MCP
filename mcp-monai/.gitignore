@@ -1,0 +1,23 @@
+# Sample data (large medical images)
+sample_data/
+
+# Downloaded model bundles (large files)
+bundles/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

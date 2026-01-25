@@ -5,3 +5,4 @@ torch>=2.0.0
 numpy>=1.24.0
 mcp
 Pillow # for reading jpegs as in the example
+nibabel

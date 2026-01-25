@@ -16,8 +16,11 @@ function App() {
   const [sessionContext, setSessionContext] = useState({
     fileUploaded: false,
     analysisComplete: false,
-    lastAnalysis: null
+    lastAnalysis: null,
+    modality: null,
+    bodyPart: null
   })
+  const [showModalitySelect, setShowModalitySelect] = useState(false)
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
 
@@ -69,15 +72,29 @@ function App() {
 
       if (!response.ok) throw new Error('Upload failed')
 
+      // Check if it's a DICOM file (has metadata) or needs user input
+      const ext = file.name.split('.').pop().toLowerCase()
+      const needsModalityInput = ['jpg', 'jpeg', 'png', 'bmp', 'gif'].includes(ext)
+
       setSessionContext(prev => ({ ...prev, fileUploaded: true }))
-      addMessage({
-        type: 'bot',
-        content: `File "${file.name}" received. What would you like to do?`,
-        actions: [
-          { id: 'analyze', label: 'Analyze Image' },
-          { id: 'info', label: 'System Info' }
-        ]
-      })
+
+      if (needsModalityInput) {
+        setShowModalitySelect(true)
+        addMessage({
+          type: 'bot',
+          content: `File "${file.name}" received. Since this is a ${ext.toUpperCase()} file, please specify the image type for accurate analysis:`,
+          actions: []
+        })
+      } else {
+        addMessage({
+          type: 'bot',
+          content: `File "${file.name}" received. What would you like to do?`,
+          actions: [
+            { id: 'analyze', label: 'Analyze Image' },
+            { id: 'info', label: 'System Info' }
+          ]
+        })
+      }
     } catch (error) {
       addMessage({
         type: 'bot',
@@ -87,6 +104,32 @@ function App() {
     } finally {
       setIsProcessing(false)
     }
+  }
+
+  const handleModalitySelect = async (modality, bodyPart) => {
+    setShowModalitySelect(false)
+    setSessionContext(prev => ({ ...prev, modality, bodyPart }))
+    addMessage({ type: 'user', content: `Image type: ${modality} - ${bodyPart}` })
+
+    // Send metadata to backend
+    try {
+      await fetch(getApiUrl('/api/set-metadata'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modality, bodyPart })
+      })
+    } catch (e) {
+      console.log('Metadata endpoint not available, will use query context')
+    }
+
+    addMessage({
+      type: 'bot',
+      content: `Got it! This is a ${modality} scan of the ${bodyPart}. What would you like to do?`,
+      actions: [
+        { id: 'analyze', label: 'Analyze Image' },
+        { id: 'info', label: 'System Info' }
+      ]
+    })
   }
 
   const handleAction = async (actionId) => {
@@ -120,10 +163,17 @@ function App() {
   const handleAnalyze = async () => {
     addMessage({ type: 'bot', content: 'Analyzing image...', isLoading: true })
 
+    // Include modality info in the request if available
+    const requestBody = {
+      action: 'analyze',
+      modality: sessionContext.modality,
+      bodyPart: sessionContext.bodyPart
+    }
+
     const response = await fetch(getApiUrl(API_CONFIG.ENDPOINTS.PROCESS_WORKFLOW), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'analyze' })
+      body: JSON.stringify(requestBody)
     })
 
     if (!response.ok) throw new Error('Analysis failed')
@@ -187,7 +237,8 @@ function App() {
 
   const handleNewAnalysis = () => {
     setUploadedFile(null)
-    setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null })
+    setShowModalitySelect(false)
+    setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null })
     addMessage({ type: 'bot', content: 'Ready for new analysis. Upload a file to continue.', actions: [] })
   }
 
@@ -203,8 +254,8 @@ function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="logo">
-          <span className="logo-icon">+</span>
-          <span className="logo-text">Health AI</span>
+          <span className="logo-icon">H</span>
+          <span className="logo-text">HealthMCP</span>
         </div>
         <nav className="nav">
           <a href="#" className="nav-item active">Analysis</a>
@@ -253,7 +304,45 @@ function App() {
           </div>
 
           <div className="input-area">
-            {!sessionContext.fileUploaded ? (
+            {showModalitySelect ? (
+              <div className="modality-select">
+                <div className="modality-group">
+                  <label>Image Modality</label>
+                  <div className="modality-options">
+                    {['CT', 'MRI', 'X-ray', 'Ultrasound'].map(mod => (
+                      <button
+                        key={mod}
+                        className={`modality-btn ${sessionContext.modality === mod ? 'selected' : ''}`}
+                        onClick={() => setSessionContext(prev => ({ ...prev, modality: mod }))}
+                      >
+                        {mod}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="modality-group">
+                  <label>Body Part</label>
+                  <div className="modality-options">
+                    {['Head', 'Chest', 'Abdomen', 'Pelvis', 'Spine', 'Extremity'].map(part => (
+                      <button
+                        key={part}
+                        className={`modality-btn ${sessionContext.bodyPart === part ? 'selected' : ''}`}
+                        onClick={() => setSessionContext(prev => ({ ...prev, bodyPart: part }))}
+                      >
+                        {part}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  className="confirm-btn"
+                  disabled={!sessionContext.modality || !sessionContext.bodyPart}
+                  onClick={() => handleModalitySelect(sessionContext.modality, sessionContext.bodyPart)}
+                >
+                  Confirm Selection
+                </button>
+              </div>
+            ) : !sessionContext.fileUploaded ? (
               <div
                 className={`dropzone ${dragActive ? 'active' : ''}`}
                 onDragEnter={handleDrag}
@@ -270,9 +359,11 @@ function App() {
                   hidden
                 />
                 <div className="dropzone-content">
-                  <span className="dropzone-icon">+</span>
-                  <p>Drop file here or click to browse</p>
-                  <small>JPG, PNG, DICOM, NIfTI</small>
+                  <svg className="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                  </svg>
+                  <p>Drop medical image here or click to browse</p>
+                  <small>Supports JPG, PNG, DICOM, NIfTI formats</small>
                 </div>
               </div>
             ) : (

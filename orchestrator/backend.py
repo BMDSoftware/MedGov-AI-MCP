@@ -5,7 +5,7 @@ import os
 import tempfile
 import python_multipart
 from typing import AsyncGenerator, Optional
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
@@ -43,11 +43,32 @@ async def send_step(step_type: str, message: str, **kwargs) -> str:
 
 
 
-@app.post("/api/process-workflow")
-async def process_workflow():
-    global uploaded_files
+# Store metadata from frontend
+image_metadata = {"modality": None, "bodyPart": None}
 
-    query = "Analyse and return the most suitable model for the uploaded medical images and explain why. If no suitable model is found, explain and suggest the closest model available."
+@app.post("/api/set-metadata")
+async def set_metadata(data: dict = Body(...)):
+    global image_metadata
+    image_metadata["modality"] = data.get("modality")
+    image_metadata["bodyPart"] = data.get("bodyPart")
+    return {"status": "ok"}
+
+@app.post("/api/process-workflow")
+async def process_workflow(data: dict = Body(default=None)):
+    global uploaded_files, image_metadata
+
+    # Get modality from request body if provided
+    modality = None
+    body_part = None
+    if data:
+        modality = data.get("modality") or image_metadata.get("modality")
+        body_part = data.get("bodyPart") or image_metadata.get("bodyPart")
+
+    # Build query with modality context if available
+    if modality and body_part:
+        query = f"This is a {modality} scan of the {body_part}. Analyse the image and return the most suitable model for analysis. If a suitable model exists, explain what it can detect. If no suitable model is found, explain and suggest the closest model available."
+    else:
+        query = "Analyse and return the most suitable model for the uploaded medical images and explain why. If no suitable model is found, explain and suggest the closest model available."
 
     print(f"Starting predefined workflow: {query}")
     print("Uploaded files list:", uploaded_files)
@@ -60,7 +81,11 @@ async def process_workflow():
     try:
         for filename, contents in uploaded_files:
             # Create temporary file with original extension
-            file_extension = os.path.splitext(filename)[1] or '.tmp'
+            # Handle double extensions like .nii.gz
+            if filename.endswith('.nii.gz'):
+                file_extension = '.nii.gz'
+            else:
+                file_extension = os.path.splitext(filename)[1] or '.tmp'
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_extension)
             temp_file.write(contents)
             temp_file.close()

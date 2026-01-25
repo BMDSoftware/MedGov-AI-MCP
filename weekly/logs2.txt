@@ -1,0 +1,779 @@
+Yf\x99e\x96Y\xfeJ%\xf6,&?\x1d}\xfc\xf4.\xc3b\xb8\x8f\x87\x1e\xfa\xd9\xfcpr\xe9\xc71\xbe\xdf\x91y\x00qn\xc3\xf6\xe2~\x83kp\xd7\xe2{\xd63\xf6O\xf8\x01\x9d\x1f\xb8\xfez=\xa6=\xf1\x99\xf7n\xffYf\x99e\x96Yf\xf9RK\xf0\x01\x9e\xd3s\xac%\x9f\x0f\xac5\xff?\xf2\n,\x7f.r\x12\xe4\x1fx\x1e\xa3\xaf/\x04\x97\xb0\x9c\x84\x8bFw\xaf\x80\xfcE<\xfcmb\xfb,\xb3\xfc\x08\xca\xff\x02\x1a\xf7\x14\xba`\x01p\x03')]
+Saved spleen_10.nii.gz to /tmp/tmpmn03eqs8.nii.gz
+Starting autonomous task: Analyze this medical image, download an appropriate model, run inference, and return the AI analysis results. Follow all workflow steps.
+Image path for workflow: /tmp/tmpmn03eqs8.nii.gz
+Iteration 1/8
+Workflow state: analyze=False, list=False, download=False, inference=False
+  [Next step] analyze_image
+Guided workflow: Next step is monai.analyze_image
+  Arguments: {'path': '/tmp/tmpmn03eqs8.nii.gz'}
+Agent decided to call: monai.analyze_image with args: {'path': '/tmp/tmpmn03eqs8.nii.gz'}
+
+================================================================================
+MCP STDIO REQUEST
+================================================================================
+Server: monai
+Tool: analyze_image
+Arguments: {
+  "path": "/tmp/tmpmn03eqs8.nii.gz"
+}
+Full MCP Request: {
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "analyze_image",
+    "arguments": {
+      "path": "/tmp/tmpmn03eqs8.nii.gz"
+    }
+  },
+  "id": 1
+}
+================================================================================
+
+
+================================================================================
+MCP STDIO RESPONSE
+================================================================================
+Response: {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"path\": \"/tmp/tmpmn03eqs8.nii.gz\",\n  \"shape\": [\n    512,\n    512,\n    55\n  ],\n  \"dtype\": \"float32\",\n  \"analysis\": {\n    \"detected_modalities\": [\n      \"CT\"\n    ],\n    \"is_3d\": true,\n    \"dimensions\": 3,\n    \"file_format\": \"NIfTI (compressed)\",\n    \"intensity_range\": {\n      \"min\": -1024.0,\n      \"max\": 3072.0,\n      \"mean\": -450.26171875\n    }\n  },\n  \"statistics\": {\n    \"min\": -1024.0,\n    \"max\": 3072.0,\n    \"mean\": -450.26171875,\n    \"std\": 481.5650634765625\n  },\n  \"recommended_models\": [\n    {\n      \"name\": \"spleen_ct_segmentation\",\n      \"description\": \"Spleen segmentation on CT - good for testing\",\n      \"category\": \"segmentation\",\n      \"body_part\": \"abdomen\"\n    },\n    {\n      \"name\": \"swin_unetr_btcv_segmentation\",\n      \"description\": \"Multi-organ segmentation (13 organs) on CT\",\n      \"category\": \"segmentation\",\n      \"body_part\": \"abdomen\"\n    },\n    {\n      \"name\": \"pancreas_ct_dints_segmentation\",\n      \"description\": \"Pancreas and tumor segmentation on CT\",\n      \"category\": \"segmentation\",\n      \"body_part\": \"abdomen\"\n    },\n    {\n      \"name\": \"lung_nodule_ct_detection\",\n      \"description\": \"Lung nodule detection on CT\",\n      \"category\": \"detection\",\n      \"body_part\": \"chest\"\n    }\n  ],\n  \"metadata_keys\": [\n    \"sizeof_hdr\",\n    \"extents\",\n    \"session_error\",\n    \"dim_info\",\n    \"dim\",\n    \"intent_p1\",\n    \"intent_p2\",\n    \"intent_p3\",\n    \"intent_code\",\n    \"datatype\",\n    \"bitpix\",\n    \"slice_start\",\n    \"pixdim\",\n    \"vox_offset\",\n    \"scl_slope\",\n    \"scl_inter\",\n    \"slice_end\",\n    \"slice_code\",\n    \"xyzt_units\",\n    \"cal_max\",\n    \"cal_min\",\n    \"slice_duration\",\n    \"toffset\",\n    \"glmax\",\n    \"glmin\",\n    \"qform_code\",\n    \"sform_code\",\n    \"quatern_b\",\n    \"quatern_c\",\n    \"quatern_d\",\n    \"qoffset_x\",\n    \"qoffset_y\",\n    \"qoffset_z\",\n    \"srow_x\",\n    \"srow_y\",\n    \"srow_z\",\n    \"affine\",\n    \"original_affine\",\n    \"as_closest_canonical\",\n    \"spatial_shape\",\n    \"space\",\n    \"original_channel_dim\",\n    \"filename_or_obj\"\n  ],\n  \"ready_for_inference\": true\n}"
+      }
+    ],
+    "structuredContent": {
+      "result": {
+        "path": "/tmp/tmpmn03eqs8.nii.gz",
+        "shape": [
+          512,
+          512,
+          55
+        ],
+        "dtype": "float32",
+        "analysis": {
+          "detected_modalities": [
+            "CT"
+          ],
+          "is_3d": true,
+          "dimensions": 3,
+          "file_format": "NIfTI (compressed)",
+          "intensity_range": {
+            "min": -1024.0,
+            "max": 3072.0,
+            "mean": -450.26171875
+          }
+        },
+        "statistics": {
+          "min": -1024.0,
+          "max": 3072.0,
+          "mean": -450.26171875,
+          "std": 481.5650634765625
+        },
+        "recommended_models": [
+          {
+            "name": "spleen_ct_segmentation",
+            "description": "Spleen segmentation on CT - good for testing",
+            "category": "segmentation",
+            "body_part": "abdomen"
+          },
+          {
+            "name": "swin_unetr_btcv_segmentation",
+            "description": "Multi-organ segmentation (13 organs) on CT",
+            "category": "segmentation",
+            "body_part": "abdomen"
+          },
+          {
+            "name": "pancreas_ct_dints_segmentation",
+            "description": "Pancreas and tumor segmentation on CT",
+            "category": "segmentation",
+            "body_part": "abdomen"
+          },
+          {
+            "name": "lung_nodule_ct_detection",
+            "description": "Lung nodule detection on CT",
+            "category": "detection",
+            "body_part": "chest"
+          }
+        ],
+        "metadata_keys": [
+          "sizeof_hdr",
+          "extents",
+          "session_error",
+          "dim_info",
+          "dim",
+          "intent_p1",
+          "intent_p2",
+          "intent_p3",
+          "intent_code",
+          "datatype",
+          "bitpix",
+          "slice_start",
+          "pixdim",
+          "vox_offset",
+          "scl_slope",
+          "scl_inter",
+          "slice_end",
+          "slice_code",
+          "xyzt_units",
+          "cal_max",
+          "cal_min",
+          "slice_duration",
+          "toffset",
+          "glmax",
+          "glmin",
+          "qform_code",
+          "sform_code",
+          "quatern_b",
+          "quatern_c",
+          "quatern_d",
+          "qoffset_x",
+          "qoffset_y",
+          "qoffset_z",
+          "srow_x",
+          "srow_y",
+          "srow_z",
+          "affine",
+          "original_affine",
+          "as_closest_canonical",
+          "spatial_shape",
+          "space",
+          "original_channel_dim",
+          "filename_or_obj"
+        ],
+        "ready_for_inference": true
+      }
+    },
+    "isError": false
+  }
+}
+================================================================================
+
+
+================================================================================
+FHIR RESOURCE (STDIO)
+================================================================================
+Resource Type: Unknown
+Resource ID: N/A
+Full Resource (first 500 chars):
+{
+  "path": "/tmp/tmpmn03eqs8.nii.gz",
+  "shape": [
+    512,
+    512,
+    55
+  ],
+  "dtype": "float32",
+  "analysis": {
+    "detected_modalities": [
+      "CT"
+    ],
+    "is_3d": true,
+    "dimensions": 3,
+    "file_format": "NIfTI (compressed)",
+    "intensity_range": {
+      "min": -1024.0,
+      "max": 3072.0,
+      "mean": -450.26171875
+    }
+  },
+  "statistics": {
+    "min": -1024.0,
+    "max": 3072.0,
+    "mean": -450.26171875,
+    "std": 481.5650634765625
+  },
+  "recommended_models": [
+ ...
+================================================================================
+
+Executed monai.analyze_image (stdio) in 0.57s
+Tool succeeded: monai.analyze_image
+Iteration 2/8
+  [Workflow] analyze_image done, path=/tmp/tmpmn03eqs8.nii.gz
+Workflow state: analyze=True, list=False, download=False, inference=False
+  [Next step] list_models
+Guided workflow: Next step is monai.list_models
+  Arguments: {}
+Agent decided to call: monai.list_models with args: {}
+
+================================================================================
+MCP STDIO REQUEST
+================================================================================
+Server: monai
+Tool: list_models
+Arguments: {}
+Full MCP Request: {
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "list_models",
+    "arguments": {}
+  },
+  "id": 1
+}
+================================================================================
+
+
+================================================================================
+MCP STDIO RESPONSE
+================================================================================
+Response: {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"total\": 4,\n  \"filters_applied\": {\n    \"category\": null,\n    \"modality\": null,\n    \"body_part\": null\n  },\n  \"models\": [\n    {\n      \"name\": \"spleen_ct_segmentation\",\n      \"category\": \"segmentation\",\n      \"modality\": \"CT\",\n      \"body_part\": \"abdomen\",\n      \"description\": \"Spleen segmentation on CT - good for testing\",\n      \"labels\": {\n        \"1\": \"spleen\"\n      },\n      \"downloaded\": true,\n      \"input_size\": [\n        96,\n        96,\n        96\n      ]\n    },\n    {\n      \"name\": \"swin_unetr_btcv_segmentation\",\n      \"category\": \"segmentation\",\n      \"modality\": \"CT\",\n      \"body_part\": \"abdomen\",\n      \"description\": \"Multi-organ segmentation (13 organs) on CT\",\n      \"labels\": {\n        \"1\": \"spleen\",\n        \"2\": \"right_kidney\",\n        \"3\": \"left_kidney\",\n        \"4\": \"gallbladder\",\n        \"5\": \"esophagus\",\n        \"6\": \"liver\",\n        \"7\": \"stomach\",\n        \"8\": \"aorta\",\n        \"9\": \"inferior_vena_cava\",\n        \"10\": \"portal_vein_and_splenic_vein\",\n        \"11\": \"pancreas\",\n        \"12\": \"right_adrenal_gland\",\n        \"13\": \"left_adrenal_gland\"\n      },\n      \"downloaded\": true,\n      \"input_size\": [\n        96,\n        96,\n        96\n      ]\n    },\n    {\n      \"name\": \"pancreas_ct_dints_segmentation\",\n      \"category\": \"segmentation\",\n      \"modality\": \"CT\",\n      \"body_part\": \"abdomen\",\n      \"description\": \"Pancreas and tumor segmentation on CT\",\n      \"labels\": {\n        \"1\": \"pancreas\",\n        \"2\": \"tumor\"\n      },\n      \"downloaded\": true,\n      \"input_size\": [\n        96,\n        96,\n        96\n      ]\n    },\n    {\n      \"name\": \"lung_nodule_ct_detection\",\n      \"category\": \"detection\",\n      \"modality\": \"CT\",\n      \"body_part\": \"chest\",\n      \"description\": \"Lung nodule detection on CT\",\n      \"labels\": {\n        \"1\": \"nodule\"\n      },\n      \"downloaded\": true,\n      \"input_size\": [\n        96,\n        96,\n        96\n      ]\n    }\n  ]\n}"
+      }
+    ],
+    "structuredContent": {
+      "result": {
+        "total": 4,
+        "filters_applied": {
+          "category": null,
+          "modality": null,
+          "body_part": null
+        },
+        "models": [
+          {
+            "name": "spleen_ct_segmentation",
+            "category": "segmentation",
+            "modality": "CT",
+            "body_part": "abdomen",
+            "description": "Spleen segmentation on CT - good for testing",
+            "labels": {
+              "1": "spleen"
+            },
+            "downloaded": true,
+            "input_size": [
+              96,
+              96,
+              96
+            ]
+          },
+          {
+            "name": "swin_unetr_btcv_segmentation",
+            "category": "segmentation",
+            "modality": "CT",
+            "body_part": "abdomen",
+            "description": "Multi-organ segmentation (13 organs) on CT",
+            "labels": {
+              "1": "spleen",
+              "2": "right_kidney",
+              "3": "left_kidney",
+              "4": "gallbladder",
+              "5": "esophagus",
+              "6": "liver",
+              "7": "stomach",
+              "8": "aorta",
+              "9": "inferior_vena_cava",
+              "10": "portal_vein_and_splenic_vein",
+              "11": "pancreas",
+              "12": "right_adrenal_gland",
+              "13": "left_adrenal_gland"
+            },
+            "downloaded": true,
+            "input_size": [
+              96,
+              96,
+              96
+            ]
+          },
+          {
+            "name": "pancreas_ct_dints_segmentation",
+            "category": "segmentation",
+            "modality": "CT",
+            "body_part": "abdomen",
+            "description": "Pancreas and tumor segmentation on CT",
+            "labels": {
+              "1": "pancreas",
+              "2": "tumor"
+            },
+            "downloaded": true,
+            "input_size": [
+              96,
+              96,
+              96
+            ]
+          },
+          {
+            "name": "lung_nodule_ct_detection",
+            "category": "detection",
+            "modality": "CT",
+            "body_part": "chest",
+            "description": "Lung nodule detection on CT",
+            "labels": {
+              "1": "nodule"
+            },
+            "downloaded": true,
+            "input_size": [
+              96,
+              96,
+              96
+            ]
+          }
+        ]
+      }
+    },
+    "isError": false
+  }
+}
+================================================================================
+
+
+================================================================================
+FHIR RESOURCE (STDIO)
+================================================================================
+Resource Type: Unknown
+Resource ID: N/A
+Full Resource (first 500 chars):
+{
+  "total": 4,
+  "filters_applied": {
+    "category": null,
+    "modality": null,
+    "body_part": null
+  },
+  "models": [
+    {
+      "name": "spleen_ct_segmentation",
+      "category": "segmentation",
+      "modality": "CT",
+      "body_part": "abdomen",
+      "description": "Spleen segmentation on CT - good for testing",
+      "labels": {
+        "1": "spleen"
+      },
+      "downloaded": true,
+      "input_size": [
+        96,
+        96,
+        96
+      ]
+    },
+    {
+      "name": "swin_...
+================================================================================
+
+Executed monai.list_models (stdio) in 0.00s
+Tool succeeded: monai.list_models
+Iteration 3/8
+  [Workflow] analyze_image done, path=/tmp/tmpmn03eqs8.nii.gz
+  [Workflow] list_models found 4 models
+  [Workflow] Found downloaded model: spleen_ct_segmentation
+Workflow state: analyze=True, list=True, download=False, inference=False
+  [Next step] run_inference with model spleen_ct_segmentation
+Guided workflow: Next step is monai.run_inference
+  Arguments: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+Agent decided to call: monai.run_inference with args: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+
+================================================================================
+MCP STDIO REQUEST
+================================================================================
+Server: monai
+Tool: run_inference
+Arguments: {
+  "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+  "model_name": "spleen_ct_segmentation"
+}
+Full MCP Request: {
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "run_inference",
+    "arguments": {
+      "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+      "model_name": "spleen_ct_segmentation"
+    }
+  },
+  "id": 1
+}
+================================================================================
+
+
+================================================================================
+STDIO ERROR
+================================================================================
+Error: Expecting value: line 1 column 1 (char 0)
+================================================================================
+
+
+================================================================================
+EXCEPTION
+================================================================================
+Tool execution failed: Expecting value: line 1 column 1 (char 0)
+Exception type: JSONDecodeError
+Traceback:
+Traceback (most recent call last):
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 65, in execute_tool_decision
+    result = self._execute_stdio_tool(server_name, mcp_request, logs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 189, in _execute_stdio_tool
+    raise e
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 139, in _execute_stdio_tool
+    result_json = json.loads(response_line.strip())
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 355, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+================================================================================
+
+Tool execution failed: monai.run_inference - returned None
+Iteration 4/8
+  [Workflow] analyze_image done, path=/tmp/tmpmn03eqs8.nii.gz
+  [Workflow] list_models found 4 models
+  [Workflow] Found downloaded model: spleen_ct_segmentation
+Workflow state: analyze=True, list=True, download=False, inference=False
+  [Next step] run_inference with model spleen_ct_segmentation
+Guided workflow: Next step is monai.run_inference
+  Arguments: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+Agent decided to call: monai.run_inference with args: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+
+================================================================================
+MCP STDIO REQUEST
+================================================================================
+Server: monai
+Tool: run_inference
+Arguments: {
+  "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+  "model_name": "spleen_ct_segmentation"
+}
+Full MCP Request: {
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "run_inference",
+    "arguments": {
+      "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+      "model_name": "spleen_ct_segmentation"
+    }
+  },
+  "id": 1
+}
+================================================================================
+
+
+================================================================================
+STDIO ERROR
+================================================================================
+Error: Expecting value: line 1 column 1 (char 0)
+================================================================================
+
+
+================================================================================
+EXCEPTION
+================================================================================
+Tool execution failed: Expecting value: line 1 column 1 (char 0)
+Exception type: JSONDecodeError
+Traceback:
+Traceback (most recent call last):
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 65, in execute_tool_decision
+    result = self._execute_stdio_tool(server_name, mcp_request, logs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 189, in _execute_stdio_tool
+    raise e
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 139, in _execute_stdio_tool
+    result_json = json.loads(response_line.strip())
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 355, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+================================================================================
+
+Tool execution failed: monai.run_inference - returned None
+Iteration 5/8
+  [Workflow] analyze_image done, path=/tmp/tmpmn03eqs8.nii.gz
+  [Workflow] list_models found 4 models
+  [Workflow] Found downloaded model: spleen_ct_segmentation
+Workflow state: analyze=True, list=True, download=False, inference=False
+  [Next step] run_inference with model spleen_ct_segmentation
+Guided workflow: Next step is monai.run_inference
+  Arguments: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+Agent decided to call: monai.run_inference with args: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+
+================================================================================
+MCP STDIO REQUEST
+================================================================================
+Server: monai
+Tool: run_inference
+Arguments: {
+  "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+  "model_name": "spleen_ct_segmentation"
+}
+Full MCP Request: {
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "run_inference",
+    "arguments": {
+      "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+      "model_name": "spleen_ct_segmentation"
+    }
+  },
+  "id": 1
+}
+================================================================================
+
+
+================================================================================
+STDIO ERROR
+================================================================================
+Error: Expecting value: line 1 column 1 (char 0)
+================================================================================
+
+
+================================================================================
+EXCEPTION
+================================================================================
+Tool execution failed: Expecting value: line 1 column 1 (char 0)
+Exception type: JSONDecodeError
+Traceback:
+Traceback (most recent call last):
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 65, in execute_tool_decision
+    result = self._execute_stdio_tool(server_name, mcp_request, logs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 189, in _execute_stdio_tool
+    raise e
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 139, in _execute_stdio_tool
+    result_json = json.loads(response_line.strip())
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 355, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+================================================================================
+
+Tool execution failed: monai.run_inference - returned None
+Iteration 6/8
+  [Workflow] analyze_image done, path=/tmp/tmpmn03eqs8.nii.gz
+  [Workflow] list_models found 4 models
+  [Workflow] Found downloaded model: spleen_ct_segmentation
+Workflow state: analyze=True, list=True, download=False, inference=False
+  [Next step] run_inference with model spleen_ct_segmentation
+Guided workflow: Next step is monai.run_inference
+  Arguments: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+Agent decided to call: monai.run_inference with args: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+
+================================================================================
+MCP STDIO REQUEST
+================================================================================
+Server: monai
+Tool: run_inference
+Arguments: {
+  "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+  "model_name": "spleen_ct_segmentation"
+}
+Full MCP Request: {
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "run_inference",
+    "arguments": {
+      "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+      "model_name": "spleen_ct_segmentation"
+    }
+  },
+  "id": 1
+}
+================================================================================
+
+
+================================================================================
+STDIO ERROR
+================================================================================
+Error: Expecting value: line 1 column 1 (char 0)
+================================================================================
+
+
+================================================================================
+EXCEPTION
+================================================================================
+Tool execution failed: Expecting value: line 1 column 1 (char 0)
+Exception type: JSONDecodeError
+Traceback:
+Traceback (most recent call last):
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 65, in execute_tool_decision
+    result = self._execute_stdio_tool(server_name, mcp_request, logs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 189, in _execute_stdio_tool
+    raise e
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 139, in _execute_stdio_tool
+    result_json = json.loads(response_line.strip())
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 355, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+================================================================================
+
+Tool execution failed: monai.run_inference - returned None
+Iteration 7/8
+  [Workflow] analyze_image done, path=/tmp/tmpmn03eqs8.nii.gz
+  [Workflow] list_models found 4 models
+  [Workflow] Found downloaded model: spleen_ct_segmentation
+Workflow state: analyze=True, list=True, download=False, inference=False
+  [Next step] run_inference with model spleen_ct_segmentation
+Guided workflow: Next step is monai.run_inference
+  Arguments: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+Agent decided to call: monai.run_inference with args: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+
+================================================================================
+MCP STDIO REQUEST
+================================================================================
+Server: monai
+Tool: run_inference
+Arguments: {
+  "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+  "model_name": "spleen_ct_segmentation"
+}
+Full MCP Request: {
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "run_inference",
+    "arguments": {
+      "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+      "model_name": "spleen_ct_segmentation"
+    }
+  },
+  "id": 1
+}
+================================================================================
+
+
+================================================================================
+STDIO ERROR
+================================================================================
+Error: Expecting value: line 1 column 1 (char 0)
+================================================================================
+
+
+================================================================================
+EXCEPTION
+================================================================================
+Tool execution failed: Expecting value: line 1 column 1 (char 0)
+Exception type: JSONDecodeError
+Traceback:
+Traceback (most recent call last):
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 65, in execute_tool_decision
+    result = self._execute_stdio_tool(server_name, mcp_request, logs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 189, in _execute_stdio_tool
+    raise e
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 139, in _execute_stdio_tool
+    result_json = json.loads(response_line.strip())
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 355, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+================================================================================
+
+Tool execution failed: monai.run_inference - returned None
+Iteration 8/8
+  [Workflow] analyze_image done, path=/tmp/tmpmn03eqs8.nii.gz
+  [Workflow] list_models found 4 models
+  [Workflow] Found downloaded model: spleen_ct_segmentation
+Workflow state: analyze=True, list=True, download=False, inference=False
+  [Next step] run_inference with model spleen_ct_segmentation
+Guided workflow: Next step is monai.run_inference
+  Arguments: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+Agent decided to call: monai.run_inference with args: {'image_path': '/tmp/tmpmn03eqs8.nii.gz', 'model_name': 'spleen_ct_segmentation'}
+
+================================================================================
+MCP STDIO REQUEST
+================================================================================
+Server: monai
+Tool: run_inference
+Arguments: {
+  "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+  "model_name": "spleen_ct_segmentation"
+}
+Full MCP Request: {
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "run_inference",
+    "arguments": {
+      "image_path": "/tmp/tmpmn03eqs8.nii.gz",
+      "model_name": "spleen_ct_segmentation"
+    }
+  },
+  "id": 1
+}
+================================================================================
+
+
+================================================================================
+STDIO ERROR
+================================================================================
+Error: Expecting value: line 1 column 1 (char 0)
+================================================================================
+
+
+================================================================================
+EXCEPTION
+================================================================================
+Tool execution failed: Expecting value: line 1 column 1 (char 0)
+Exception type: JSONDecodeError
+Traceback:
+Traceback (most recent call last):
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 65, in execute_tool_decision
+    result = self._execute_stdio_tool(server_name, mcp_request, logs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 189, in _execute_stdio_tool
+    raise e
+  File "/home/gabriel/Desktop/AgenticHealthMCP/orchestrator/tool_executor.py", line 139, in _execute_stdio_tool
+    result_json = json.loads(response_line.strip())
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 355, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+================================================================================
+
+Tool execution failed: monai.run_inference - returned None
+Failed to achieve goal after 8 iterations
+INFO:     127.0.0.1:51410 - "POST /api/process-workflow HTTP/1.1" 200 OK

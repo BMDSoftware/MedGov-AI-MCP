@@ -69,7 +69,7 @@ class ToolExecutor:
             elapsed_time = time.time() - start_time
             
             if logs:
-                print(f"🔧 Executed {tool_name} ({transport}) in {elapsed_time:.2f}s")
+                print(f"Executed {tool_name} ({transport}) in {elapsed_time:.2f}s")
             
             # Notify callback of tool call completion
             if self.callback:

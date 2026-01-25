@@ -1,55 +1,278 @@
 #!/usr/bin/env python3
+import os
 import json
 from typing import Dict, List, Optional, Any
 
 from tool_registry import tool_registry
-from gemini_client import GeminiClient
 from tool_executor import ToolExecutor
+
+# LLM Backend selection: "ollama" (local) or "gemini" (API)
+LLM_BACKEND = os.getenv("LLM_BACKEND", "ollama")
+
+# Workflow state machine for medical imaging analysis
+# This enforces the correct sequence of tool calls
+WORKFLOW_STEPS = [
+    {"name": "analyze", "tool": "monai.analyze_image", "required": True},
+    {"name": "list", "tool": "monai.list_models", "required": True},
+    {"name": "download", "tool": "monai.download_model", "required": False},  # Only if not downloaded
+    {"name": "inference", "tool": "monai.run_inference", "required": True},
+]
 
 
 class AgenticAgent:
     """AI agent that decides which MCP tools to call based on context and data"""
-    
+
     def __init__(self, callback=None):
         self.available_tools = {}
         self.callback = callback  # Callback function for real-time event tracking
-        self.gemini_client = None
+        self.llm_client = None
         self.tool_executor = None
+        self.workflow_state = {}  # Track workflow progress
         self._initialize_components()
-    
+
     def _initialize_components(self):
-        """Initialize Gemini client and tool executor with discovered tools"""
+        """Initialize LLM client and tool executor with discovered tools"""
         # Discover available tools
         self.available_tools = tool_registry.discover_tools()
-        
-        # Initialize components
-        self.gemini_client = GeminiClient(self.available_tools)
+
+        # Initialize LLM client based on backend selection
+        if LLM_BACKEND.lower() == "ollama":
+            print("Using Ollama (local) for orchestration")
+            from ollama_client import OllamaClient
+            self.llm_client = OllamaClient(self.available_tools)
+        else:
+            print("Using Gemini (API) for orchestration")
+            from gemini_client import GeminiClient
+            self.llm_client = GeminiClient(self.available_tools)
+
         self.tool_executor = ToolExecutor(self.available_tools, self.callback)
-    
-    def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 5) -> Optional[Dict]:
+
+    def _get_workflow_state(self, execution_history: List[Dict]) -> Dict:
+        """Analyze execution history to determine workflow state"""
+        state = {
+            "analyze_done": False,
+            "list_done": False,
+            "download_done": False,
+            "inference_done": False,
+            "image_path": None,
+            "model_name": None,
+            "model_downloaded": False,
+            "inference_result": None,
+        }
+
+        for event in execution_history:
+            if not event.get("success"):
+                continue
+
+            tool = event.get("tool", "")
+            result = event.get("result", {})
+
+            if tool == "monai.analyze_image":
+                state["analyze_done"] = True
+                # Extract image path from result if available
+                if isinstance(result, dict):
+                    state["image_path"] = result.get("path") or result.get("file_path")
+                    print(f"  [Workflow] analyze_image done, path={state['image_path']}")
+
+            elif tool == "monai.list_models":
+                state["list_done"] = True
+                # Check if any model is downloaded
+                if isinstance(result, dict):
+                    models = result.get("models", [])
+                    print(f"  [Workflow] list_models found {len(models)} models")
+                    for model in models:
+                        if model.get("downloaded"):
+                            state["model_downloaded"] = True
+                            state["model_name"] = model.get("name")
+                            print(f"  [Workflow] Found downloaded model: {state['model_name']}")
+                            break
+                    # If no downloaded model, pick the first one
+                    if not state["model_name"] and models:
+                        state["model_name"] = models[0].get("name")
+                        print(f"  [Workflow] Selected model to download: {state['model_name']}")
+
+            elif tool == "monai.download_model":
+                state["download_done"] = True
+                state["model_downloaded"] = True
+                # Extract model name from result
+                if isinstance(result, dict) and result.get("model_name"):
+                    state["model_name"] = result.get("model_name")
+                print(f"  [Workflow] download_model done, model={state['model_name']}")
+
+            elif tool == "monai.run_inference":
+                state["inference_done"] = True
+                state["inference_result"] = result
+                print(f"  [Workflow] run_inference done")
+
+        return state
+
+    def _get_next_workflow_step(self, state: Dict, image_path: str) -> Optional[Dict]:
+        """Determine the next tool to call based on workflow state"""
+        if not state["analyze_done"]:
+            print("  [Next step] analyze_image")
+            return {
+                "tool_name": "monai.analyze_image",
+                "arguments": {"path": image_path}
+            }
+
+        if not state["list_done"]:
+            print("  [Next step] list_models")
+            return {
+                "tool_name": "monai.list_models",
+                "arguments": {}
+            }
+
+        # If we have a model but it's not downloaded yet, download it
+        if state["model_name"] and not state["model_downloaded"]:
+            print(f"  [Next step] download_model ({state['model_name']})")
+            return {
+                "tool_name": "monai.download_model",
+                "arguments": {"model_name": state["model_name"]}
+            }
+
+        # Run inference if we have a downloaded model
+        if not state["inference_done"] and state["model_name"] and state["model_downloaded"]:
+            print(f"  [Next step] run_inference with model {state['model_name']}")
+            return {
+                "tool_name": "monai.run_inference",
+                "arguments": {
+                    "image_path": state["image_path"] or image_path,
+                    "model_name": state["model_name"]
+                }
+            }
+
+        # Workflow complete
+        print("  [Next step] None - workflow complete")
+        return None
+
+    def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 8) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
-        
+
         Args:
             goal: Natural language description of what to accomplish
             data: Optional data context (e.g., patient data to save)
             imageList: Optional list of images for processing
             max_iterations: Maximum number of tool executions allowed
-            
+
         Returns:
             Final result if successful, None if goal not achieved
         """
         print(f"Starting autonomous task: {goal}")
-        
+
         execution_history = []
         iterations = 0
         final_result = None
-        
+
+        # Extract image path for workflow
+        image_path = None
+        if imageList and isinstance(imageList, list) and imageList:
+            image_path = imageList[0][0]  # First image's temp file path
+            print(f"Image path for workflow: {image_path}")
+
+        # Use guided workflow for local LLMs (Ollama)
+        use_guided_workflow = LLM_BACKEND.lower() == "ollama"
+
         while iterations < max_iterations:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
-            
+
             try:
+                # For Ollama: Use guided workflow to enforce correct sequence
+                if use_guided_workflow and image_path:
+                    workflow_state = self._get_workflow_state(execution_history)
+                    print(f"Workflow state: analyze={workflow_state['analyze_done']}, list={workflow_state['list_done']}, download={workflow_state['download_done']}, inference={workflow_state['inference_done']}")
+
+                    # Check if workflow is complete
+                    if workflow_state["inference_done"]:
+                        print("Workflow complete! Inference has been run.")
+                        tools_used = [event['tool'] for event in execution_history if event['success']]
+
+                        # Format the inference result
+                        inference_result = workflow_state.get("inference_result", {})
+                        answer = "GOAL_ACHIEVED\n\n**Medical Image Analysis Complete**\n"
+
+                        if isinstance(inference_result, dict):
+                            # Add model info
+                            if inference_result.get("model_used"):
+                                answer += f"\n**Model:** {inference_result['model_used']}\n"
+                            if inference_result.get("model_type"):
+                                answer += f"**Analysis Type:** {inference_result['model_type']}\n"
+                            if inference_result.get("device_used"):
+                                answer += f"**Device:** {inference_result['device_used']}\n"
+
+                            # Add detection/segmentation results
+                            results = inference_result.get("results", {})
+                            if results.get("detected_structures"):
+                                answer += "\n**Detected Structures:**\n"
+                                for struct in results["detected_structures"]:
+                                    name = struct.get("name", "Unknown")
+                                    vol_pct = struct.get("volume_percentage", "N/A")
+                                    voxels = struct.get("voxel_count", "N/A")
+                                    answer += f"  - {name}: {vol_pct}% of volume ({voxels} voxels)\n"
+
+                            if results.get("total_foreground_voxels"):
+                                answer += f"\n**Total foreground:** {results['total_foreground_voxels']} voxels\n"
+
+                            # Add status
+                            if inference_result.get("status") == "success":
+                                answer += "\nInference completed successfully.\n"
+
+                        return {
+                            "type": "agent_response",
+                            "answer": answer,
+                            "tools_used": tools_used,
+                            "execution_history": execution_history,
+                            "inference_result": inference_result,
+                            "success": True
+                        }
+
+                    # Get next step from workflow state machine
+                    next_step = self._get_next_workflow_step(workflow_state, image_path)
+
+                    if next_step:
+                        print(f"Guided workflow: Next step is {next_step['tool_name']}")
+                        print(f"  Arguments: {next_step['arguments']}")
+
+                        # Execute the tool directly with logs enabled for debugging
+                        result = self.tool_executor.execute_tool_decision(next_step, logs=True)
+
+                        # Record execution
+                        if result:
+                            # Check if result contains an error
+                            if isinstance(result, dict) and result.get("error"):
+                                error_msg = result.get("error")
+                                print(f"Tool returned error: {error_msg}")
+                                execution_history.append({
+                                    "tool": next_step["tool_name"],
+                                    "success": False,
+                                    "error": error_msg,
+                                    "result": result
+                                })
+                            else:
+                                result_type = result.get("resourceType", result.get("status", "unknown"))
+                                result_summary = str(result)[:200]
+
+                                execution_history.append({
+                                    "tool": next_step["tool_name"],
+                                    "success": True,
+                                    "result_type": result_type,
+                                    "result_summary": result_summary,
+                                    "result": result
+                                })
+
+                                final_result = result
+                                print(f"Tool succeeded: {next_step['tool_name']}")
+                        else:
+                            execution_history.append({
+                                "tool": next_step["tool_name"],
+                                "success": False,
+                                "error": "Execution returned no result"
+                            })
+                            print(f"Tool execution failed: {next_step['tool_name']} - returned None")
+
+                        continue  # Move to next iteration
+
                 # Build context with execution history including MCP responses
                 history_text = ""
                 if execution_history:
@@ -78,11 +301,26 @@ class AgenticAgent:
                     data_context = f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)}" if len(json.dumps(data)) > 500 else f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)}"
                 
                 image_context = ""
+                images_for_llm = None  # Only pass 2D images to LLM (if supported)
+
                 if imageList:
                     # Handle imageList as (temp_filepath, content) tuples
                     if isinstance(imageList, list) and imageList:
                         temp_files = [temp_filepath for temp_filepath, _ in imageList]
                         image_context = f"\n\nIMAGES AVAILABLE:\nImage file paths: {', '.join(temp_files)}"
+
+                        # Only pass small 2D images to LLM, skip large 3D medical files
+                        images_for_llm = []
+                        for temp_filepath, content in imageList:
+                            ext = temp_filepath.lower()
+                            # Skip 3D formats - too large, LLM can't visualize
+                            if not ext.endswith(('.nii', '.nii.gz', '.dcm', '.mha', '.mhd', '.nrrd')):
+                                # Only include if file is small enough (< 5MB)
+                                if len(content) < 5 * 1024 * 1024:
+                                    images_for_llm.append((temp_filepath, content))
+
+                        if not images_for_llm:
+                            images_for_llm = None
                     else:
                         image_context = f"\n\nIMAGES AVAILABLE:\nImage data provided"
 
@@ -110,7 +348,7 @@ Your decision:"""
                 # Prepare content with actual images for Gemini
                 content_parts = [prompt]
                 
-                response = self.gemini_client.generate_content(content_parts, imageList)
+                response = self.llm_client.generate_content(content_parts, images_for_llm)
                 print(f"Response: {response}")
                 
                 # Check if agent declares success (text response, no tool call)

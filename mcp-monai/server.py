@@ -5,6 +5,7 @@ Provides medical image analysis using MONAI pre-trained models
 """
 
 import os
+import sys
 import json
 import torch
 import numpy as np
@@ -12,6 +13,11 @@ import monai
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
+
+
+def log(msg: str):
+    """Log to stderr to avoid interfering with stdio JSON-RPC protocol"""
+    print(msg, file=sys.stderr, flush=True)
 
 from monai.transforms import (
     LoadImage, EnsureChannelFirst, ScaleIntensity, Compose,

@@ -66,9 +66,9 @@ async def process_workflow(data: dict = Body(default=None)):
 
     # Build query with modality context if available
     if modality and body_part:
-        query = f"This is a {modality} scan of the {body_part}. Analyse the image and return the most suitable model for analysis. If a suitable model exists, explain what it can detect. If no suitable model is found, explain and suggest the closest model available."
+        query = f"This is a {modality} scan of the {body_part}. Follow all steps: analyze the image, list models, download the best model, and run inference. Return the segmentation/detection results."
     else:
-        query = "Analyse and return the most suitable model for the uploaded medical images and explain why. If no suitable model is found, explain and suggest the closest model available."
+        query = "Analyze this medical image, download an appropriate model, run inference, and return the AI analysis results. Follow all workflow steps."
 
     print(f"Starting predefined workflow: {query}")
     print("Uploaded files list:", uploaded_files)

@@ -1,3 +1,23 @@
+.expand-btn {
+  margin-left: auto;
+  background: var(--bg-hover, #222228);
+  color: var(--accent, #6366f1);
+  border: none;
+  border-radius: 6px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+.expand-btn:hover {
+  background: var(--accent-glow, #23234a);
+  color: var(--accent-hover, #4f46e5);
+}
 .refresh-btn {
   padding: 10px 22px;
   background: var(--gradient-1, #6366f1);

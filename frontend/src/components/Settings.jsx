@@ -5,6 +5,9 @@ const API_URL = 'http://localhost:5001';
 
 
 function Settings() {
+  // Track MCP selection state independently
+  const [mcpSelected, setMcpSelected] = useState({});
+  const [expandedMCPs, setExpandedMCPs] = useState({});
   const [mcpData, setMcpData] = useState({});
   const [enabledTools, setEnabledTools] = useState(new Set());
   const [loading, setLoading] = useState(true);
@@ -42,6 +45,11 @@ function Settings() {
     fetchData();
   }, []);
 
+  // Toggle expand/collapse for an MCP
+  const handleExpandToggle = (mcp) => {
+    setExpandedMCPs(prev => ({ ...prev, [mcp]: !prev[mcp] }));
+  };
+
   // Refresh config and reload tools
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -57,6 +65,7 @@ function Settings() {
 
   // Toggle all tools for an MCP
   const handleMcpToggle = async (mcp, enable) => {
+    setMcpSelected(prev => ({ ...prev, [mcp]: enable }));
     const mcpTools = mcpData[mcp]?.map(t => t.name) || [];
     for (const toolName of mcpTools) {
       await handleToolToggle(toolName, enable, true);
@@ -75,6 +84,20 @@ function Settings() {
         const next = new Set(prev);
         if (enable) next.add(toolName);
         else next.delete(toolName);
+        // After updating enabledTools, update MCP selection state
+        // Find the MCP for this tool
+        let mcpForTool = null;
+        Object.entries(mcpData).forEach(([mcp, tools]) => {
+          if (tools.some(t => t.name === toolName)) mcpForTool = mcp;
+        });
+        if (mcpForTool) {
+          const mcpTools = mcpData[mcpForTool].map(t => t.name);
+          const someEnabled = mcpTools.some(t => next.has(t));
+          setMcpSelected(prevSel => ({
+            ...prevSel,
+            [mcpForTool]: someEnabled
+          }));
+        }
         return next;
       });
     } catch (e) {
@@ -98,30 +121,46 @@ function Settings() {
         {Object.entries(mcpData).map(([mcp, tools]) => {
           const allEnabled = tools.every(t => enabledTools.has(t.name));
           const someEnabled = tools.some(t => enabledTools.has(t.name));
+          // MCP selection is independent, defaults to allEnabled if not set
+          const mcpChecked = mcpSelected[mcp] !== undefined ? mcpSelected[mcp] : allEnabled;
+          const expanded = expandedMCPs[mcp] ?? false;
           return (
             <div className="mcp-group" key={mcp}>
               <div className="mcp-header">
                 <input
                   type="checkbox"
-                  checked={allEnabled}
+                  checked={mcpChecked}
                   indeterminate={someEnabled && !allEnabled ? 'indeterminate' : undefined}
                   onChange={e => handleMcpToggle(mcp, e.target.checked)}
                 />
                 <span className="mcp-name">{mcp}</span>
+                <button
+                  className="expand-btn"
+                  onClick={() => handleExpandToggle(mcp)}
+                  aria-label={expanded ? 'Collapse tools' : 'Expand tools'}
+                >
+                  {expanded ? (
+                    <span style={{fontSize: '1.2em'}}>&#x25BC;</span>
+                  ) : (
+                    <span style={{fontSize: '1.2em'}}>&#x25B6;</span>
+                  )}
+                </button>
               </div>
-              <div className="tools-list">
-                {tools.map(tool => (
-                  <label className="tool-item" key={tool.name}>
-                    <input
-                      type="checkbox"
-                      checked={enabledTools.has(tool.name)}
-                      onChange={e => handleToolToggle(tool.name, e.target.checked)}
-                    />
-                    <span className="tool-name">{tool.original_name}</span>
-                    <span className="tool-desc">{tool.description}</span>
-                  </label>
-                ))}
-              </div>
+              {expanded && (
+                <div className="tools-list">
+                  {tools.map(tool => (
+                    <label className="tool-item" key={tool.name}>
+                      <input
+                        type="checkbox"
+                        checked={enabledTools.has(tool.name)}
+                        onChange={e => handleToolToggle(tool.name, e.target.checked)}
+                      />
+                      <span className="tool-name">{tool.original_name}</span>
+                      <span className="tool-desc">{tool.description}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

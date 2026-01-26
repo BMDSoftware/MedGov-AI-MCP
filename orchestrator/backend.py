@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import asyncio
 from email.mime import image
 import json
 import os
@@ -9,14 +10,20 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
-
+from contextlib import asynccontextmanager
 from agenticAgent import agent_decision
 
 load_dotenv()
 
 workflow_queue = []
 
-app = FastAPI(title="Agentic Health Assistant API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup code
+    await agent_decision._initialize_components()
+    yield
+
+app = FastAPI(title="Agentic Health Assistant API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -95,7 +102,7 @@ async def process_workflow(data: dict = Body(default=None)):
             image_data.append((temp_file.name, contents))
             print(f"Saved {filename} to {temp_file.name}")
         
-        result = agent_decision.execute_task(query, imageList=image_data)
+        result = await agent_decision.execute_task(query, imageList=image_data)
         
         # Clean up temporary files after agent execution
         for temp_path in temp_file_paths.values():
@@ -165,7 +172,7 @@ async def disable_tool(data: dict = Body(...)):
 
 @app.post("/api/refresh-config")
 async def refresh_config():
-    agent_decision.refresh_available_tools()
+    await agent_decision.refresh_available_tools()
     return {"status": "refreshed", "available_tools": list(agent_decision.available_tools.keys())}
 
 
@@ -174,7 +181,9 @@ async def health_check():
     return {"status": "healthy"}
 
 
+
 if __name__ == "__main__":
     import uvicorn
     print("Starting server on http://localhost:5001")
     uvicorn.run(app, host="0.0.0.0", port=5001)
+

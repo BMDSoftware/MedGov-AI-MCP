@@ -1,239 +1,166 @@
 #!/usr/bin/env python3
-from json import tool
 import os
 import json
-import subprocess
-import sys
-from typing import Dict, List
+import asyncio
+from typing import Dict
+from contextlib import AsyncExitStack
 
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamable_http_client
 
 class ToolRegistry:
-    """Dynamic tool registry that discovers available MCP tools"""
-    
     def __init__(self):
         self.available_tools: Dict[str, Dict] = {}
         self.config_path = os.path.join(os.path.dirname(__file__), "mcp-config.json")
-        self.server_processes: Dict[str, subprocess.Popen] = {}
-    
+        self.stack = AsyncExitStack()
+        self.sessions = {}
 
-    def reload_config_and_refresh(self) -> Dict[str, Dict]:
-        """Reload config file and refresh available tools/servers"""
-        print("Reloading MCP config and refreshing tools...")
-        return self.discover_tools()
-    
+
     def _load_mcp_config(self) -> Dict:
-        """Load MCP configuration from config file"""
         try:
             with open(self.config_path, 'r') as f:
                 return json.load(f)
         except Exception as e:
             print(f"Could not load MCP config: {e}")
             return {}
-    
-    def discover_tools(self) -> Dict[str, Dict]:
-        """Discover available tools from all MCP servers in config"""
-        try:
-            # Load config to get all servers
-            config = self._load_mcp_config()
-            self.available_tools = {}
-            mcp_servers = config.get("mcpServers", {})
-            
-            if not mcp_servers:
-                print(f"No MCP servers found in config")
-                print(f"Configuration required - no tools available")
-                self.available_tools = {}
-                return self.available_tools
-            
-            print(f"Found {len(mcp_servers)} MCP servers: {list(mcp_servers.keys())}")
-            
-            # Discover tools from each server
-            for server_name, server_config in mcp_servers.items():
-                print(f"Discovering tools from '{server_name}' server...")
-                transport = server_config.get("transport", "http")
-                
-                if transport == "stdio":
-                    self._discover_from_stdio_server(server_name, server_config)
-                else:
-                    self._discover_from_http_server(server_name, server_config)
-            
-        except Exception as e:
-            print(f"Tool discovery failed: {e}")
-            print(f"MCP servers unreachable - no tools available")
-            self.available_tools = {}
-            
-        print(f"Discovered {len(self.available_tools)} tools: {list(self.available_tools.keys())}")
-        return self.available_tools
-    
-    def _discover_from_stdio_server(self, server_name: str, server_config: Dict):
-        """Discover tools from a stdio-based MCP server"""
-        command = server_config.get("command")
-        args = server_config.get("args", [])
-        cwd = server_config.get("cwd")
-        env_vars = server_config.get("env", {})
-        
-        if not command:
-            print(f"{server_name}: No command specified")
-            return
-        
-        try:
-            # Start the MCP server process
-            full_command = [command] + args
 
-            
-            process = subprocess.Popen(
-                full_command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                cwd=cwd,
-                env=env_vars if env_vars else None
-            )
-            
-            # Store the process for later cleanup
-            self.server_processes[server_name] = process
-            
-            # Step 1: Send initialize request (MCP protocol requirement)
-            init_request = {
-                "jsonrpc": "2.0",
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {
-                        "name": "orchestrator",
-                        "version": "1.0.0"
-                    }
-                },
-                "id": 1
-            }
-            
-            process.stdin.write(json.dumps(init_request) + "\n")
-            process.stdin.flush()
-            
-            # Read initialize response
-            init_response = process.stdout.readline()
-            if not init_response:
-                raise Exception("No response from server during initialization")
-            
-            # Step 2: Send initialized notification
-            initialized_notification = {
-                "jsonrpc": "2.0",
-                "method": "notifications/initialized"
-            }
-            
-            process.stdin.write(json.dumps(initialized_notification) + "\n")
-            process.stdin.flush()
-            
-            # Step 3: Send tools/list request
-            request = {
-                "jsonrpc": "2.0",
-                "method": "tools/list",
-                "id": 2
-            }
-            
-            process.stdin.write(json.dumps(request) + "\n")
-            process.stdin.flush()
-            
-            # Read response
-            response_line = process.stdout.readline()
-            if not response_line:
-                raise Exception("No response from server")
-            
-            result = json.loads(response_line)
-            tools_list = result.get("result", {}).get("tools", [])
-            
-            # Process discovered tools from this server
-            for tool in tools_list:
-                tool_name = tool.get("name", "")
-                # Prefix tool name with server name
-                prefixed_tool_name = f"{server_name}.{tool_name}"
-                self.available_tools[prefixed_tool_name] = {
-                    "description": tool.get("description", ""),
-                    "schema": tool.get("inputSchema", {}),
-                    "server": server_name,
-                    "original_name": tool_name,
-                    "transport": "stdio"
-                }
-            
-            print(f"{server_name}: Discovered {len(tools_list)} tools via stdio")
-            
-        except Exception as e:
-            print(f"{server_name}: Failed to discover tools - {e}")
-            if server_name in self.server_processes:
-                self.server_processes[server_name].terminate()
-                del self.server_processes[server_name]
-    
-    def _discover_from_http_server(self, server_name: str, server_config: Dict):
-        """Discover tools from an HTTP-based MCP server"""
-        mcp_server_url = server_config.get("url", "http://localhost:8000")
-        
-        import requests
-        
-        response = requests.post(
-            f"{mcp_server_url}/mcp/tools/list",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream"
-            },
-            json={
-                "jsonrpc": "2.0",
-                "method": "tools/list", 
-                "id": 1
-            },
-            timeout=5
-        )
-        
-        print(f"{server_name}: {response.status_code} from {mcp_server_url}/tools/list")
-        
-        if response.status_code != 200:
-            raise Exception(f"HTTP {response.status_code} from {server_name}")
-            
-        result = response.json()
-        tools_list = result.get("result", {}).get("tools", [])
-        
-        # Process discovered tools from this server
-        for tool in tools_list:
-            tool_name = tool.get("name", "")
-            # Prefix tool name with server name
-            prefixed_tool_name = f"{server_name}.{tool_name}"
-            self.available_tools[prefixed_tool_name] = {
-                "description": tool.get("description", ""),
-                "schema": tool.get("inputSchema", {}),
-                "server": server_name,
-                "original_name": tool_name,
-                "server_url": mcp_server_url,
-                "transport": "http"
-            }
-        
-        print(f"{server_name}: Discovered {len(tools_list)} tools via HTTP")
-    
-    def cleanup(self):
-        """Cleanup stdio server processes"""
-        for server_name, process in list(self.server_processes.items()):
+
+    async def discover_tools(self) -> Dict[str, Dict]:
+        config = self._load_mcp_config()
+        mcp_servers = config.get("mcpServers", {})
+
+        if not mcp_servers:
+            return {}
+
+        print(f"Found {len(mcp_servers)} MCP servers: {list(mcp_servers.keys())}")
+
+        for name, cfg in mcp_servers.items():
+            print(f"--- Starting Server: {name} ---")
+            transport = cfg.get("transport", "stdio")
             try:
-                if process.poll() is None:  # Only if still running
-                    process.terminate()
-                    process.wait(timeout=2)
-            except Exception:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
-        self.server_processes.clear()
-    
-    def __del__(self):
-        """Cleanup on deletion"""
-        try:
-            self.cleanup()
-        except (ImportError, AttributeError):
-            # Python is shutting down, ignore cleanup errors
-            pass
-    
+                if transport == "stdio":
+                    params = StdioServerParameters(
+                        command=cfg["command"],
+                        args=cfg.get("args", []),
+                        env={**os.environ, **cfg.get("env", {})}
+                    )
+                    read, write = await self.stack.enter_async_context(stdio_client(params))
+                    session = await self.stack.enter_async_context(ClientSession(read, write))
+                    await session.initialize()
+                    self.sessions[name] = (session, "stdio")
+                elif transport == "http":
+                    url = cfg.get("url", "http://localhost:8000/mcp")
+                    read, write, _ = await self.stack.enter_async_context(streamable_http_client(url))
+                    session = await self.stack.enter_async_context(ClientSession(read, write))
+                    await session.initialize()
+                    self.sessions[name] = (session, "http")
 
+                tools = await session.list_tools()
+                for tool in tools.tools:
+                    prefixed_name = f"{name}.{tool.name}"
+                    self.available_tools[prefixed_name] = {
+                        "description": getattr(tool, "description", ""),
+                        "schema": getattr(tool, "input_schema", {}),
+                        "server": name,
+                        "original_name": tool.name,
+                        "transport": transport
+                    }
+                print(f"[{name}] Tools: {[t.name for t in tools.tools]}")
+
+            except Exception as e:
+                print(f"{name}: Failed to start: {e}")
+
+        return self.available_tools
+
+
+    async def execute_tool(self, tool_name: str, arguments: dict, logs: bool = False) -> dict:
+        tool_info = self.available_tools.get(tool_name)
+        if not tool_info:
+            raise Exception(f"Tool not found: {tool_name}")
+        
+        server = tool_info["server"]
+        session_tuple = self.sessions.get(server)
+        if not session_tuple:
+            raise Exception(f"No active session for server: {server}")
+        
+        session, transport = session_tuple
+        clean_arguments = self._protobuf_to_dict(arguments)
+        
+        if logs:
+            print(f"Executing '{tool_name}' on '{server}' (transport: {transport}) with args: {clean_arguments}")
             
+        try:
+            mcp_result = await session.call_tool(tool_info["original_name"], arguments=clean_arguments)
+            
+            combined_text = "".join([block.text for block in mcp_result.content if hasattr(block, 'text')])
+            try:
+                # If it's a JSON string, convert it to a real Python dictionary
+                final_result = json.loads(combined_text)
+                # Ensure the result is a dictionary (for .get() compatibility)
+                if not isinstance(final_result, dict):
+                    final_result = {"result": final_result}
+            except (json.JSONDecodeError, TypeError):
+                # If it's not JSON, return it as a dictionary with a 'text' key
+                final_result = {"text": combined_text}
 
-# Create global tool registry instance
-tool_registry = ToolRegistry()
-tool_registry.discover_tools()
+            # 4. Attach error status if the MCP server reported a failure
+            if mcp_result.isError:
+                final_result["is_error"] = True
+
+            return final_result
+
+        except Exception as e:
+            print(f"Error executing tool '{tool_name}': {type(e).__name__}: {e}")
+            return {"error": str(e), "is_error": True}
+
+
+    def _protobuf_to_dict(self, obj):
+        if isinstance(obj, dict):
+            return {k: self._protobuf_to_dict(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._protobuf_to_dict(v) for v in obj]
+        elif hasattr(obj, 'to_dict'):
+            return obj.to_dict()
+        else:
+            return obj
+
+
+    async def close(self):
+        """Cleanup stdio server processes"""
+        await self.stack.aclose()
+
+
+    async def reload_config_and_refresh(self) -> Dict[str, Dict]:
+        """
+        Reload MCP config and rediscover tools without closing sessions.
+        Returns the refreshed available_tools dict.
+        """
+        # Do NOT close sessions here; just rediscover tools
+        self.available_tools = {}
+        # Optionally, you could re-initialize sessions if needed, but do not call self.close()
+        await self.discover_tools()
+        return self.available_tools
+
+
+
+
+async def main():
+    tool_registry = ToolRegistry()
+    try:
+        # Discover tools
+        await tool_registry.discover_tools()
+
+        # Execute a tool while the sessions are still alive
+        if "monai.list_models" in tool_registry.available_tools:
+            result = await tool_registry.execute_tool("monai.list_models", {}, logs=True)
+            print(f"Result: {result}")
+        else:
+            print("monai.list_models not found.")
+            
+    finally:
+        # Shut down everything cleanly
+        await tool_registry.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())

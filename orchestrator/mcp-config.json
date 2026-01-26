@@ -15,6 +15,11 @@
       "env": {
         "PYTHONUNBUFFERED": "1"
       }
+    },
+    "fhir": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp",
+      "transport": "http"
     }
   }
 }

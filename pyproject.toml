@@ -19,4 +19,6 @@ dependencies = [
     "mcp",
     "Pillow",
     "monai",
+    "huggingface-hub",
+    "torchvision",
 ]

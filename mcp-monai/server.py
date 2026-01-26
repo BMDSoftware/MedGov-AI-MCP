@@ -203,7 +203,7 @@ def load_model_from_bundle(bundle_path: Path, model_name: str, device: torch.dev
             model.load_state_dict(checkpoint)
 
     except Exception as e:
-        print(f"ConfigParser failed: {e}, trying direct load...")
+        log(f"ConfigParser failed: {e}, trying direct load...")
 
         # Fallback: Load TorchScript model directly
         if model_path.suffix == ".ts":
@@ -444,7 +444,7 @@ def download_model(model_name: str) -> Dict[str, Any]:
         }
 
     try:
-        print(f"Downloading {bundle_name} from MONAI Model Zoo...")
+        log(f"Downloading {bundle_name} from MONAI Model Zoo...")
         download(
             name=bundle_name,
             bundle_dir=str(BUNDLE_ROOT),
@@ -498,23 +498,23 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
 
     try:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Running inference on {device}...")
+        log(f"Running inference on {device}...")
 
         # Load the model
-        print(f"Loading model from {bundle_path}...")
+        log(f"Loading model from {bundle_path}...")
         model = load_model_from_bundle(bundle_path, model_name, device)
 
         # Preprocess the image
         target_size = model_info.get("input_size", [96, 96, 96])
-        print(f"Preprocessing image to size {target_size}...")
+        log(f"Preprocessing image to size {target_size}...")
         image = preprocess_image(image_path, target_size)
 
         # Add batch dimension and move to device
         image = image.unsqueeze(0).to(device)
-        print(f"Input tensor shape: {image.shape}")
+        log(f"Input tensor shape: {image.shape}")
 
         # Run inference
-        print("Running model inference...")
+        log("Running model inference...")
         with torch.no_grad():
             # Use sliding window inference for large images
             if image.shape[-1] > target_size[-1]:
@@ -527,7 +527,7 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
             else:
                 output = model(image)
 
-        print(f"Output tensor shape: {output.shape}")
+        log(f"Output tensor shape: {output.shape}")
 
         # Post-process based on model type
         if model_info["category"] == "segmentation":
@@ -554,6 +554,7 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
 
     except Exception as e:
         import traceback
+        log(f"Inference failed: {str(e)}\n{traceback.format_exc()}")
         return {
             "error": f"Inference failed: {str(e)}",
             "traceback": traceback.format_exc(),

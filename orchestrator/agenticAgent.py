@@ -5,8 +5,7 @@ import json
 from re import S
 from typing import Dict, List, Optional, Any
 
-from tool_registry import tool_registry
-from tool_executor import ToolExecutor
+from tool_registry import ToolRegistry
 
 # LLM Backend selection: "ollama" (local) or "gemini" (API)
 LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
@@ -25,22 +24,19 @@ class AgenticAgent:
     """AI agent that decides which MCP tools to call based on context and data"""
 
     def __init__(self, callback=None):
+        self.tool_registry = ToolRegistry()
         self.available_tools = {}
         self.agent_tools: Set[str] = set()
         self.callback = callback  # Callback function for real-time event tracking
         self.llm_client = None
-        self.tool_executor = None
         self.workflow_state = {}  # Track workflow progress
-        self._initialize_components()
-    
-    def _initialize_components(self):
-        """Initialize LLM client and tool executor with discovered tools"""
-        # Discover available tools
-        self.available_tools = tool_registry.discover_tools()
-        # Initialize agent_tools with all available tool names
-        self.agent_tools = set(self.available_tools.keys())
+        # Use async init pattern for tool discovery
+        # You must call await self._initialize_components() after instantiation
 
-        # Initialize LLM client based on backend selection
+    async def _initialize_components(self):
+        """Initialize LLM client and tool registry with discovered tools"""
+        self.available_tools = await self.tool_registry.discover_tools()
+        self.agent_tools = set(self.available_tools.keys())
         enabled_tools = self.get_enabled_agent_tools()
         if LLM_BACKEND.lower() == "ollama":
             print("Using Ollama (local) for orchestration")
@@ -51,7 +47,9 @@ class AgenticAgent:
             from gemini_client import GeminiClient
             self.llm_client = GeminiClient(enabled_tools)
 
-        self.tool_executor = ToolExecutor(enabled_tools, self.callback)
+    async def close(self):
+        """Explicit async cleanup for tool registry resources."""
+        await self.tool_registry.close()
 
     def get_enabled_agent_tools(self) -> Dict[str, Dict]:
         return {name: info for name, info in self.available_tools.items() if name in self.agent_tools}
@@ -76,32 +74,16 @@ class AgenticAgent:
         enabled_tools = self.get_enabled_agent_tools()
         if self.llm_client:
             self.llm_client.update_tools(enabled_tools)
-        if self.tool_executor:
-            self.tool_executor.available_tools = enabled_tools
 
-
-    def refresh_available_tools(self):
-        """Reload tool registry and refresh available tools"""
-
+    async def refresh_available_tools(self):
         previous_tools = set(self.available_tools.keys())
         previous_enabled = set(self.agent_tools)
-
-        # Reload tools
-        self.available_tools = tool_registry.reload_config_and_refresh()
+        self.available_tools = await self.tool_registry.reload_config_and_refresh()
         current_tools = set(self.available_tools.keys())
-
-        # Keep enabled tools that still exist
         still_enabled = previous_enabled & current_tools
-
-        # Enable newly discovered tools
         new_tools = current_tools - previous_tools
-
-        # Update enabled tools
         self.agent_tools = still_enabled | new_tools
-
-        # Absolute safety: remove ghosts
         self.agent_tools &= current_tools
-
         self._refresh_agent_components()
 
     def _get_workflow_state(self, execution_history: List[Dict]) -> Dict:
@@ -202,7 +184,7 @@ class AgenticAgent:
         print("  [Next step] None - workflow complete")
         return None
 
-    def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 8) -> Optional[Dict]:
+    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 8) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 
@@ -233,9 +215,7 @@ class AgenticAgent:
         while iterations < max_iterations:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
-
             try:
-                # For Ollama: Use guided workflow to enforce correct sequence
                 if use_guided_workflow and image_path:
                     workflow_state = self._get_workflow_state(execution_history)
                     print(f"Workflow state: analyze={workflow_state['analyze_done']}, list={workflow_state['list_done']}, download={workflow_state['download_done']}, inference={workflow_state['inference_done']}")
@@ -290,13 +270,9 @@ class AgenticAgent:
                     if next_step:
                         print(f"Guided workflow: Next step is {next_step['tool_name']}")
                         print(f"  Arguments: {next_step['arguments']}")
-
-                        # Execute the tool directly with logs enabled for debugging
-                        result = self.tool_executor.execute_tool_decision(next_step, logs=True)
-
-                        # Record execution
+                        # FIX: Await the async execute_tool call
+                        result = await self.tool_registry.execute_tool(next_step["tool_name"], next_step["arguments"], logs=True)
                         if result:
-                            # Check if result contains an error
                             if isinstance(result, dict) and result.get("error"):
                                 error_msg = result.get("error")
                                 print(f"Tool returned error: {error_msg}")
@@ -307,27 +283,18 @@ class AgenticAgent:
                                     "result": result
                                 })
                             else:
-                                result_type = result.get("resourceType", result.get("status", "unknown"))
-                                result_summary = str(result)[:200]
-
                                 execution_history.append({
                                     "tool": next_step["tool_name"],
                                     "success": True,
-                                    "result_type": result_type,
-                                    "result_summary": result_summary,
                                     "result": result
                                 })
-
-                                final_result = result
-                                print(f"Tool succeeded: {next_step['tool_name']}")
                         else:
                             execution_history.append({
                                 "tool": next_step["tool_name"],
                                 "success": False,
-                                "error": "Execution returned no result"
+                                "error": "No result returned",
+                                "result": None
                             })
-                            print(f"Tool execution failed: {next_step['tool_name']} - returned None")
-
                         continue  # Move to next iteration
 
                 # Build context with execution history including MCP responses
@@ -451,12 +418,8 @@ Your decision:"""
                             # Execute the tool
                             print(f"Executing: {tool_name}")
                             
-                            decision = {
-                                "tool_name": tool_name,
-                                "arguments": arguments
-                            }
                             
-                            result = self.tool_executor.execute_tool_decision(decision)
+                            result = await self.tool_registry.execute_tool(tool_name, arguments, logs=True)
                             
                             # Record execution with result details
                             if result:
@@ -498,20 +461,16 @@ Your decision:"""
                     })
                     
             except Exception as e:
-                print(f"Error in iteration {iterations}: {e}")
+                print(f"Error in agentic workflow: {type(e).__name__}: {e}")
                 execution_history.append({
-                    "tool": "error",
+                    "tool": None,
                     "success": False,
-                    "error": str(e)
+                    "error": str(e),
+                    "result": None
                 })
-        
-        print(f"Failed to achieve goal after {max_iterations} iterations")
-        return final_result
+        print("Max iterations reached or goal not achieved.")
+        return None
     
-    def execute_tool_decision(self, decision: Dict, logs: bool = False) -> Optional[Dict]:
-        """Execute a tool decision using existing MCP infrastructure - delegated to ToolExecutor"""
-        return self.tool_executor.execute_tool_decision(decision, logs)
-
     def _extract_answer_from_results(self, agent_response: str, execution_history: List[Dict], final_result: Any) -> str:
         """Extract meaningful answer from agent response and execution results"""
         # Get the agent's text response (which should contain the answer)
@@ -536,19 +495,18 @@ Your decision:"""
         # Last fallback: return a generic success message
         return "Goal achieved successfully"
 
-    def cleanup(self):
-        """Cleanup stdio server processes"""
-        if self.tool_executor:
-            self.tool_executor.cleanup()
-
-    def __del__(self):
-        """Cleanup on deletion"""
-        try:
-            self.cleanup()
-        except (ImportError, AttributeError):
-            # Python is shutting down, ignore cleanup errors
-            pass
-
 
 # Global agent instance
 agent_decision = AgenticAgent()
+
+if __name__ == "__main__":
+    import asyncio
+    async def main():
+        await agent_decision._initialize_components()
+        # ... add your main agent logic here ...
+
+        result = await agent_decision.execute_task("List all existing models in MONAI Model Zoo.")
+        print(f"Final Result: {result}")
+
+        await agent_decision.close()
+    asyncio.run(main())

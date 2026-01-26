@@ -75,7 +75,7 @@ class AgenticAgent:
     def _refresh_agent_components(self):
         enabled_tools = self.get_enabled_agent_tools()
         if self.llm_client:
-            self.llm_client.available_tools = enabled_tools
+            self.llm_client.update_tools(enabled_tools)
         if self.tool_executor:
             self.tool_executor.available_tools = enabled_tools
 

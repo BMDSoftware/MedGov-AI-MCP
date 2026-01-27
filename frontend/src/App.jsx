@@ -75,9 +75,10 @@ function App() {
 
       if (!response.ok) throw new Error('Upload failed')
 
-      // Check if it's a DICOM file (has metadata) or needs user input
-      const ext = file.name.split('.').pop().toLowerCase()
-      const needsModalityInput = ['jpg', 'jpeg', 'png', 'bmp', 'gif'].includes(ext)
+      // Check if file needs user input for modality/body part
+      // DICOM files have embedded metadata, but NIfTI and images need user input
+      const fileName = file.name.toLowerCase()
+      const needsModalityInput = !fileName.endsWith('.dcm')
 
       setSessionContext(prev => ({ ...prev, fileUploaded: true }))
 
@@ -85,7 +86,7 @@ function App() {
         setShowModalitySelect(true)
         addMessage({
           type: 'bot',
-          content: `File "${file.name}" received. Since this is a ${ext.toUpperCase()} file, please specify the image type for accurate analysis:`,
+          content: `File "${file.name}" received. Please specify the image type so we can select the right AI model:`,
           actions: []
         })
       } else {
@@ -125,9 +126,11 @@ function App() {
       console.log('Metadata endpoint not available, will use query context')
     }
 
+    const modalityText = modality || 'auto-detected'
+    const bodyPartText = bodyPart || 'auto-detected'
     addMessage({
       type: 'bot',
-      content: `Got it! This is a ${modality} scan of the ${bodyPart}. What would you like to do?`,
+      content: `Got it! Modality: ${modalityText}, Body part: ${bodyPartText}. What would you like to do?`,
       actions: [
         { id: 'analyze', label: 'Analyze Image' },
         { id: 'info', label: 'System Info' }
@@ -315,7 +318,7 @@ function App() {
                   <div className="modality-group">
                     <label>Image Modality</label>
                     <div className="modality-options">
-                      {['CT', 'MRI', 'X-ray', 'Ultrasound'].map(mod => (
+                      {['Auto-detect', 'CT', 'MRI', 'X-ray'].map(mod => (
                         <button
                           key={mod}
                           className={`modality-btn ${sessionContext.modality === mod ? 'selected' : ''}`}
@@ -329,7 +332,7 @@ function App() {
                   <div className="modality-group">
                     <label>Body Part</label>
                     <div className="modality-options">
-                      {['Head', 'Chest', 'Abdomen', 'Pelvis', 'Spine', 'Extremity'].map(part => (
+                      {['Auto-detect', 'Head', 'Chest', 'Abdomen'].map(part => (
                         <button
                           key={part}
                           className={`modality-btn ${sessionContext.bodyPart === part ? 'selected' : ''}`}
@@ -343,9 +346,12 @@ function App() {
                   <button
                     className="confirm-btn"
                     disabled={!sessionContext.modality || !sessionContext.bodyPart}
-                    onClick={() => handleModalitySelect(sessionContext.modality, sessionContext.bodyPart)}
+                    onClick={() => handleModalitySelect(
+                      sessionContext.modality === 'Auto-detect' ? null : sessionContext.modality,
+                      sessionContext.bodyPart === 'Auto-detect' ? null : sessionContext.bodyPart
+                    )}
                   >
-                    Confirm Selection
+                    Continue
                   </button>
                 </div>
               ) : !sessionContext.fileUploaded ? (

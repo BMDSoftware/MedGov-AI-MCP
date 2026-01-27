@@ -20,7 +20,7 @@ def log(msg: str):
     print(msg, file=sys.stderr, flush=True)
 
 from monai.transforms import (
-    LoadImage, EnsureChannelFirst, ScaleIntensity, Compose,
+    LoadImage, EnsureChannelFirst, ScaleIntensity, ScaleIntensityRange, Compose,
     Spacing, Orientation, CropForeground, Resize, EnsureType,
     Activations, AsDiscrete, KeepLargestConnectedComponent
 )
@@ -83,6 +83,26 @@ MODEL_REGISTRY = {
         "labels": {1: "nodule"},
         "input_size": [96, 96, 96],
         "num_classes": 2
+    },
+    "brats_mri_segmentation": {
+        "category": "segmentation",
+        "modality": "MRI",
+        "body_part": "head",
+        "description": "Brain tumor segmentation on MRI (BraTS challenge)",
+        "bundle_name": "brats_mri_segmentation",
+        "labels": {1: "necrotic_core", 2: "edema", 3: "enhancing_tumor"},
+        "input_size": [128, 128, 128],
+        "num_classes": 4
+    },
+    "wholeBody_ct_segmentation": {
+        "category": "segmentation",
+        "modality": "CT",
+        "body_part": "whole_body",
+        "description": "Whole body CT segmentation (104 structures)",
+        "bundle_name": "wholeBody_ct_segmentation",
+        "labels": {1: "multiple_structures"},
+        "input_size": [96, 96, 96],
+        "num_classes": 105
     },
 }
 
@@ -209,7 +229,7 @@ def load_model_from_bundle(bundle_path: Path, model_name: str, device: torch.dev
         if model_path.suffix == ".ts":
             model = torch.jit.load(str(model_path), map_location=device)
         else:
-            # Create a generic UNet and load weights
+            # Create UNet matching the bundle config (with batch norm)
             model = UNet(
                 spatial_dims=3,
                 in_channels=1,
@@ -217,18 +237,25 @@ def load_model_from_bundle(bundle_path: Path, model_name: str, device: torch.dev
                 channels=(16, 32, 64, 128, 256),
                 strides=(2, 2, 2, 2),
                 num_res_units=2,
+                norm="batch",  # Important: bundle uses batch normalization
             )
             checkpoint = torch.load(str(model_path), map_location=device)
             if isinstance(checkpoint, dict):
                 if "state_dict" in checkpoint:
-                    model.load_state_dict(checkpoint["state_dict"])
+                    state_dict = checkpoint["state_dict"]
                 elif "model" in checkpoint:
-                    model.load_state_dict(checkpoint["model"])
+                    state_dict = checkpoint["model"]
                 else:
-                    # Try loading as-is
-                    model.load_state_dict(checkpoint)
+                    state_dict = checkpoint
             else:
-                model.load_state_dict(checkpoint)
+                state_dict = checkpoint
+
+            # Strip "model." prefix if present (MONAI bundle format)
+            if any(k.startswith("model.") for k in state_dict.keys()):
+                state_dict = {k.replace("model.", "", 1): v for k, v in state_dict.items()}
+                log("Stripped 'model.' prefix from state dict keys")
+
+            model.load_state_dict(state_dict)
 
     model = model.to(device)
     model.eval()
@@ -237,9 +264,11 @@ def load_model_from_bundle(bundle_path: Path, model_name: str, device: torch.dev
     return model
 
 
-def preprocess_image(image_path: str, target_size: List[int] = [96, 96, 96]) -> torch.Tensor:
-    """Preprocess an image for inference."""
+def preprocess_image(image_path: str, model_name: str = None) -> torch.Tensor:
+    """Preprocess an image for inference using model-specific transforms."""
     ext = Path(image_path).suffix.lower()
+    if image_path.endswith('.nii.gz'):
+        ext = '.nii.gz'
 
     # Build preprocessing pipeline
     if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif']:
@@ -248,22 +277,22 @@ def preprocess_image(image_path: str, target_size: List[int] = [96, 96, 96]) -> 
             LoadImage(image_only=True, reader=PILReader()),
             EnsureChannelFirst(),
             ScaleIntensity(),
-            Resize(spatial_size=target_size[:2]),  # Only use 2D size
+            Resize(spatial_size=[96, 96]),
             EnsureType(),
         ])
         image = transforms(image_path)
         # Add a dummy depth dimension for 3D models
-        image = image.unsqueeze(-1).repeat(1, 1, 1, target_size[2])
+        image = image.unsqueeze(-1).repeat(1, 1, 1, 96)
     else:
-        # 3D medical image
+        # 3D medical image - use proper CT preprocessing
+        # Based on MONAI bundle inference.json
         transforms = Compose([
             LoadImage(image_only=True),
             EnsureChannelFirst(),
             Orientation(axcodes="RAS"),
             Spacing(pixdim=(1.5, 1.5, 2.0), mode="bilinear"),
-            ScaleIntensity(minv=0.0, maxv=1.0),
-            CropForeground(allow_smaller=True),
-            Resize(spatial_size=target_size),
+            # CT windowing for spleen/abdomen: [-57, 164] HU -> [0, 1]
+            ScaleIntensityRange(a_min=-57, a_max=164, b_min=0.0, b_max=1.0, clip=True),
             EnsureType(),
         ])
         image = transforms(image_path)
@@ -504,28 +533,25 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
         log(f"Loading model from {bundle_path}...")
         model = load_model_from_bundle(bundle_path, model_name, device)
 
-        # Preprocess the image
-        target_size = model_info.get("input_size", [96, 96, 96])
-        log(f"Preprocessing image to size {target_size}...")
-        image = preprocess_image(image_path, target_size)
+        # Preprocess the image (no resize - use sliding window instead)
+        log(f"Preprocessing image...")
+        image = preprocess_image(image_path, model_name)
 
         # Add batch dimension and move to device
         image = image.unsqueeze(0).to(device)
         log(f"Input tensor shape: {image.shape}")
 
-        # Run inference
-        log("Running model inference...")
+        # Run inference using sliding window (handles any size input)
+        roi_size = model_info.get("input_size", [96, 96, 96])
+        log(f"Running sliding window inference with ROI size {roi_size}...")
         with torch.no_grad():
-            # Use sliding window inference for large images
-            if image.shape[-1] > target_size[-1]:
-                output = sliding_window_inference(
-                    image,
-                    roi_size=target_size,
-                    sw_batch_size=1,
-                    predictor=model
-                )
-            else:
-                output = model(image)
+            output = sliding_window_inference(
+                image,
+                roi_size=roi_size,
+                sw_batch_size=4,
+                predictor=model,
+                overlap=0.5
+            )
 
         log(f"Output tensor shape: {output.shape}")
 

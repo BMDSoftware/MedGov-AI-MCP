@@ -86,7 +86,7 @@ class AgenticAgent:
         self.agent_tools &= current_tools
         self._refresh_agent_components()
 
-    def _get_workflow_state(self, execution_history: List[Dict]) -> Dict:
+    def _get_workflow_state(self, execution_history: List[Dict], metadata: Dict = None) -> Dict:
         """Analyze execution history to determine workflow state"""
         state = {
             "analyze_done": False,
@@ -97,6 +97,8 @@ class AgenticAgent:
             "model_name": None,
             "model_downloaded": False,
             "inference_result": None,
+            "detected_modality": None,
+            "body_part": metadata.get("body_part") if metadata else None,
         }
 
         for event in execution_history:
@@ -108,10 +110,15 @@ class AgenticAgent:
 
             if tool == "monai.analyze_image":
                 state["analyze_done"] = True
-                # Extract image path from result if available
+                # Extract image path and detected modality from result
                 if isinstance(result, dict):
                     state["image_path"] = result.get("path") or result.get("file_path")
-                    print(f"  [Workflow] analyze_image done, path={state['image_path']}")
+                    # Get detected modality from analysis
+                    analysis = result.get("analysis", {})
+                    modalities = analysis.get("detected_modalities", [])
+                    if modalities:
+                        state["detected_modality"] = modalities[0]
+                    print(f"  [Workflow] analyze_image done, path={state['image_path']}, modality={state['detected_modality']}")
 
             elif tool == "monai.list_models":
                 state["list_done"] = True
@@ -155,10 +162,16 @@ class AgenticAgent:
             }
 
         if not state["list_done"]:
-            print("  [Next step] list_models")
+            # Build filter arguments from detected modality and user-provided body_part
+            args = {}
+            if state.get("detected_modality"):
+                args["modality"] = state["detected_modality"]
+            if state.get("body_part"):
+                args["body_part"] = state["body_part"]
+            print(f"  [Next step] list_models with filters: {args}")
             return {
                 "tool_name": "monai.list_models",
-                "arguments": {}
+                "arguments": args
             }
 
         # If we have a model but it's not downloaded yet, download it
@@ -184,7 +197,7 @@ class AgenticAgent:
         print("  [Next step] None - workflow complete")
         return None
 
-    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 8) -> Optional[Dict]:
+    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 8, metadata: Dict = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 
@@ -193,11 +206,14 @@ class AgenticAgent:
             data: Optional data context (e.g., patient data to save)
             imageList: Optional list of images for processing
             max_iterations: Maximum number of tool executions allowed
+            metadata: Optional dict with modality, body_part for filtering models
 
         Returns:
             Final result if successful, None if goal not achieved
         """
         print(f"Starting autonomous task: {goal}")
+        if metadata:
+            print(f"Metadata: modality={metadata.get('modality')}, body_part={metadata.get('body_part')}")
 
         execution_history = []
         iterations = 0
@@ -217,7 +233,7 @@ class AgenticAgent:
             print(f"Iteration {iterations}/{max_iterations}")
             try:
                 if use_guided_workflow and image_path:
-                    workflow_state = self._get_workflow_state(execution_history)
+                    workflow_state = self._get_workflow_state(execution_history, metadata)
                     print(f"Workflow state: analyze={workflow_state['analyze_done']}, list={workflow_state['list_done']}, download={workflow_state['download_done']}, inference={workflow_state['inference_done']}")
 
                     # Check if workflow is complete
@@ -423,24 +439,16 @@ Your decision:"""
                             
                             # Record execution with result details
                             if result:
-                                # Create human-readable summary for agent
-                                result_type = result.get("resourceType", "unknown")
-                                result_summary = f"{result_type}"
-                                if result_type == "Bundle":
-                                    entry_count = len(result.get("entry", []))
-                                    result_summary += f" with {entry_count} entries"
-                                elif result_type == "Patient":
-                                    result_id = result.get("id", "no-id")
-                                    result_summary += f" (id: {result_id})"
-                                
+                                # Create human-readable summary based on tool type
+                                result_summary = self._create_result_summary(tool_name, result)
+
                                 execution_history.append({
                                     "tool": tool_name,
                                     "success": True,
-                                    "result_type": result_type,
                                     "result_summary": result_summary,
                                     "result": result  # Store actual result
                                 })
-                                
+
                                 final_result = result
                                 print(f"Tool succeeded: {result_summary}")
                             else:
@@ -471,6 +479,63 @@ Your decision:"""
         print("Max iterations reached or goal not achieved.")
         return None
     
+    def _create_result_summary(self, tool_name: str, result: Any) -> str:
+        """Create a human-readable summary of tool results"""
+        if not isinstance(result, dict):
+            return "completed"
+
+        # MONAI tools
+        if tool_name == "monai.analyze_image":
+            modality = result.get("analysis", {}).get("detected_modalities", ["unknown"])[0]
+            shape = result.get("shape", [])
+            return f"Image analyzed: {modality}, shape {shape}"
+
+        elif tool_name == "monai.list_models":
+            total = result.get("total", 0)
+            models = result.get("models", [])
+            downloaded = sum(1 for m in models if m.get("downloaded"))
+            return f"Found {total} models ({downloaded} downloaded)"
+
+        elif tool_name == "monai.download_model":
+            status = result.get("status", "unknown")
+            model_name = result.get("model_name", "unknown")
+            return f"Model {model_name}: {status}"
+
+        elif tool_name == "monai.run_inference":
+            status = result.get("status", "unknown")
+            results = result.get("results", {})
+            detected = results.get("detected_structures", [])
+            if detected:
+                names = [s.get("name", "?") for s in detected]
+                return f"Inference {status}: detected {', '.join(names)}"
+            return f"Inference {status}"
+
+        # RadLex tools
+        elif tool_name.startswith("radlex."):
+            if "template" in tool_name.lower():
+                return f"Template operation completed"
+            elif "report" in tool_name.lower():
+                return f"Report generated"
+            return "RadLex operation completed"
+
+        # FHIR tools
+        elif tool_name.startswith("fhir."):
+            resource_type = result.get("resourceType", "unknown")
+            if resource_type == "Bundle":
+                entry_count = len(result.get("entry", []))
+                return f"Bundle with {entry_count} entries"
+            elif resource_type != "unknown":
+                resource_id = result.get("id", "no-id")
+                return f"{resource_type} (id: {resource_id})"
+            return "FHIR operation completed"
+
+        # Generic fallback
+        if result.get("status"):
+            return f"Status: {result['status']}"
+        if result.get("error"):
+            return f"Error: {result['error']}"
+        return "completed"
+
     def _extract_answer_from_results(self, agent_response: str, execution_history: List[Dict], final_result: Any) -> str:
         """Extract meaningful answer from agent response and execution results"""
         # Get the agent's text response (which should contain the answer)

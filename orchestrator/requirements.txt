@@ -15,3 +15,6 @@ requests>=2.31.0
 
 
 google-genai
+
+# MCP core
+mcp

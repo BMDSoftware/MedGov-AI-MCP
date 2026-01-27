@@ -6,14 +6,16 @@ import os
 import tempfile
 import python_multipart
 from typing import AsyncGenerator, Optional
+from dotenv import load_dotenv
+
+# Load env BEFORE importing agenticAgent so LLM_BACKEND is set
+load_dotenv()
+
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from agenticAgent import agent_decision
-
-load_dotenv()
 
 workflow_queue = []
 
@@ -22,6 +24,20 @@ async def lifespan(app: FastAPI):
     # Startup code
     await agent_decision._initialize_components()
     yield
+    # Shutdown code - clean up files and close MCP sessions
+    uploaded_files.clear()
+    for temp_path in temp_file_paths.values():
+        try:
+            os.unlink(temp_path)
+        except:
+            pass
+    temp_file_paths.clear()
+
+    # Close MCP sessions properly
+    try:
+        await agent_decision.close()
+    except Exception as e:
+        print(f"Error closing agent: {e}")
 
 app = FastAPI(title="Agentic Health Assistant API", lifespan=lifespan)
 
@@ -64,6 +80,14 @@ async def set_metadata(data: dict = Body(...)):
 async def process_workflow(data: dict = Body(default=None)):
     global uploaded_files, image_metadata
 
+    # Check for action type
+    action = data.get("action") if data else None
+
+    # Handle report generation separately
+    if action == "generate_report":
+        analysis = data.get("analysis", {})
+        return await generate_report(analysis)
+
     # Get modality from request body if provided
     modality = None
     body_part = None
@@ -102,16 +126,15 @@ async def process_workflow(data: dict = Body(default=None)):
             image_data.append((temp_file.name, contents))
             print(f"Saved {filename} to {temp_file.name}")
         
-        result = await agent_decision.execute_task(query, imageList=image_data)
-        
-        # Clean up temporary files after agent execution
-        for temp_path in temp_file_paths.values():
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
-        temp_file_paths.clear()
-        uploaded_files.clear()  # Clear uploaded files after processing
+        # Pass metadata for model filtering (lowercase body_part to match registry)
+        metadata = {
+            "modality": modality,
+            "body_part": body_part.lower() if body_part else None
+        }
+        result = await agent_decision.execute_task(query, imageList=image_data, metadata=metadata)
+
+        # Keep files in memory for subsequent workflows (e.g., report generation)
+        # Files will be cleared on backend shutdown or manual clear
 
         return {"result": result}
         
@@ -133,10 +156,21 @@ async def process_workflow(data: dict = Body(default=None)):
 
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
+    global uploaded_files, temp_file_paths
     print(f"Received file: {file.filename}")
     try:
+        # Clear previous files when uploading a new one
+        for temp_path in temp_file_paths.values():
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+        temp_file_paths.clear()
+        uploaded_files.clear()
+
         contents = await file.read()
         uploaded_files.append((file.filename, contents))
+        print(f"Uploaded files list now has {len(uploaded_files)} file(s)")
         return {"status": "success", "filename": file.filename, "size": len(contents)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -161,6 +195,145 @@ async def enable_tool(data: dict = Body(...)):
     agent_decision.enable_tool(tool_name)
     return {"status": "enabled", "tool": tool_name}
 
+async def generate_report(analysis: dict):
+    """Generate a clinical report from inference results using RadLex tools directly"""
+    print(f"Generating report from analysis: {analysis}")
+
+    # Extract inference results
+    inference_result = analysis.get("inference_result", {})
+    results = inference_result.get("results", {})
+    detected_structures = results.get("detected_structures", [])
+    model_used = inference_result.get("model_used", "unknown")
+    model_type = inference_result.get("model_type", "segmentation")
+    labels = inference_result.get("labels", {})
+
+    try:
+        # Step 1: List templates to find the right one
+        templates_result = await agent_decision.tool_registry.execute_tool(
+            "radlex.list_templates",
+            {"modality": "CT", "body_part": "abdomen"}
+        )
+        print(f"Templates found: {templates_result}")
+
+        # Pick the first matching template or default to ct_abdomen_general
+        template_id = "ct_abdomen_general"
+        if templates_result and templates_result.get("templates"):
+            template_id = templates_result["templates"][0]["id"]
+
+        # Step 2: Build findings from AI analysis
+        # Mark all organs as not analyzed by default
+        findings = {
+            "liver_findings": "Not analyzed.",
+            "gallbladder_findings": "Not analyzed.",
+            "spleen_findings": "Not analyzed.",
+            "pancreas_findings": "Not analyzed.",
+            "adrenal_findings": "Not analyzed.",
+            "kidney_findings": "Not analyzed.",
+            "bladder_findings": "Not analyzed.",
+            "bowel_findings": "Not analyzed.",
+            "lymph_node_findings": "Not analyzed.",
+            "vascular_findings": "Not analyzed.",
+            "bone_findings": "Not analyzed.",
+            "other_findings": "None.",
+        }
+
+        # Fill in actual AI findings
+        analyzed_structures = []
+        for struct in detected_structures:
+            name = struct.get("name", "").lower()
+            voxels = struct.get("voxel_count", 0)
+            vol_pct = struct.get("volume_percentage", 0)
+            analyzed_structures.append(struct.get("name", "unknown"))
+
+            if "spleen" in name:
+                findings["spleen_findings"] = f"Segmented. Volume: {voxels:,} voxels ({vol_pct}% of image)."
+            elif "liver" in name:
+                findings["liver_findings"] = f"Segmented. Volume: {voxels:,} voxels ({vol_pct}% of image)."
+            elif "kidney" in name:
+                findings["kidney_findings"] = f"Segmented. Volume: {voxels:,} voxels ({vol_pct}% of image)."
+            elif "pancreas" in name:
+                findings["pancreas_findings"] = f"Segmented. Volume: {voxels:,} voxels ({vol_pct}% of image)."
+            elif "tumor" in name:
+                findings["other_findings"] = f"TUMOR DETECTED. Volume: {voxels:,} voxels ({vol_pct}% of image). Urgent review required."
+            elif "nodule" in name:
+                findings["other_findings"] = f"NODULE DETECTED. Volume: {voxels:,} voxels. Further evaluation recommended."
+
+        # Add technique info
+        findings["clinical_history"] = "AI-assisted image analysis"
+        findings["comparison"] = "None"
+        findings["contrast"] = "as provided in source image"
+
+        # Build impression
+        if detected_structures:
+            findings["impression"] = f"""1. AI segmentation complete using {model_used}.
+2. Analyzed: {', '.join(analyzed_structures)}.
+3. Other structures not evaluated.
+4. Radiologist review required."""
+        else:
+            findings["impression"] = """1. No structures detected by AI.
+2. Radiologist review required."""
+
+        # Step 3: Generate the report
+        report_result = await agent_decision.tool_registry.execute_tool(
+            "radlex.generate_report",
+            {
+                "template_id": template_id,
+                "findings": findings,
+                "patient_info": {"name": "Anonymous", "mrn": "N/A"}
+            }
+        )
+        print(f"Report generated: {report_result}")
+
+        if report_result and report_result.get("report_text"):
+            return {
+                "result": {
+                    "answer": report_result["report_text"],
+                    "report": report_result["report_text"],
+                    "template_used": template_id,
+                    "success": True
+                }
+            }
+        else:
+            raise Exception("Report generation returned no text")
+
+    except Exception as e:
+        print(f"Report generation error: {e}")
+        # Fallback: generate a simple report
+        findings_text = "\n".join([
+            f"- {s.get('name', 'unknown')}: {s.get('voxel_count', 0)} voxels ({s.get('volume_percentage', 0)}%)"
+            for s in detected_structures
+        ]) or "No structures detected"
+
+        report = f"""
+============================================================
+RADIOLOGY REPORT - CT ABDOMEN (AI-GENERATED)
+============================================================
+Exam Date: {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}
+------------------------------------------------------------
+
+CLINICAL HISTORY:
+AI-assisted medical image analysis
+
+TECHNIQUE:
+{model_type.upper()} analysis using {model_used} model.
+Processing performed on CUDA GPU.
+
+FINDINGS:
+{findings_text}
+
+IMPRESSION:
+1. Automated {model_type} analysis completed.
+2. Results should be reviewed and validated by a qualified radiologist.
+3. This AI-generated report is for research/demonstration purposes only.
+
+------------------------------------------------------------
+Report generated: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+AI Assistant: HealthMCP
+============================================================
+"""
+        return {"result": {"answer": report, "report": report, "fallback": True}}
+
+
 @app.post("/api/disable-tool")
 async def disable_tool(data: dict = Body(...)):
     tool_name = data.get("tool_name")
@@ -174,6 +347,20 @@ async def disable_tool(data: dict = Body(...)):
 async def refresh_config():
     await agent_decision.refresh_available_tools()
     return {"status": "refreshed", "available_tools": list(agent_decision.available_tools.keys())}
+
+
+@app.post("/api/clear-files")
+async def clear_files():
+    """Manually clear uploaded files"""
+    global uploaded_files, temp_file_paths
+    for temp_path in temp_file_paths.values():
+        try:
+            os.unlink(temp_path)
+        except:
+            pass
+    temp_file_paths.clear()
+    uploaded_files.clear()
+    return {"status": "cleared"}
 
 
 @app.get("/api/health")

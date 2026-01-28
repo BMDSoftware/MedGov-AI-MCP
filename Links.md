@@ -7,6 +7,7 @@
 - https://medmnist.com/
 ### RADLEX
 - https://radreport.org                                                    
-- https://www.rsna.org/artificial-intelligence/radiology-reimagined-ai
+- https://www.rsna.org/artificial-intelligence/radiology-reimagined-
+- https://radreport.org/home/50890/2023-05-24%2013:21:01
 ### MCP APPS
 - https://modelcontextprotocol.io/docs/extensions/apps

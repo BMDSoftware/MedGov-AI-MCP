@@ -8,3 +8,5 @@
 ### RADLEX
 - https://radreport.org                                                    
 - https://www.rsna.org/artificial-intelligence/radiology-reimagined-ai
+### MCP APPS
+- https://modelcontextprotocol.io/docs/extensions/apps

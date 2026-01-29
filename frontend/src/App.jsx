@@ -234,13 +234,15 @@ function App() {
               <form className="chatbot-input-row" onSubmit={async e => {
                 e.preventDefault();
                 if (!userQuery.trim()) return;
-                addMessage({ type: 'user', content: userQuery });
+                const currentQuery = userQuery;
+                setUserQuery(""); // Limpa imediatamente
+                addMessage({ type: 'user', content: currentQuery });
                 setIsProcessing(true);
                 try {
                   const response = await fetch(getApiUrl('/api/process-query'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain' },
-                    body: userQuery
+                    body: currentQuery
                   });
                   const data = await response.json();
                   if (data.result?.error) {
@@ -252,7 +254,6 @@ function App() {
                   addMessage({ type: 'bot', content: `Error: ${err.message}` });
                 } finally {
                   setIsProcessing(false);
-                  setUserQuery("");
                 }
               }}>
                 {/* Always render preview above the input row */}

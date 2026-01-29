@@ -21,4 +21,7 @@ dependencies = [
     "monai",
     "huggingface-hub",
     "torchvision",
+    "nibabel",
+    "pydicom",
+    "itk",
 ]

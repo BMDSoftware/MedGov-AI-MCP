@@ -151,6 +151,41 @@ async def process_workflow(data: dict = Body(default=None)):
     
 
     
+@app.post("/api/process-query")
+async def process_query(query: str = Body(..., media_type="text/plain")):
+    print(f"Processing ad-hoc query: {query}")
+    try:
+        if not uploaded_files:
+            result = await agent_decision.execute_task(query, )
+        else:
+            # Use existing uploaded files
+            image_data = []
+            try:
+                for filename, contents in uploaded_files:
+                    # Create temporary file with original extension
+                    # Handle double extensions like .nii.gz
+                    if filename.endswith('.nii.gz'):
+                        file_extension = '.nii.gz'
+                    else:
+                        file_extension = os.path.splitext(filename)[1] or '.tmp'
+                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_extension)
+                    temp_file.write(contents)
+                    temp_file.close()
+                    temp_file_paths[filename] = temp_file.name
+                    
+                    # Add tuple of (temp_filepath, content) to the list
+                    image_data.append((temp_file.name, contents))
+                    print(f"Saved {filename} to {temp_file.name}")
+                
+                
+                result = await agent_decision.execute_task(query, imageList=image_data)
+            except Exception as e:
+                print(f"Error preparing files for query: {e}")
+                return {"result": {"error": str(e)}}
+        return {"result": result}
+    except Exception as e:
+        print(f"Error processing query: {e}")
+        return {"result": {"error": str(e)}}
 
 
 
@@ -174,6 +209,24 @@ async def upload_file(file: UploadFile = File(...)):
         return {"status": "success", "filename": file.filename, "size": len(contents)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+@app.delete("/api/upload")
+async def remove_file(filename: str):
+    global uploaded_files, temp_file_paths
+    print(f"Removing file: {filename}")
+    for i, (fname, _) in enumerate(uploaded_files):
+        if fname == filename:
+            del uploaded_files[i]
+            # Remove corresponding temp file if exists
+            if filename in temp_file_paths:
+                try:
+                    os.unlink(temp_file_paths[filename])
+                except:
+                    pass
+                del temp_file_paths[filename]
+            return {"status": "success", "message": f"Removed {filename}"}
+    raise HTTPException(status_code=404, detail="File not found")
 
 
 
@@ -194,6 +247,21 @@ async def enable_tool(data: dict = Body(...)):
         return {"error": "tool_name required"}
     agent_decision.enable_tool(tool_name)
     return {"status": "enabled", "tool": tool_name}
+
+@app.post("/api/disable-tool")
+async def disable_tool(data: dict = Body(...)):
+    tool_name = data.get("tool_name")
+    if not tool_name:
+        return {"error": "tool_name required"}
+    agent_decision.disable_tool(tool_name)
+    return {"status": "disabled", "tool": tool_name}
+
+
+@app.post("/api/refresh-config")
+async def refresh_config():
+    await agent_decision.refresh_available_tools()
+    return {"status": "refreshed", "available_tools": list(agent_decision.available_tools.keys())}
+
 
 async def generate_report(analysis: dict):
     """Generate a clinical report from inference results using RadLex tools directly"""
@@ -333,20 +401,6 @@ AI Assistant: HealthMCP
 """
         return {"result": {"answer": report, "report": report, "fallback": True}}
 
-
-@app.post("/api/disable-tool")
-async def disable_tool(data: dict = Body(...)):
-    tool_name = data.get("tool_name")
-    if not tool_name:
-        return {"error": "tool_name required"}
-    agent_decision.disable_tool(tool_name)
-    return {"status": "disabled", "tool": tool_name}
-
-
-@app.post("/api/refresh-config")
-async def refresh_config():
-    await agent_decision.refresh_available_tools()
-    return {"status": "refreshed", "available_tools": list(agent_decision.available_tools.keys())}
 
 
 @app.post("/api/clear-files")

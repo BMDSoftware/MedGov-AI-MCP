@@ -263,6 +263,33 @@ async def refresh_config():
     return {"status": "refreshed", "available_tools": list(agent_decision.available_tools.keys())}
 
 
+@app.get("/api/pending-tool")
+async def get_pending_tool():
+    """Get the current pending tool call awaiting confirmation"""
+    pending = agent_decision.get_pending_tool()
+    if pending:
+        return {
+            "pending": True,
+            "tool_name": pending["tool_name"],
+            "arguments": pending["arguments"]
+        }
+    return {"pending": False}
+
+
+@app.post("/api/confirm-tool")
+async def confirm_tool():
+    """Confirm and execute the pending tool"""
+    result = await agent_decision.confirm_tool_execution()
+    return {"result": result}
+
+
+@app.post("/api/deny-tool")
+async def deny_tool():
+    """Deny/cancel the pending tool execution"""
+    result = agent_decision.deny_tool_execution()
+    return {"result": result}
+
+
 async def generate_report(analysis: dict):
     """Generate a clinical report from inference results using RadLex tools directly"""
     print(f"Generating report from analysis: {analysis}")

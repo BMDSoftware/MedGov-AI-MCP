@@ -10,14 +10,15 @@ from tool_registry import ToolRegistry
 # LLM Backend selection: "ollama" (local) or "gemini" (API)
 LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
 
-# Workflow state machine for medical imaging analysis
-# This enforces the correct sequence of tool calls
-WORKFLOW_STEPS = [
-    {"name": "analyze", "tool": "monai.analyze_image", "required": True},
-    {"name": "list", "tool": "monai.list_models", "required": True},
-    {"name": "download", "tool": "monai.download_model", "required": False},  # Only if not downloaded
-    {"name": "inference", "tool": "monai.run_inference", "required": True},
-]
+# NOTE: Guided workflow removed - now using true agentic approach
+# The LLM (Gemini or Ollama) decides which tools to call based on context
+# Keeping this comment for future reference if deterministic mode is needed
+# WORKFLOW_STEPS = [
+#     {"name": "analyze", "tool": "monai.analyze_image", "required": True},
+#     {"name": "list", "tool": "monai.list_models", "required": True},
+#     {"name": "download", "tool": "monai.download_model", "required": False},
+#     {"name": "inference", "tool": "monai.run_inference", "required": True},
+# ]
 
 
 class AgenticAgent:
@@ -30,6 +31,9 @@ class AgenticAgent:
         self.callback = callback  # Callback function for real-time event tracking
         self.llm_client = None
         self.workflow_state = {}  # Track workflow progress
+        self.require_confirmation = True  # Require user confirmation before tool execution
+        self.pending_tool_call = None  # Stores tool call waiting for confirmation
+        self.pending_task_context = None  # Stores context for resuming after confirmation
         # Use async init pattern for tool discovery
         # You must call await self._initialize_components() after instantiation
 
@@ -86,118 +90,145 @@ class AgenticAgent:
         self.agent_tools &= current_tools
         self._refresh_agent_components()
 
-    def _get_workflow_state(self, execution_history: List[Dict], metadata: Dict = None) -> Dict:
-        """Analyze execution history to determine workflow state"""
-        state = {
-            "analyze_done": False,
-            "list_done": False,
-            "download_done": False,
-            "inference_done": False,
-            "image_path": None,
-            "model_name": None,
-            "model_downloaded": False,
-            "inference_result": None,
-            "detected_modality": None,
-            "body_part": metadata.get("body_part") if metadata else None,
+    async def confirm_tool_execution(self) -> Optional[Dict]:
+        """Execute the pending tool after user confirmation"""
+        if not self.pending_tool_call:
+            return {"error": "No pending tool call to confirm"}
+
+        pending = self.pending_tool_call
+        self.pending_tool_call = None
+
+        # Execute the tool
+        tool_name = pending["tool_name"]
+        arguments = pending["arguments"]
+        print(f"Confirmed - Executing: {tool_name}")
+
+        result = await self.tool_registry.execute_tool(tool_name, arguments, logs=True)
+
+        # Check if result contains an error
+        is_error = False
+        if isinstance(result, dict):
+            is_error = result.get("is_error") or result.get("error")
+
+        execution_history = pending["execution_history"]
+
+        if result and not is_error:
+            result_summary = self._create_result_summary(tool_name, result)
+            execution_history.append({
+                "tool": tool_name,
+                "success": True,
+                "result_summary": result_summary,
+                "result": result
+            })
+            print(f"Tool succeeded: {result_summary}")
+        else:
+            error_msg = result.get("error") if result else "No result"
+            execution_history.append({
+                "tool": tool_name,
+                "success": False,
+                "error": error_msg
+            })
+            print(f"Tool failed: {error_msg}")
+
+        # Continue the task from where we left off
+        return await self.execute_task(
+            goal=pending["goal"],
+            data=pending["data"],
+            imageList=pending["imageList"],
+            max_iterations=pending["max_iterations"] - pending["iterations_used"],
+            metadata=pending["metadata"],
+            _resume_history=execution_history
+        )
+
+    def deny_tool_execution(self) -> Dict:
+        """Cancel the pending tool call"""
+        if not self.pending_tool_call:
+            return {"error": "No pending tool call to deny"}
+
+        tool_name = self.pending_tool_call["tool_name"]
+        self.pending_tool_call = None
+        print(f"Denied - Tool not executed: {tool_name}")
+
+        return {
+            "type": "agent_response",
+            "answer": f"Tool '{tool_name}' was not executed. How would you like to proceed?",
+            "tools_used": [],
+            "success": False
         }
 
-        for event in execution_history:
-            if not event.get("success"):
-                continue
+    def get_pending_tool(self) -> Optional[Dict]:
+        """Get the pending tool call details"""
+        return self.pending_tool_call
 
-            tool = event.get("tool", "")
-            result = event.get("result", {})
+    # NOTE: Guided workflow methods commented out - using true agentic approach now
+    # Keeping for future reference if deterministic mode is needed
+    #
+    # def _get_workflow_state(self, execution_history: List[Dict], metadata: Dict = None) -> Dict:
+    #     """Analyze execution history to determine workflow state"""
+    #     state = {
+    #         "analyze_done": False,
+    #         "list_done": False,
+    #         "download_done": False,
+    #         "inference_done": False,
+    #         "image_path": None,
+    #         "model_name": None,
+    #         "model_downloaded": False,
+    #         "inference_result": None,
+    #         "detected_modality": None,
+    #         "body_part": metadata.get("body_part") if metadata else None,
+    #     }
+    #     for event in execution_history:
+    #         if not event.get("success"):
+    #             continue
+    #         tool = event.get("tool", "")
+    #         result = event.get("result", {})
+    #         if tool == "monai.analyze_image":
+    #             state["analyze_done"] = True
+    #             if isinstance(result, dict):
+    #                 state["image_path"] = result.get("path") or result.get("file_path")
+    #                 analysis = result.get("analysis", {})
+    #                 modalities = analysis.get("detected_modalities", [])
+    #                 if modalities:
+    #                     state["detected_modality"] = modalities[0]
+    #         elif tool == "monai.list_models":
+    #             state["list_done"] = True
+    #             if isinstance(result, dict):
+    #                 models = result.get("models", [])
+    #                 for model in models:
+    #                     if model.get("downloaded"):
+    #                         state["model_downloaded"] = True
+    #                         state["model_name"] = model.get("name")
+    #                         break
+    #                 if not state["model_name"] and models:
+    #                     state["model_name"] = models[0].get("name")
+    #         elif tool == "monai.download_model":
+    #             state["download_done"] = True
+    #             state["model_downloaded"] = True
+    #             if isinstance(result, dict) and result.get("model_name"):
+    #                 state["model_name"] = result.get("model_name")
+    #         elif tool == "monai.run_inference":
+    #             state["inference_done"] = True
+    #             state["inference_result"] = result
+    #     return state
+    #
+    # def _get_next_workflow_step(self, state: Dict, image_path: str) -> Optional[Dict]:
+    #     """Determine the next tool to call based on workflow state"""
+    #     if not state["analyze_done"]:
+    #         return {"tool_name": "monai.analyze_image", "arguments": {"path": image_path}}
+    #     if not state["list_done"]:
+    #         args = {}
+    #         if state.get("detected_modality"):
+    #             args["modality"] = state["detected_modality"]
+    #         if state.get("body_part"):
+    #             args["body_part"] = state["body_part"]
+    #         return {"tool_name": "monai.list_models", "arguments": args}
+    #     if state["model_name"] and not state["model_downloaded"]:
+    #         return {"tool_name": "monai.download_model", "arguments": {"model_name": state["model_name"]}}
+    #     if not state["inference_done"] and state["model_name"] and state["model_downloaded"]:
+    #         return {"tool_name": "monai.run_inference", "arguments": {"image_path": state["image_path"] or image_path, "model_name": state["model_name"]}}
+    #     return None
 
-            if tool == "monai.analyze_image":
-                state["analyze_done"] = True
-                # Extract image path and detected modality from result
-                if isinstance(result, dict):
-                    state["image_path"] = result.get("path") or result.get("file_path")
-                    # Get detected modality from analysis
-                    analysis = result.get("analysis", {})
-                    modalities = analysis.get("detected_modalities", [])
-                    if modalities:
-                        state["detected_modality"] = modalities[0]
-                    print(f"  [Workflow] analyze_image done, path={state['image_path']}, modality={state['detected_modality']}")
-
-            elif tool == "monai.list_models":
-                state["list_done"] = True
-                # Check if any model is downloaded
-                if isinstance(result, dict):
-                    models = result.get("models", [])
-                    print(f"  [Workflow] list_models found {len(models)} models")
-                    for model in models:
-                        if model.get("downloaded"):
-                            state["model_downloaded"] = True
-                            state["model_name"] = model.get("name")
-                            print(f"  [Workflow] Found downloaded model: {state['model_name']}")
-                            break
-                    # If no downloaded model, pick the first one
-                    if not state["model_name"] and models:
-                        state["model_name"] = models[0].get("name")
-                        print(f"  [Workflow] Selected model to download: {state['model_name']}")
-
-            elif tool == "monai.download_model":
-                state["download_done"] = True
-                state["model_downloaded"] = True
-                # Extract model name from result
-                if isinstance(result, dict) and result.get("model_name"):
-                    state["model_name"] = result.get("model_name")
-                print(f"  [Workflow] download_model done, model={state['model_name']}")
-
-            elif tool == "monai.run_inference":
-                state["inference_done"] = True
-                state["inference_result"] = result
-                print(f"  [Workflow] run_inference done")
-
-        return state
-
-    def _get_next_workflow_step(self, state: Dict, image_path: str) -> Optional[Dict]:
-        """Determine the next tool to call based on workflow state"""
-        if not state["analyze_done"]:
-            print("  [Next step] analyze_image")
-            return {
-                "tool_name": "monai.analyze_image",
-                "arguments": {"path": image_path}
-            }
-
-        if not state["list_done"]:
-            # Build filter arguments from detected modality and user-provided body_part
-            args = {}
-            if state.get("detected_modality"):
-                args["modality"] = state["detected_modality"]
-            if state.get("body_part"):
-                args["body_part"] = state["body_part"]
-            print(f"  [Next step] list_models with filters: {args}")
-            return {
-                "tool_name": "monai.list_models",
-                "arguments": args
-            }
-
-        # If we have a model but it's not downloaded yet, download it
-        if state["model_name"] and not state["model_downloaded"]:
-            print(f"  [Next step] download_model ({state['model_name']})")
-            return {
-                "tool_name": "monai.download_model",
-                "arguments": {"model_name": state["model_name"]}
-            }
-
-        # Run inference if we have a downloaded model
-        if not state["inference_done"] and state["model_name"] and state["model_downloaded"]:
-            print(f"  [Next step] run_inference with model {state['model_name']}")
-            return {
-                "tool_name": "monai.run_inference",
-                "arguments": {
-                    "image_path": state["image_path"] or image_path,
-                    "model_name": state["model_name"]
-                }
-            }
-
-        # Workflow complete
-        print("  [Next step] None - workflow complete")
-        return None
-
-    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 8, metadata: Dict = None) -> Optional[Dict]:
+    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 8, metadata: Dict = None, _resume_history: List = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 
@@ -215,7 +246,7 @@ class AgenticAgent:
         if metadata:
             print(f"Metadata: modality={metadata.get('modality')}, body_part={metadata.get('body_part')}")
 
-        execution_history = []
+        execution_history = _resume_history if _resume_history else []
         iterations = 0
         final_result = None
 
@@ -225,94 +256,13 @@ class AgenticAgent:
             image_path = imageList[0][0]  # First image's temp file path
             print(f"Image path for workflow: {image_path}")
 
-        # Use guided workflow for local LLMs (Ollama)
-        use_guided_workflow = LLM_BACKEND.lower() == "ollama"
+        # Both Ollama and Gemini now use true agentic approach
+        # The LLM decides which tools to call based on context
 
         while iterations < max_iterations:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
             try:
-                if use_guided_workflow and image_path:
-                    workflow_state = self._get_workflow_state(execution_history, metadata)
-                    print(f"Workflow state: analyze={workflow_state['analyze_done']}, list={workflow_state['list_done']}, download={workflow_state['download_done']}, inference={workflow_state['inference_done']}")
-
-                    # Check if workflow is complete
-                    if workflow_state["inference_done"]:
-                        print("Workflow complete! Inference has been run.")
-                        tools_used = [event['tool'] for event in execution_history if event['success']]
-
-                        # Format the inference result
-                        inference_result = workflow_state.get("inference_result", {})
-                        answer = "GOAL_ACHIEVED\n\n**Medical Image Analysis Complete**\n"
-
-                        if isinstance(inference_result, dict):
-                            # Add model info
-                            if inference_result.get("model_used"):
-                                answer += f"\n**Model:** {inference_result['model_used']}\n"
-                            if inference_result.get("model_type"):
-                                answer += f"**Analysis Type:** {inference_result['model_type']}\n"
-                            if inference_result.get("device_used"):
-                                answer += f"**Device:** {inference_result['device_used']}\n"
-
-                            # Add detection/segmentation results
-                            results = inference_result.get("results", {})
-                            if results.get("detected_structures"):
-                                answer += "\n**Detected Structures:**\n"
-                                for struct in results["detected_structures"]:
-                                    name = struct.get("name", "Unknown")
-                                    vol_pct = struct.get("volume_percentage", "N/A")
-                                    voxels = struct.get("voxel_count", "N/A")
-                                    answer += f"  - {name}: {vol_pct}% of volume ({voxels} voxels)\n"
-
-                            if results.get("total_foreground_voxels"):
-                                answer += f"\n**Total foreground:** {results['total_foreground_voxels']} voxels\n"
-
-                            # Add status
-                            if inference_result.get("status") == "success":
-                                answer += "\nInference completed successfully.\n"
-
-                        return {
-                            "type": "agent_response",
-                            "answer": answer,
-                            "tools_used": tools_used,
-                            "execution_history": execution_history,
-                            "inference_result": inference_result,
-                            "success": True
-                        }
-
-                    # Get next step from workflow state machine
-                    next_step = self._get_next_workflow_step(workflow_state, image_path)
-
-                    if next_step:
-                        print(f"Guided workflow: Next step is {next_step['tool_name']}")
-                        print(f"  Arguments: {next_step['arguments']}")
-                        # FIX: Await the async execute_tool call
-                        result = await self.tool_registry.execute_tool(next_step["tool_name"], next_step["arguments"], logs=True)
-                        if result:
-                            if isinstance(result, dict) and result.get("error"):
-                                error_msg = result.get("error")
-                                print(f"Tool returned error: {error_msg}")
-                                execution_history.append({
-                                    "tool": next_step["tool_name"],
-                                    "success": False,
-                                    "error": error_msg,
-                                    "result": result
-                                })
-                            else:
-                                execution_history.append({
-                                    "tool": next_step["tool_name"],
-                                    "success": True,
-                                    "result": result
-                                })
-                        else:
-                            execution_history.append({
-                                "tool": next_step["tool_name"],
-                                "success": False,
-                                "error": "No result returned",
-                                "result": None
-                            })
-                        continue  # Move to next iteration
-
                 # Build context with execution history including MCP responses
                 history_text = ""
                 if execution_history:
@@ -340,14 +290,14 @@ class AgenticAgent:
                 if data:
                     data_context = f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)}" if len(json.dumps(data)) > 500 else f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)}"
                 
-                image_context = ""
+                image_context = "\n\nIMAGES AVAILABLE: None. User has not uploaded any images."
                 images_for_llm = None  # Only pass 2D images to LLM (if supported)
 
                 if imageList:
                     # Handle imageList as (temp_filepath, content) tuples
                     if isinstance(imageList, list) and imageList:
                         temp_files = [temp_filepath for temp_filepath, _ in imageList]
-                        image_context = f"\n\nIMAGES AVAILABLE:\nImage file paths: {', '.join(temp_files)}"
+                        image_context = f"\n\nIMAGES AVAILABLE: Yes\nUse these file paths: {', '.join(temp_files)}"
 
                         # Only pass small 2D images to LLM, skip large 3D medical files
                         images_for_llm = []
@@ -418,7 +368,15 @@ Your decision:"""
                             has_function_call = True
                             tool_name = part.function_call.name
                             arguments = dict(part.function_call.args)
-                            
+
+                            # Resolve tool name if missing prefix (e.g., "get_capabilities" -> "fhir.get_capabilities")
+                            if tool_name not in self.available_tools:
+                                for full_name in self.available_tools.keys():
+                                    if full_name.endswith(f".{tool_name}"):
+                                        print(f"Resolved tool name: {tool_name} -> {full_name}")
+                                        tool_name = full_name
+                                        break
+
                             # Check if agent is repeating a failed tool
                             if execution_history:
                                 last_event = execution_history[-1]
@@ -430,15 +388,41 @@ Your decision:"""
                                         "error": f"Repetition prevented: Tool '{tool_name}' already failed. Try a different tool."
                                     })
                                     continue
-                            
+
+                            # Check if confirmation is required
+                            if self.require_confirmation:
+                                print(f"Tool confirmation required: {tool_name}")
+                                self.pending_tool_call = {
+                                    "tool_name": tool_name,
+                                    "arguments": arguments,
+                                    "goal": goal,
+                                    "execution_history": execution_history,
+                                    "imageList": imageList,
+                                    "data": data,
+                                    "metadata": metadata,
+                                    "iterations_used": iterations,
+                                    "max_iterations": max_iterations
+                                }
+                                return {
+                                    "type": "confirmation_required",
+                                    "tool_name": tool_name,
+                                    "arguments": arguments,
+                                    "message": f"About to execute: {tool_name}",
+                                    "execution_history": execution_history
+                                }
+
                             # Execute the tool
                             print(f"Executing: {tool_name}")
-                            
-                            
+
                             result = await self.tool_registry.execute_tool(tool_name, arguments, logs=True)
-                            
+
+                            # Check if result contains an error
+                            is_error = False
+                            if isinstance(result, dict):
+                                is_error = result.get("is_error") or result.get("error") or "error" in str(result.get("text", "")).lower()
+
                             # Record execution with result details
-                            if result:
+                            if result and not is_error:
                                 # Create human-readable summary based on tool type
                                 result_summary = self._create_result_summary(tool_name, result)
 
@@ -451,6 +435,15 @@ Your decision:"""
 
                                 final_result = result
                                 print(f"Tool succeeded: {result_summary}")
+                            elif result and is_error:
+                                error_msg = result.get("error") or result.get("text") or "Unknown error"
+                                execution_history.append({
+                                    "tool": tool_name,
+                                    "success": False,
+                                    "error": error_msg,
+                                    "result": result
+                                })
+                                print(f"Tool failed: {error_msg}")
                             else:
                                 execution_history.append({
                                     "tool": tool_name,
@@ -459,14 +452,39 @@ Your decision:"""
                                 })
                                 print(f"Tool execution failed")
                 
-                # If agent didn't call a tool or declare success, it's confused
-                if not has_function_call and not (has_text and "GOAL" in response.text.upper()):
-                    print(f"Agent didn't call a tool or declare success")
-                    execution_history.append({
-                        "tool": "none",
-                        "success": False,
-                        "error": "Agent did not select a tool or declare success"
-                    })
+                # If agent responded with text but no tool call
+                if has_text and not has_function_call:
+                    text_response = response.text.strip()
+                    # Check if it's a GOAL_ACHIEVED response
+                    if "GOAL_ACHIEVED" in text_response.upper() or "GOAL ACHIEVED" in text_response.upper():
+                        pass  # Already handled above
+                    # Check if this is a valid conversational response (no successful tools, or no tools at all)
+                    elif not execution_history or all(not e.get('success') for e in execution_history):
+                        # No successful tool calls - accept text response if it's substantial
+                        if len(text_response) > 20:  # More than a short error
+                            print(f"Agent responded with text (no tools needed for this query)")
+                            return {
+                                "type": "agent_response",
+                                "answer": text_response,
+                                "tools_used": [],
+                                "execution_history": execution_history,
+                                "success": True
+                            }
+                        else:
+                            print(f"Agent response too short, continuing...")
+                            execution_history.append({
+                                "tool": "none",
+                                "success": False,
+                                "error": "Agent response was not actionable"
+                            })
+                    else:
+                        # Agent has successful history but didn't declare GOAL_ACHIEVED
+                        print(f"Agent didn't declare goal achieved despite successful tools")
+                        execution_history.append({
+                            "tool": "none",
+                            "success": False,
+                            "error": "Agent did not declare GOAL_ACHIEVED"
+                        })
                     
             except Exception as e:
                 print(f"Error in agentic workflow: {type(e).__name__}: {e}")
@@ -538,27 +556,55 @@ Your decision:"""
 
     def _extract_answer_from_results(self, agent_response: str, execution_history: List[Dict], final_result: Any) -> str:
         """Extract meaningful answer from agent response and execution results"""
-        # Get the agent's text response (which should contain the answer)
         agent_text = agent_response.strip()
-        
-        # If the response contains GOAL_ACHIEVED, return the entire response
-        if "GOAL_ACHIEVED" in agent_text.upper() or "GOAL ACHIEVED" in agent_text.upper():
-            return agent_text
-        
-        # Fallback: try to extract meaningful information from the last successful result
-        if execution_history:
-            for event in reversed(execution_history):
-                if event['success'] and event.get('result'):
-                    result = event['result']
-                    
-                    # For any FHIR resource, return basic info
-                    if isinstance(result, dict) and result.get('resourceType'):
-                        resource_type = result.get('resourceType')
-                        resource_id = result.get('id', 'unknown')
-                        return f"{resource_type} resource successfully processed with ID: {resource_id}"
-        
-        # Last fallback: return a generic success message
-        return "Goal achieved successfully"
+
+        # Build response with tool results
+        response_parts = []
+
+        # Add agent's text if it's more than just GOAL_ACHIEVED
+        clean_text = agent_text.replace("GOAL_ACHIEVED", "").replace("GOAL ACHIEVED", "").strip()
+        if clean_text and len(clean_text) > 20:
+            response_parts.append(clean_text)
+
+        # Add results from successful tool executions
+        for event in execution_history:
+            if event.get('success') and event.get('result'):
+                tool_name = event.get('tool', 'unknown')
+                result = event['result']
+
+                # Format result based on tool type
+                if tool_name == "monai.list_models" and isinstance(result, dict):
+                    models = result.get('models', [])
+                    if models:
+                        response_parts.append(f"\n**Available Models ({len(models)} total):**")
+                        for m in models:
+                            status = "✓ downloaded" if m.get('downloaded') else "○ not downloaded"
+                            response_parts.append(f"- **{m.get('name')}** ({m.get('modality', '?')}, {m.get('body_part', '?')}) - {status}")
+
+                elif tool_name == "radlex.list_templates" and isinstance(result, dict):
+                    templates = result.get('templates', [])
+                    if templates:
+                        response_parts.append(f"\n**Available Templates ({len(templates)} total):**")
+                        for t in templates:
+                            response_parts.append(f"- **{t.get('name')}** ({t.get('modality', '?')}, {t.get('body_part', '?')})")
+
+                elif tool_name == "fhir.search" and isinstance(result, dict):
+                    entries = result.get('entry', [])
+                    response_parts.append(f"\n**Search Results ({len(entries)} found):**")
+                    for entry in entries[:5]:  # Limit to 5
+                        resource = entry.get('resource', {})
+                        response_parts.append(f"- {resource.get('resourceType', '?')} (ID: {resource.get('id', '?')})")
+
+                elif isinstance(result, dict) and 'error' not in result:
+                    # Generic result summary
+                    summary = event.get('result_summary', '')
+                    if summary and summary != 'completed':
+                        response_parts.append(f"\n{tool_name}: {summary}")
+
+        if response_parts:
+            return "\n".join(response_parts)
+
+        return "Task completed successfully."
 
 
 # Global agent instance

@@ -24,8 +24,9 @@ function App() {
     modality: null,
     bodyPart: null
   });
-  const [showModalitySelect, setShowModalitySelect] = useState(false);
   const [userQuery, setUserQuery] = useState("");
+  const [pendingTool, setPendingTool] = useState(null); // {tool_name, arguments}
+  const [runningTool, setRunningTool] = useState(null); // tool currently executing
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -57,7 +58,6 @@ function App() {
 
   const handleFileUpload = async (file) => {
     setUploadedFile(file);
-    addMessage({ type: 'user', content: `File: ${file.name}` });
     setIsProcessing(true);
     try {
       const formData = new FormData();
@@ -67,38 +67,13 @@ function App() {
         body: formData
       });
       if (!response.ok) throw new Error('Upload failed');
-      const fileName = file.name.toLowerCase();
-      const needsModalityInput = !fileName.endsWith('.dcm');
       setSessionContext(prev => ({ ...prev, fileUploaded: true }));
-      if (needsModalityInput) {
-        setShowModalitySelect(true);
-        addMessage({ type: 'bot', content: `File "${file.name}" received. Please specify the image type so we can select the right AI model:`, actions: [] });
-      } else {
-        addMessage({ type: 'bot', content: `File "${file.name}" received. What would you like to do?`, actions: [ { id: 'analyze', label: 'Analyze Image' }, { id: 'info', label: 'System Info' } ] });
-      }
+      addMessage({ type: 'bot', content: `File "${file.name}" uploaded. You can now ask me to analyze it.` });
     } catch (error) {
-      addMessage({ type: 'bot', content: `Upload error: ${error.message}`, actions: [] });
+      addMessage({ type: 'bot', content: `Upload error: ${error.message}` });
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const handleModalitySelect = async (modality, bodyPart) => {
-    setShowModalitySelect(false);
-    setSessionContext(prev => ({ ...prev, modality, bodyPart }));
-    addMessage({ type: 'user', content: `Image type: ${modality} - ${bodyPart}` });
-    try {
-      await fetch(getApiUrl('/api/set-metadata'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modality, bodyPart })
-      });
-    } catch (e) {
-      console.log('Metadata endpoint not available, will use query context');
-    }
-    const modalityText = modality || 'auto-detected';
-    const bodyPartText = bodyPart || 'auto-detected';
-    addMessage({ type: 'bot', content: `Got it! Modality: ${modalityText}, Body part: ${bodyPartText}. What would you like to do?`, actions: [ { id: 'analyze', label: 'Analyze Image' }, { id: 'info', label: 'System Info' } ] });
   };
 
   const handleAction = async (actionId) => {
@@ -162,13 +137,60 @@ function App() {
 
   const handleNewAnalysis = () => {
     setUploadedFile(null);
-    setShowModalitySelect(false);
     setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null });
-    addMessage({ type: 'bot', content: 'Ready for new analysis. Upload a file to continue.', actions: [] });
+    addMessage({ type: 'bot', content: 'Ready for new analysis. Upload a file to continue.' });
   };
 
   const handleExport = () => {
     addMessage({ type: 'bot', content: 'Export functionality coming soon.', actions: [{ id: 'new', label: 'New Analysis' }] });
+  };
+
+  const handleConfirmTool = async () => {
+    if (!pendingTool) return;
+    const toolName = pendingTool.tool_name;
+    addMessage({ type: 'user', content: `✓ Confirmed` });
+    setPendingTool(null);
+    setRunningTool(toolName);
+    setIsProcessing(true);
+    try {
+      const response = await fetch(getApiUrl('/api/confirm-tool'), { method: 'POST' });
+      const data = await response.json();
+      setRunningTool(null);
+      if (data.result?.type === 'confirmation_required') {
+        // Another tool needs confirmation
+        setPendingTool({
+          tool_name: data.result.tool_name,
+          arguments: data.result.arguments
+        });
+        addMessage({
+          type: 'bot',
+          content: `I want to execute: **${data.result.tool_name}**\n\nWith parameters:\n\`\`\`json\n${JSON.stringify(data.result.arguments, null, 2)}\n\`\`\``,
+          isConfirmation: true
+        });
+      } else if (data.result?.error) {
+        addMessage({ type: 'bot', content: `Error: ${data.result.error}` });
+      } else {
+        addMessage({ type: 'bot', content: data.result?.answer || JSON.stringify(data.result, null, 2) });
+      }
+    } catch (err) {
+      setRunningTool(null);
+      addMessage({ type: 'bot', content: `Error: ${err.message}` });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDenyTool = async () => {
+    if (!pendingTool) return;
+    addMessage({ type: 'user', content: `Denied: ${pendingTool.tool_name}` });
+    setPendingTool(null);
+    try {
+      const response = await fetch(getApiUrl('/api/deny-tool'), { method: 'POST' });
+      const data = await response.json();
+      addMessage({ type: 'bot', content: data.result?.answer || 'Tool execution cancelled.' });
+    } catch (err) {
+      addMessage({ type: 'bot', content: 'Tool execution cancelled.' });
+    }
   };
 
   // --- Render ---
@@ -190,6 +212,35 @@ function App() {
       </aside>
 
       <main className="main">
+        {/* Running Tool Indicator */}
+        {runningTool && (
+          <div style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            backgroundColor: '#1e1e2e',
+            border: '1px solid #6366f1',
+            borderRadius: '8px',
+            padding: '10px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            zIndex: 1000,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+          }}>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              backgroundColor: '#6366f1',
+              borderRadius: '50%',
+              animation: 'pulse 1s infinite'
+            }} />
+            <span style={{ color: '#e2e8f0', fontSize: '13px' }}>
+              Running: <strong>{runningTool}</strong>
+            </span>
+          </div>
+        )}
+
         <header className="header">
           <h1>Medical Image Analysis</h1>
           <p>Multi-Agent Orchestrator for Healthcare</p>
@@ -210,7 +261,41 @@ function App() {
                       </div>
                     ) : (
                       <>
-                        <p>{msg.content}</p>
+                        <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                        {msg.isConfirmation && pendingTool && i === messages.length - 1 && (
+                          <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                            <button
+                              onClick={handleConfirmTool}
+                              disabled={isProcessing}
+                              style={{
+                                backgroundColor: '#10b981',
+                                color: 'white',
+                                border: 'none',
+                                padding: '8px 20px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '500'
+                              }}
+                            >
+                              ✓ Run
+                            </button>
+                            <button
+                              onClick={handleDenyTool}
+                              disabled={isProcessing}
+                              style={{
+                                backgroundColor: 'transparent',
+                                color: '#9ca3af',
+                                border: '1px solid #4b5563',
+                                padding: '8px 20px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '500'
+                              }}
+                            >
+                              ✗ Skip
+                            </button>
+                          </div>
+                        )}
                         {msg.actions?.length > 0 && (
                           <div className="actions">
                             {msg.actions.map(a => (
@@ -237,6 +322,7 @@ function App() {
                 const currentQuery = userQuery;
                 setUserQuery(""); // Limpa imediatamente
                 addMessage({ type: 'user', content: currentQuery });
+                addMessage({ type: 'bot', content: '', isLoading: true });
                 setIsProcessing(true);
                 try {
                   const response = await fetch(getApiUrl('/api/process-query'), {
@@ -245,12 +331,32 @@ function App() {
                     body: currentQuery
                   });
                   const data = await response.json();
+
+                  // Remove loading message
+                  setMessages(prev => prev.filter(m => !m.isLoading));
+
+                  // Check if tool confirmation is required
+                  if (data.result?.type === 'confirmation_required') {
+                    setPendingTool({
+                      tool_name: data.result.tool_name,
+                      arguments: data.result.arguments
+                    });
+                    addMessage({
+                      type: 'bot',
+                      content: `I want to execute: **${data.result.tool_name}**\n\nWith parameters:\n\`\`\`json\n${JSON.stringify(data.result.arguments, null, 2)}\n\`\`\``,
+                      isConfirmation: true
+                    });
+                    setIsProcessing(false);
+                    return;
+                  }
+
                   if (data.result?.error) {
                     addMessage({ type: 'bot', content: `Error: ${data.result.error}` });
                   } else {
                     addMessage({ type: 'bot', content: data.result?.answer || JSON.stringify(data.result, null, 2) });
                   }
                 } catch (err) {
+                  setMessages(prev => prev.filter(m => !m.isLoading));
                   addMessage({ type: 'bot', content: `Error: ${err.message}` });
                 } finally {
                   setIsProcessing(false);
@@ -287,29 +393,34 @@ function App() {
                         </button>
                       </div>
                     ) : (
-                      <span className="chatbot-preview-file" style={{ position: 'relative', display: 'inline-block' }}>
-                        {`Selected: ${uploadedFile.name}`}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px' }}>
+                        <span style={{ fontSize: '14px' }}>📄 {uploadedFile.name}</span>
                         <button
                           type="button"
-                          className="chatbot-remove-btn"
-                            onClick={async () => {
-                              if (uploadedFile?.name) {
-                                try {
-                                  await fetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD) + `?filename=${encodeURIComponent(uploadedFile.name)}`, {
-                                    method: 'DELETE'
-                                  });
-                                } catch (e) {
-                                  // Optionally handle error
-                                }
-                              }
-                              setUploadedFile(null);
-                            }}
+                          onClick={async () => {
+                            if (uploadedFile?.name) {
+                              try {
+                                await fetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD) + `?filename=${encodeURIComponent(uploadedFile.name)}`, {
+                                  method: 'DELETE'
+                                });
+                              } catch (e) {}
+                            }
+                            setUploadedFile(null);
+                          }}
                           title="Remove file"
-                          style={{ marginLeft: 8 }}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#ef4444',
+                            cursor: 'pointer',
+                            fontSize: '18px',
+                            padding: '0 4px',
+                            lineHeight: 1
+                          }}
                         >
-                          &times;
+                          ✕
                         </button>
-                      </span>
+                      </div>
                     )}
                   </div>
                 )}

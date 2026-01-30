@@ -36,3 +36,6 @@ Thumbs.db
 *.sqlite
 
 node_modules/
+
+# MCP config (machine-specific paths)
+orchestrator/mcp-config.json

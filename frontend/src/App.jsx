@@ -321,6 +321,12 @@ function App() {
                     value={userQuery}
                     onChange={e => setUserQuery(e.target.value)}
                     disabled={isProcessing}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        e.target.form.requestSubmit();
+                      }
+                    }}
                   />
                   <input
                     type="file"

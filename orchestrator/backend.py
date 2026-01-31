@@ -444,6 +444,9 @@ async def clear_files():
     return {"status": "cleared"}
 
 
+
+
+
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy"}

@@ -116,13 +116,8 @@ class GeminiClient:
 
 CRITICAL - DO NOT call tools for:
 - Greetings ("Hello", "Hi") → Reply: "Hello! How can I help you? Ask me what tools I have available."
-- Questions like "What can you do?" or "What tools do you have?" → List your capabilities:
-  "I can help with:
-  - **Medical Image Analysis** (monai.*): Analyze images, list/download AI models, run inference
-  - **Radiology Reports** (radlex.*): Generate reports, search terminology, use templates
-  - **Patient Data** (fhir.*): Search, read, create, update, delete FHIR resources
+- If user asks to list tools → Reply with the tools available
 
-  What would you like to do?"
 - General questions → Answer directly with text
 
 YOUR TOOLS (always use FULL name with prefix):
@@ -136,11 +131,6 @@ WHEN USER REQUESTS AN ACTION:
 5. Report the result
 6. Say "GOAL_ACHIEVED" when done
 
-IF NO TOOL FITS THE REQUEST:
-Respond with: "I don't have a tool suitable for that request. Here are my available tools:
-- monai.*: Medical image analysis (analyze, list models, run inference)
-- radlex.*: Radiology reports and terminology
-- fhir.*: Patient data operations (search, read, create, update, delete)
 
 Would you like me to execute a specific tool? Just tell me which one."
 

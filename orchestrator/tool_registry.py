@@ -61,15 +61,24 @@ class ToolRegistry:
                     prefixed_name = f"{name}.{tool.name}"
                     self.available_tools[prefixed_name] = {
                         "description": getattr(tool, "description", ""),
-                        "schema": getattr(tool, "input_schema", {}),
+                        "schema": getattr(tool, "inputSchema", {}),
                         "server": name,
                         "original_name": tool.name,
                         "transport": transport
                     }
                 print(f"[{name}] Tools: {[t.name for t in tools.tools]}")
+                
 
             except Exception as e:
                 print(f"{name}: Failed to start: {e}")
+
+        '''
+        #run radlex.get_template_schema test
+        if "radlex.get_template_schema" in self.available_tools:
+            print("Testing radlex.get_template_schema...")
+            result = await self.execute_tool("radlex.get_template_schema", {"template_id": "CT Angiography or CT Enterography - GI Bleed"}, logs=True)
+            print(f"Result: {result}")
+        '''
 
         return self.available_tools
 

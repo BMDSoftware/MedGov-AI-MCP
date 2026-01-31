@@ -5,7 +5,7 @@ description = "AI agent for healthcare automation"
 authors = [
 ]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10, <3.12"
 
 dependencies = [
     "fastapi",
@@ -24,4 +24,5 @@ dependencies = [
     "nibabel",
     "pydicom",
     "itk",
+    "beautifulsoup4"
 ]

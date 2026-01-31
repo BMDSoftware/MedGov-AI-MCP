@@ -228,7 +228,7 @@ class AgenticAgent:
     #         return {"tool_name": "monai.run_inference", "arguments": {"image_path": state["image_path"] or image_path, "model_name": state["model_name"]}}
     #     return None
 
-    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 8, metadata: Dict = None, _resume_history: List = None) -> Optional[Dict]:
+    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 

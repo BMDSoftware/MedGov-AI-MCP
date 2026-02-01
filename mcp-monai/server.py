@@ -14,6 +14,15 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
+# DICOM parsing
+try:
+    import pydicom
+    from pydicom.errors import InvalidDicomError
+    PYDICOM_AVAILABLE = True
+except ImportError:
+    PYDICOM_AVAILABLE = False
+    log("Warning: pydicom not installed. DICOM metadata extraction will be limited.")
+
 
 def log(msg: str):
     """Log to stderr to avoid interfering with stdio JSON-RPC protocol"""

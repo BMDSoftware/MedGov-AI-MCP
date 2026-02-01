@@ -1,0 +1,2 @@
+mcp
+pydicom>=2.4.0

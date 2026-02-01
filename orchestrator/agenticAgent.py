@@ -547,6 +547,21 @@ Your decision:"""
                 return f"{resource_type} (id: {resource_id})"
             return "FHIR operation completed"
 
+        # Utils tools (DICOM parsing)
+        elif tool_name == "utils.parse_dicom":
+            if result.get("is_valid"):
+                tags = result.get("tags", {})
+                modality = tags.get("Modality", "unknown")
+                body_part = tags.get("BodyPartExamined", "unknown")
+                num_tags = result.get("num_tags", 0)
+                return f"DICOM parsed: {modality}, {body_part}, {num_tags} tags"
+            return f"DICOM invalid: {result.get('error', 'unknown error')}"
+
+        elif tool_name == "utils.parse_dicom_directory":
+            total = result.get("total_files", 0)
+            num_series = result.get("num_series", 0)
+            return f"Directory parsed: {total} files, {num_series} series"
+
         # Generic fallback
         if result.get("status"):
             return f"Status: {result['status']}"

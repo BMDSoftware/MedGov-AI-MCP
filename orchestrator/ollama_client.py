@@ -66,20 +66,26 @@ CRITICAL RULES:
    - Check if "IMAGES AVAILABLE:" is in the context - if yes, use that path
    - If no images in context, respond: "I need an image file to analyze. Please upload one or provide the file path."
 
-2. WHEN TO RESPOND WITH TEXT (no tool call):
+2. FOR DICOM FILES (.dcm): ALWAYS call utils.parse_dicom FIRST to extract metadata (modality, body part).
+   Use this info to select the correct MONAI model. Do not skip this step.
+
+3. WHEN TO RESPOND WITH TEXT (no tool call):
    - Greetings → respond with text
    - "What tools do you have?" → list the tools above
    - Missing required parameters → ask for them
 
-3. WHEN TO CALL A TOOL:
+4. WHEN TO CALL A TOOL:
    - User requests an action AND all required parameters are available
-   - Say: "I'll use [tool] because [reason]. The file is at [path from context]."
    - Call the tool with the ACTUAL path from context
    - Summarize result, then say "GOAL_ACHIEVED"
 
-4. DO NOT repeat failed tools. If a tool fails, explain the error and ask how to proceed.
+5. DO NOT repeat failed tools. If a tool fails, explain the error and ask how to proceed.
 
-TOOL NAMES: Always use full prefix (monai.list_models, fhir.search, radlex.generate_report)"""
+6. RESPOND DIRECTLY. Do not explain your reasoning or thought process. Just give the answer or take the action.
+
+7. MONAI models require 3D volumes. If an image is 2D (single slice), inform the user that inference requires a full 3D scan.
+
+TOOL NAMES: Always use full prefix (monai.list_models, fhir.search, radlex.generate_report, utils.parse_dicom)"""
 
     def start_chat(self, history: List = None):
         """Start a new chat session or restore history."""

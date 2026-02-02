@@ -1,0 +1,13 @@
+# Ignore downloaded test data
+*.dcm
+*.zip
+*.nii
+*.nii.gz
+*.mha
+*.mhd
+*.nrrd
+
+# Ignore downloaded directories
+DICOM/
+dicom_structural/
+pydicom/

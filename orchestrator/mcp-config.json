@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "monai": {
-      "command": "/home/gabriel/Desktop/AgenticHealthMCP/.venv/bin/python",
+      "command": "/home/gabriel/Desktop/AgenticHealthMCP/mcp-monai/venv/bin/python",
       "args": ["/home/gabriel/Desktop/AgenticHealthMCP/mcp-monai/server.py"],
       "transport": "stdio",
       "env": {
@@ -9,7 +9,7 @@
       }
     },
     "radlex": {
-      "command": "/home/gabriel/Desktop/AgenticHealthMCP/.venv/bin/python",
+      "command": "/home/gabriel/Desktop/AgenticHealthMCP/mcp-radlex/venv/bin/python",
       "args": ["/home/gabriel/Desktop/AgenticHealthMCP/mcp-radlex/server2.py"],
       "transport": "stdio",
       "env": {
@@ -18,7 +18,7 @@
       }
     },
     "utils": {
-      "command": "/home/gabriel/Desktop/AgenticHealthMCP/.venv/bin/python",
+      "command": "/home/gabriel/Desktop/AgenticHealthMCP/mcp-utils/venv/bin/python",
       "args": ["/home/gabriel/Desktop/AgenticHealthMCP/mcp-utils/server.py"],
       "transport": "stdio",
       "env": {

@@ -1,0 +1,21 @@
+# DICOM Test Data Download Commands
+# Run these from the test_data folder
+
+# Pydicom test files (small, good for testing)
+curl -L -o CT_small.dcm "https://github.com/pydicom/pydicom/raw/main/src/pydicom/data/test_files/CT_small.dcm"
+curl -L -o MR_small.dcm "https://github.com/pydicom/pydicom/raw/main/src/pydicom/data/test_files/MR_small.dcm"
+curl -L -o MR_small_implicit.dcm "https://github.com/pydicom/pydicom/raw/main/src/pydicom/data/test_files/MR_small_implicit.dcm"
+
+# Full CT dataset from Zenodo (~50MB)
+curl -L -o ct_dataset.zip "https://zenodo.org/record/16956/files/DICOM.zip?download=1"
+unzip ct_dataset.zip
+
+# Example DICOM structural dataset (git)
+git clone --depth 1 https://github.com/datalad/example-dicom-structural.git dicom_structural
+
+# Medimodel free samples (manual download)
+# https://medimodel.com/sample-dicom-files/
+
+
+# Download of a full dataset to try and feed it to MONAI
+curl -L -o ct_dataset.zip "https://zenodo.org/record/16956/files/DICOM.zip?download=1"

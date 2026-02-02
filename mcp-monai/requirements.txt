@@ -8,3 +8,4 @@ Pillow # for reading jpegs as in the example
 nibabel
 requests>=2.31.0
 huggingface-hub>=0.18.0
+pydicom>=2.3.0

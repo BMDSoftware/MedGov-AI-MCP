@@ -393,10 +393,15 @@ function App() {
                         </button>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                        <span style={{ fontSize: '14px' }}>📄 {uploadedFile.name}</span>
+                      <div className="chatbot-file-chip">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                          <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        <span className="file-name">{uploadedFile.name}</span>
                         <button
                           type="button"
+                          className="remove-btn"
                           onClick={async () => {
                             if (uploadedFile?.name) {
                               try {
@@ -408,15 +413,6 @@ function App() {
                             setUploadedFile(null);
                           }}
                           title="Remove file"
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: '#ef4444',
-                            cursor: 'pointer',
-                            fontSize: '18px',
-                            padding: '0 4px',
-                            lineHeight: 1
-                          }}
                         >
                           ✕
                         </button>

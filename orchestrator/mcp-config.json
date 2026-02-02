@@ -14,7 +14,7 @@
       "transport": "stdio",
       "env": {
         "PYTHONUNBUFFERED": "1",
-        "RAD_TEMPLATES_DIR": "/home/gabriel/Desktop/AgenticHealthMCP/mcp-radlex/templates"
+        "RAD_TEMPLATES_DIR": "/Users/hemapefe/Desktop/AgenticHealthMCP/mcp-radlex/templates"
       }
     },
     "utils": {
@@ -24,6 +24,10 @@
       "env": {
         "PYTHONUNBUFFERED": "1"
       }
+    },
+    "fhir": {
+      "transport": "http",
+      "url": "http://localhost:8000/mcp"
     }
   }
 }

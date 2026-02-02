@@ -2,18 +2,19 @@ import { useState, useRef, useEffect } from 'react';
 import { API_CONFIG, getApiUrl } from './config';
 import './App.css';
 import Settings from './components/Settings';
-import { useState as useReactRouterState } from 'react';
+import PatientSelection from './components/PatientSelection';
 
 function App() {
   // --- State and refs ---
-  const [page, setPage] = useState('analysis');
+  const [page, setPage] = useState('patient-selection');
   const [messages, setMessages] = useState([
     {
       type: 'bot',
-      content: 'Welcome to the Health Assistant. Upload a medical file to begin.',
+      content: 'Welcome to the Health Assistant. You can select a patient from the Patients tab or upload a medical file to begin.',
       actions: []
     }
   ]);
+  const [selectedPatient, setSelectedPatient] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
@@ -22,7 +23,9 @@ function App() {
     analysisComplete: false,
     lastAnalysis: null,
     modality: null,
-    bodyPart: null
+    bodyPart: null,
+    selectedPatient: null,
+    patientContext: null
   });
   const [userQuery, setUserQuery] = useState("");
   const [pendingTool, setPendingTool] = useState(null); // {tool_name, arguments}
@@ -37,6 +40,47 @@ function App() {
 
   // --- Logic functions ---
   const addMessage = (message) => setMessages(prev => [...prev, message]);
+
+  const handlePatientSelection = async (patient) => {
+    setSelectedPatient(patient);
+    setSessionContext(prev => ({
+      ...prev,
+      selectedPatient: patient,
+      patientContext: patient.resource
+    }));
+    
+    // Call backend to set patient focus in AgenticAgent
+    try {
+      const response = await fetch(getApiUrl('/api/start-healthcare-conversation'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          patient_id: patient.id,
+          patient_name: patient.name
+        })
+      });
+      
+      const result = await response.json();
+      console.log('Healthcare conversation started:', result);
+      
+      if (result.error) {
+        console.error('Error starting healthcare conversation:', result.error);
+      }
+    } catch (error) {
+      console.error('Failed to start healthcare conversation:', error);
+    }
+    
+    // Initialize conversation with patient context
+    const welcomeMessage = {
+      type: 'bot',
+      content: `Hello! I'm ready to help with ${patient.name}'s case. Upload a medical file or ask me anything about their healthcare.`,
+      actions: []
+    };
+    setMessages([welcomeMessage]);
+    setPage('analysis');
+  };
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -202,6 +246,7 @@ function App() {
           <span className="logo-text">HealthMCP</span>
         </div>
         <nav className="nav">
+          <a href="#" className={`nav-item${page === 'patient-selection' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('patient-selection'); }}>Patients</a>
           <a href="#" className={`nav-item${page === 'analysis' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('analysis'); }}>Analysis</a>
           <a href="#" className={`nav-item${page === 'history' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('history'); }}>History</a>
           <a href="#" className={`nav-item${page === 'settings' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('settings'); }}>Settings</a>
@@ -243,11 +288,17 @@ function App() {
 
         <header className="header">
           <h1>Medical Image Analysis</h1>
-          <p>Multi-Agent Orchestrator for Healthcare</p>
+          {selectedPatient ? (
+            <p>Healthcare Agent for <strong>{selectedPatient.name}</strong> ({selectedPatient.gender}, Born: {selectedPatient.birthDate})</p>
+          ) : (
+            <p>Multi-Agent Orchestrator for Healthcare</p>
+          )}
         </header>
 
         {page === 'settings' ? (
           <Settings />
+        ) : page === 'patient-selection' ? (
+          <PatientSelection onPatientSelect={handlePatientSelection} />
         ) : (
           <div className="chat">
             <div className="messages">

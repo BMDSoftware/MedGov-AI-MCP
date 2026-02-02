@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 # Load env BEFORE importing agenticAgent so LLM_BACKEND is set
 load_dotenv()
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
@@ -76,79 +76,6 @@ async def set_metadata(data: dict = Body(...)):
     image_metadata["bodyPart"] = data.get("bodyPart")
     return {"status": "ok"}
 
-@app.post("/api/process-workflow")
-async def process_workflow(data: dict = Body(default=None)):
-    global uploaded_files, image_metadata
-
-    # Check for action type
-    action = data.get("action") if data else None
-
-    # Handle report generation separately
-    if action == "generate_report":
-        analysis = data.get("analysis", {})
-        return await generate_report(analysis)
-
-    # Get modality from request body if provided
-    modality = None
-    body_part = None
-    if data:
-        modality = data.get("modality") or image_metadata.get("modality")
-        body_part = data.get("bodyPart") or image_metadata.get("bodyPart")
-
-    # Build query with modality context if available
-    if modality and body_part:
-        query = f"This is a {modality} scan of the {body_part}. Follow all steps: analyze the image, list models, download the best model, and run inference. Return the segmentation/detection results."
-    else:
-        query = "Analyze this medical image, download an appropriate model, run inference, and return the AI analysis results. Follow all workflow steps."
-
-    print(f"Starting predefined workflow: {query}")
-    print("Uploaded files list:", uploaded_files)
-
-    if not uploaded_files:
-        return {"result": {"error": "No files uploaded. Please upload an image first."}}
-    
-    # Create temporary files and prepare tuples with (temp_filepath, content)
-    image_data = []
-    try:
-        for filename, contents in uploaded_files:
-            # Create temporary file with original extension
-            # Handle double extensions like .nii.gz
-            if filename.endswith('.nii.gz'):
-                file_extension = '.nii.gz'
-            else:
-                file_extension = os.path.splitext(filename)[1] or '.tmp'
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_extension)
-            temp_file.write(contents)
-            temp_file.close()
-            temp_file_paths[filename] = temp_file.name
-            
-            # Add tuple of (temp_filepath, content) to the list
-            image_data.append((temp_file.name, contents))
-            print(f"Saved {filename} to {temp_file.name}")
-        
-        # Pass metadata for model filtering (lowercase body_part to match registry)
-        metadata = {
-            "modality": modality,
-            "body_part": body_part.lower() if body_part else None
-        }
-        result = await agent_decision.execute_task(query, imageList=image_data, metadata=metadata)
-
-        # Keep files in memory for subsequent workflows (e.g., report generation)
-        # Files will be cleared on backend shutdown or manual clear
-
-        return {"result": result}
-        
-    except Exception as e:
-        print(f"Error processing workflow: {e}")
-        # Clean up temporary files on error
-        for temp_path in temp_file_paths.values():
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
-        temp_file_paths.clear()
-        return {"result": {"error": str(e)}}
-    
 
     
 @app.post("/api/process-query")
@@ -263,6 +190,30 @@ async def refresh_config():
     return {"status": "refreshed", "available_tools": list(agent_decision.available_tools.keys())}
 
 
+@app.post("/api/start-healthcare-conversation")
+async def start_healthcare_conversation(request: Request):
+    """Start a healthcare conversation focused on a specific patient"""
+    try:
+        data = await request.json()
+        patient_id = data.get("patient_id")
+        patient_name = data.get("patient_name")
+        
+        if not patient_id or not patient_name:
+            return {"error": "patient_id and patient_name are required"}
+        
+        # Set the agent to focus on this patient
+        agent_decision.set_patient_focus(patient_id, patient_name)
+        
+        return {
+            "status": "success",
+            "message": f"Healthcare conversation started for patient {patient_name}",
+            "patient_id": patient_id,
+            "patient_name": patient_name
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/pending-tool")
 async def get_pending_tool():
     """Get the current pending tool call awaiting confirmation"""
@@ -290,145 +241,6 @@ async def deny_tool():
     return {"result": result}
 
 
-async def generate_report(analysis: dict):
-    """Generate a clinical report from inference results using RadLex tools directly"""
-    print(f"Generating report from analysis: {analysis}")
-
-    # Extract inference results
-    inference_result = analysis.get("inference_result", {})
-    results = inference_result.get("results", {})
-    detected_structures = results.get("detected_structures", [])
-    model_used = inference_result.get("model_used", "unknown")
-    model_type = inference_result.get("model_type", "segmentation")
-    labels = inference_result.get("labels", {})
-
-    try:
-        # Step 1: List templates to find the right one
-        templates_result = await agent_decision.tool_registry.execute_tool(
-            "radlex.list_templates",
-            {"modality": "CT", "body_part": "abdomen"}
-        )
-        print(f"Templates found: {templates_result}")
-
-        # Pick the first matching template or default to ct_abdomen_general
-        template_id = "ct_abdomen_general"
-        if templates_result and templates_result.get("templates"):
-            template_id = templates_result["templates"][0]["id"]
-
-        # Step 2: Build findings from AI analysis
-        # Mark all organs as not analyzed by default
-        findings = {
-            "liver_findings": "Not analyzed.",
-            "gallbladder_findings": "Not analyzed.",
-            "spleen_findings": "Not analyzed.",
-            "pancreas_findings": "Not analyzed.",
-            "adrenal_findings": "Not analyzed.",
-            "kidney_findings": "Not analyzed.",
-            "bladder_findings": "Not analyzed.",
-            "bowel_findings": "Not analyzed.",
-            "lymph_node_findings": "Not analyzed.",
-            "vascular_findings": "Not analyzed.",
-            "bone_findings": "Not analyzed.",
-            "other_findings": "None.",
-        }
-
-        # Fill in actual AI findings
-        analyzed_structures = []
-        for struct in detected_structures:
-            name = struct.get("name", "").lower()
-            voxels = struct.get("voxel_count", 0)
-            vol_pct = struct.get("volume_percentage", 0)
-            analyzed_structures.append(struct.get("name", "unknown"))
-
-            if "spleen" in name:
-                findings["spleen_findings"] = f"Segmented. Volume: {voxels:,} voxels ({vol_pct}% of image)."
-            elif "liver" in name:
-                findings["liver_findings"] = f"Segmented. Volume: {voxels:,} voxels ({vol_pct}% of image)."
-            elif "kidney" in name:
-                findings["kidney_findings"] = f"Segmented. Volume: {voxels:,} voxels ({vol_pct}% of image)."
-            elif "pancreas" in name:
-                findings["pancreas_findings"] = f"Segmented. Volume: {voxels:,} voxels ({vol_pct}% of image)."
-            elif "tumor" in name:
-                findings["other_findings"] = f"TUMOR DETECTED. Volume: {voxels:,} voxels ({vol_pct}% of image). Urgent review required."
-            elif "nodule" in name:
-                findings["other_findings"] = f"NODULE DETECTED. Volume: {voxels:,} voxels. Further evaluation recommended."
-
-        # Add technique info
-        findings["clinical_history"] = "AI-assisted image analysis"
-        findings["comparison"] = "None"
-        findings["contrast"] = "as provided in source image"
-
-        # Build impression
-        if detected_structures:
-            findings["impression"] = f"""1. AI segmentation complete using {model_used}.
-2. Analyzed: {', '.join(analyzed_structures)}.
-3. Other structures not evaluated.
-4. Radiologist review required."""
-        else:
-            findings["impression"] = """1. No structures detected by AI.
-2. Radiologist review required."""
-
-        # Step 3: Generate the report
-        report_result = await agent_decision.tool_registry.execute_tool(
-            "radlex.generate_report",
-            {
-                "template_id": template_id,
-                "findings": findings,
-                "patient_info": {"name": "Anonymous", "mrn": "N/A"}
-            }
-        )
-        print(f"Report generated: {report_result}")
-
-        if report_result and report_result.get("report_text"):
-            return {
-                "result": {
-                    "answer": report_result["report_text"],
-                    "report": report_result["report_text"],
-                    "template_used": template_id,
-                    "success": True
-                }
-            }
-        else:
-            raise Exception("Report generation returned no text")
-
-    except Exception as e:
-        print(f"Report generation error: {e}")
-        # Fallback: generate a simple report
-        findings_text = "\n".join([
-            f"- {s.get('name', 'unknown')}: {s.get('voxel_count', 0)} voxels ({s.get('volume_percentage', 0)}%)"
-            for s in detected_structures
-        ]) or "No structures detected"
-
-        report = f"""
-============================================================
-RADIOLOGY REPORT - CT ABDOMEN (AI-GENERATED)
-============================================================
-Exam Date: {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}
-------------------------------------------------------------
-
-CLINICAL HISTORY:
-AI-assisted medical image analysis
-
-TECHNIQUE:
-{model_type.upper()} analysis using {model_used} model.
-Processing performed on CUDA GPU.
-
-FINDINGS:
-{findings_text}
-
-IMPRESSION:
-1. Automated {model_type} analysis completed.
-2. Results should be reviewed and validated by a qualified radiologist.
-3. This AI-generated report is for research/demonstration purposes only.
-
-------------------------------------------------------------
-Report generated: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-AI Assistant: HealthMCP
-============================================================
-"""
-        return {"result": {"answer": report, "report": report, "fallback": True}}
-
-
 
 @app.post("/api/clear-files")
 async def clear_files():
@@ -445,6 +257,137 @@ async def clear_files():
 
 
 
+
+
+@app.get("/api/patients")
+async def get_patients():
+    """Get list of patients from FHIR server"""
+    try:
+        # Call FHIR MCP server directly
+        import requests
+        
+        mcp_server_url = "http://localhost:8000"
+        
+        # Call the search tool directly
+        response = requests.post(
+            f"{mcp_server_url}/mcp/tools/call",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream"
+            },
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "search",
+                    "arguments": {
+                        "type": "Patient",
+                        "searchParam": {"_count": "10"}
+                    }
+                },
+                "id": 1
+            }
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"MCP response: {result}")
+            
+            # MCP wraps result in content[0].text as JSON string
+            mcp_result = result.get("result", {})
+            content = mcp_result.get("content", [])
+            
+            if content and len(content) > 0:
+                text = content[0].get("text", "")
+                if text:
+                    import json
+                    bundle_data = json.loads(text)
+                    
+                    # Extract patients from FHIR Bundle
+                    patients = []
+                    if bundle_data.get("resourceType") == "Bundle" and "entry" in bundle_data:
+                        for entry in bundle_data["entry"]:
+                            resource = entry.get("resource", {})
+                            if resource.get("resourceType") == "Patient":
+                                patients.append(format_patient(resource))
+                    
+                    print(f"Found {len(patients)} patients")
+                    return {"patients": patients}
+        
+        print(f"MCP call failed with status {response.status_code}: {response.text}")
+        # Fallback to mock data
+        return {"patients": get_mock_patients()}
+        
+    except Exception as e:
+        print(f"Error fetching patients: {e}")
+        # Return mock data as fallback
+        return {"patients": get_mock_patients()}
+
+def format_patient(patient_resource):
+    """Format FHIR Patient resource for frontend display"""
+    try:
+        patient_id = patient_resource.get("id", "Unknown")
+        
+        # Extract name
+        names = patient_resource.get("name", [])
+        full_name = "Unknown Name"
+        if names:
+            name = names[0]
+            given = name.get("given", [])
+            family = name.get("family", "")
+            full_name = f"{' '.join(given)} {family}".strip()
+        
+        # Extract other info
+        birth_date = patient_resource.get("birthDate", "Unknown")
+        gender = patient_resource.get("gender", "Unknown").capitalize()
+        
+        return {
+            "id": patient_id,
+            "name": full_name,
+            "birthDate": birth_date,
+            "gender": gender,
+            "resource": patient_resource  # Keep full resource for context
+        }
+    except Exception as e:
+        print(f"Error formatting patient: {e}")
+        return {
+            "id": "Unknown",
+            "name": "Error loading patient",
+            "birthDate": "Unknown",
+            "gender": "Unknown",
+            "resource": patient_resource
+        }
+
+def get_mock_patients():
+    """Fallback mock patient data"""
+    return [
+        {
+            "id": "patient-001",
+            "name": "John Smith",
+            "birthDate": "1985-03-15",
+            "gender": "Male",
+            "resource": {
+                "id": "patient-001",
+                "resourceType": "Patient",
+                "name": [{"given": ["John"], "family": "Smith"}],
+                "birthDate": "1985-03-15",
+                "gender": "male"
+            }
+        },
+        {
+            "id": "patient-002",
+            "name": "Sarah Johnson",
+            "birthDate": "1992-07-22",
+            "gender": "Female",
+            "resource": {
+                "id": "patient-002",
+                "resourceType": "Patient",
+                "name": [{"given": ["Sarah"], "family": "Johnson"}],
+                "birthDate": "1992-07-22",
+                "gender": "female"
+            }
+        }
+    ]
 
 
 @app.get("/api/health")

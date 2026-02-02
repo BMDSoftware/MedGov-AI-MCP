@@ -25,4 +25,5 @@ dependencies = [
     "pydicom",
     "itk",
     "beautifulsoup4",
+    "tcia-utils",
 ]

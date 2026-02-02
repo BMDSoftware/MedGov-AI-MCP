@@ -79,6 +79,35 @@ class AgenticAgent:
         if self.llm_client:
             self.llm_client.update_tools(enabled_tools)
 
+    def set_patient_focus(self, patient_id: str, patient_name: str):
+        """Set the agent to focus on a specific patient for healthcare conversations"""
+        tool_descriptions = "\n".join([
+            f"- {name}: {info['description']}"
+            for name, info in self.get_enabled_agent_tools().items()
+        ])
+        
+        patient_prompt = f"""You are a healthcare AI assistant focused on patient: {patient_name} (ID: {patient_id}).
+
+CRITICAL - DO NOT call tools for:
+- Greetings ("Hello", "Hi") → Reply: "Hello! How can I help you? Ask me what tools I have available."
+- If user asks to list tools → Reply with the tools available
+
+- General questions → Answer directly with text
+
+YOUR TOOLS (always use FULL name with prefix):
+{tool_descriptions}
+
+WHEN USER REQUESTS AN ACTION:
+1. Read the tool descriptions above carefully
+2. Decide which tool best fits the request
+3. Say: "I'll use [tool_name] because [reason based on description]"
+4. Call the tool with the full prefixed name (e.g., monai.list_models)
+
+Remember: This conversation is focused on patient {patient_name} (ID: {patient_id}). Prioritize information related to this patient when using tools or analyzing data."""
+        
+        if self.llm_client:
+            self.llm_client.update_system_prompt(patient_prompt)
+
     async def refresh_available_tools(self):
         previous_tools = set(self.available_tools.keys())
         previous_enabled = set(self.agent_tools)

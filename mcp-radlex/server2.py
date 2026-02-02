@@ -227,11 +227,37 @@ def generate_report(template_id: str, findings: Dict[str, Any]) -> Dict[str, Any
         return {
             "status": "success",
             "filename": filename,
-            "message": "New professional report generated from schema blueprint."
+            "report_html": final_html,
+            "report_text": _generate_text_version(template, findings),
+            "template_used": template_id,
+            "message": "Report generated successfully"
         }
 
     except Exception as e:
         return {"error": str(e)}
     
+def _generate_text_version(template, findings):
+    """Generate plain text version of the report"""
+    lines = [
+        f"RADIOLOGY REPORT - {template['title'].upper()}",
+        "=" * 60,
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        ""
+    ]
+    
+    for section in template.get('structured_sections', []):
+        section_lines = []
+        for field in section.get('fields', []):
+            field_value = findings.get(field['html_id'], '').strip()
+            if field_value:
+                section_lines.append(f"{field['label']}: {field_value}")
+        
+        if section_lines:
+            lines.append(f"{section['section_title'].upper()}:")
+            lines.extend(section_lines)
+            lines.append("")
+    
+    return "\n".join(lines)
+
 if __name__ == "__main__":
     mcp.run()

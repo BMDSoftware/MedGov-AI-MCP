@@ -60,7 +60,7 @@ class OllamaClient:
         if self.custom_system_prompt:
             return self.custom_system_prompt
             
-        # Default system prompt        tool_descriptions = "\n".join([
+        tool_descriptions = "\n".join([
             f"- {name}: {info['description']}"
             for name, info in self.available_tools.items()
         ])

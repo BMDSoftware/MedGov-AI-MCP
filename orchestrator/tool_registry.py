@@ -68,6 +68,7 @@ class ToolRegistry:
                     }
                 print(f"[{name}] Tools: {[t.name for t in tools.tools]}")
                 
+                
 
             except Exception as e:
                 print(f"{name}: Failed to start: {e}")

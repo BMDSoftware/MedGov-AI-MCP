@@ -19,9 +19,23 @@ class GeminiClient:
         self.model_id = "gemini-2.0-flash" # Updated to current stable, use 2.5 if you have early access
         self.agent_config = None
         self.gemini_tools_list = []
+        self.custom_system_prompt = None  # Store custom system prompt
         
         self._initialize_gemini()
         self.start_chat() # Initialize the chat session immediately
+
+    def update_system_prompt(self, system_prompt: str):
+        """Update the system prompt and restart chat session"""
+        self.custom_system_prompt = system_prompt
+        # Update agent config with new system prompt
+        self.agent_config = types.GenerateContentConfig(
+            tools=[types.Tool(function_declarations=self.gemini_tools_list)],
+            system_instruction=system_prompt,
+            temperature=0.0
+        )
+        # Restart chat session with new config
+        self.start_chat()
+        print(f"System prompt updated for patient conversation")
 
     def _initialize_gemini(self):
         """Initialize Gemini using new google.genai Client"""
@@ -60,6 +74,7 @@ class GeminiClient:
             mcp_schema = tool_info.get("inputSchema", tool_info.get("schema", {}))
             gemini_parameters = self._build_gemini_schema(mcp_schema)
             
+
             function_def = types.FunctionDeclaration(
                 name=tool_name,
                 description=tool_info.get("description", "No description provided"),
@@ -107,6 +122,11 @@ class GeminiClient:
 
     def _get_system_prompt(self) -> str:
         """Get system prompt for the AI agent"""
+        # Return custom prompt if set
+        if self.custom_system_prompt:
+            return self.custom_system_prompt
+            
+        # Default system prompt
         tool_descriptions = "\n".join([
             f"- {name}: {info['description']}"
             for name, info in self.available_tools.items()

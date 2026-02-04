@@ -19,8 +19,15 @@ class OllamaClient:
         self.base_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         self.chat_history = []  # Maintain conversation history
         self.tools = self._convert_tools_to_ollama_format()
+        self.custom_system_prompt = None  # Store custom system prompt
         print(f"Ollama client initialized with model: {self.model}")
         print(f"Tools available: {list(self.available_tools.keys())}")
+
+    def update_system_prompt(self, system_prompt: str):
+        """Update the system prompt and clear chat history to apply new context"""
+        self.custom_system_prompt = system_prompt
+        self.chat_history = []  # Clear history to start fresh
+        print(f"System prompt updated for patient conversation")
 
     def update_tools(self, available_tools: Dict[str, Any]):
         """Update Ollama's available tools dynamically."""
@@ -49,7 +56,10 @@ class OllamaClient:
         return ollama_tools
 
     def _get_system_prompt(self) -> str:
-        """Get system prompt for the AI agent"""
+        """Get system prompt for the AI agent"""        # Return custom prompt if set
+        if self.custom_system_prompt:
+            return self.custom_system_prompt
+            
         tool_descriptions = "\n".join([
             f"- {name}: {info['description']}"
             for name, info in self.available_tools.items()

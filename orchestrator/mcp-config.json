@@ -17,6 +17,14 @@
         "RAD_TEMPLATES_DIR": "/Users/hemapefe/Desktop/AgenticHealthMCP/mcp-radlex/templates"
       }
     },
+    "utils": {
+      "command": "/Users/hemapefe/Desktop/AgenticHealthMCP/.venv/bin/python",
+      "args": ["/Users/hemapefe/Desktop/AgenticHealthMCP/mcp-utils/server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
     "fhir": {
       "transport": "http",
       "url": "http://localhost:8000/mcp"

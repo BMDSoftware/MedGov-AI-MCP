@@ -4,11 +4,16 @@ import os
 import json
 from re import S
 from typing import Dict, List, Optional, Any
+from pathlib import Path
+
+import yaml
 
 from tool_registry import ToolRegistry
 
 # LLM Backend selection: "ollama" (local) or "gemini" (API)
 LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
+
+SKILL_DIR_PATH = Path(__file__).parent / "skills"
 
 # NOTE: Guided workflow removed - now using true agentic approach
 # The LLM (Gemini or Ollama) decides which tools to call based on context
@@ -41,6 +46,7 @@ class AgenticAgent:
         """Initialize LLM client and tool registry with discovered tools"""
         self.available_tools = await self.tool_registry.discover_tools()
         self.agent_tools = set(self.available_tools.keys())
+        skills = self.load_all_skills()
         enabled_tools = self.get_enabled_agent_tools()
         if LLM_BACKEND.lower() == "ollama":
             print("Using Ollama (local) for orchestration")
@@ -49,7 +55,7 @@ class AgenticAgent:
         else:
             print("Using Gemini (API) for orchestration")
             from gemini_client import GeminiClient
-            self.llm_client = GeminiClient(enabled_tools)
+            self.llm_client = GeminiClient(enabled_tools, skills)
 
     async def close(self):
         """Explicit async cleanup for tool registry resources."""
@@ -81,29 +87,42 @@ class AgenticAgent:
 
     def set_patient_focus(self, patient_id: str, patient_name: str):
         """Set the agent to focus on a specific patient for healthcare conversations"""
-        tool_descriptions = "\n".join([
-            f"- {name}: {info['description']}"
-            for name, info in self.get_enabled_agent_tools().items()
-        ])
-        
-        patient_prompt = f"""You are a healthcare AI assistant focused on patient: {patient_name} (ID: {patient_id}).
 
-CRITICAL - DO NOT call tools for:
-- Greetings ("Hello", "Hi") → Reply: "Hello! How can I help you? Ask me what tools I have available."
-- If user asks to list tools → Reply with the tools available
+        patient_prompt = f"""
+# ROLE
+You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
 
-- General questions → Answer directly with text
+# PATIENT CONTEXT
+- **Name:** {patient_name}
+- **Patient ID:** {patient_id}
 
-YOUR TOOLS (always use FULL name with prefix):
-{tool_descriptions}
+# AVAILABLE SKILLS (DIRECTORY)
+{self.load_all_skills()}
 
-WHEN USER REQUESTS AN ACTION:
-1. Read the tool descriptions above carefully
-2. Decide which tool best fits the request
-3. Say: "I'll use [tool_name] because [reason based on description]"
-4. Call the tool with the full prefixed name (e.g., monai.list_models)
+# SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
+You do not have all instructions loaded into your memory at once. You must follow this tiered workflow:
 
-Remember: This conversation is focused on patient {patient_name} (ID: {patient_id}). Prioritize information related to this patient when using tools or analyzing data."""
+1. **DISCOVERY (Current State):** You can see the "Available Skills" list above. If a user asks "What can you do?", explain these skills based on their descriptions. Do NOT call a tool just to list them.
+2. **READ SKILL:** When a task requires a specific skill, call `skills.read_skill_file(skill_name)` to get the detailed instructions and rules (SKILL.md) for that domain.
+3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, first use `skills.list_skill_files(skill_name)` to see available files, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
+4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
+
+# OPERATIONAL RULES
+- **One at a Time:** Work with only one skill at a time. 
+- **Tool Reasoning:** Before calling any tool, you must state: "I am using [tool_name] because [reasoning related to patient {patient_id}]."
+- **ID Verification:** Every time a tool returns data, verify that the Patient ID in the data matches "{patient_id}". If there is a mismatch, stop and alert the user immediately.
+- **No Hallucinations:** If you do not have a skill that matches the user's request, state: "I do not have the specific clinical skill required for this task." Do not attempt to guess or simulate skill outputs.
+- **Independence:** Skills are external resources. Treat their outputs as clinical observations that require your professional interpretation.
+
+# INTERACTION GUIDELINES
+- **If the user asks for information/capabilities:** Read from the "Available Skills" list above and describe them.
+- **If the user requests a clinical action (e.g., "Analyze the labs"):** 
+    1. Identify the correct skill from the directory.
+    2. Call `skills.read_skill_file(skill_name)`.
+    3. Follow the instructions returned by that tool to complete the request.
+
+# EMERGENCY & SAFETY
+If the patient's data appears critical or the tools return error codes, prioritize clear communication of the status over performing complex analysis."""
         
         if self.llm_client:
             self.llm_client.update_system_prompt(patient_prompt)
@@ -118,6 +137,41 @@ Remember: This conversation is focused on patient {patient_name} (ID: {patient_i
         self.agent_tools = still_enabled | new_tools
         self.agent_tools &= current_tools
         self._refresh_agent_components()
+
+    
+    def load_all_skills(self):
+        """
+        Scans the skills directory, finds SKILL.md files, and loads their metadata.
+        Returns formatted text listing available skills for the system prompt.
+        """
+        skills_text = []
+        
+        if not SKILL_DIR_PATH.exists():
+            return "No skills directory found."
+
+        # Iterate through every sub-folder in the root skills directory
+        for skill_folder in SKILL_DIR_PATH.iterdir():
+            if not skill_folder.is_dir():
+                continue
+                
+            skill_file = skill_folder / "SKILL.md"
+            if skill_file.exists():
+                try:
+                    content = skill_file.read_text()
+                    # Split YAML frontmatter from Markdown body
+                    parts = content.split("---", 2)
+                    if len(parts) >= 3:
+                        frontmatter = parts[1]
+                        metadata = yaml.safe_load(frontmatter)
+                        
+                        skill_name = metadata.get("name", skill_folder.name)
+                        skill_description = metadata.get("description", "No description")
+                        skills_text.append(f"- **{skill_name}**: {skill_description}")
+                except Exception as e:
+                    print(f"Error loading skill {skill_folder.name}: {e}")
+        
+        return "\n".join(skills_text) if skills_text else "No skills available"
+    
 
     async def confirm_tool_execution(self) -> Optional[Dict]:
         """Execute the pending tool after user confirmation"""
@@ -359,6 +413,7 @@ The last tool returned: {last_event.get('result_summary', 'a result')}
 Does this accomplish the goal?
 - If YES: Respond with explicitaly "GOAL_ACHIEVED" and provide the final result
 - If NO: Take the next action
+- If you need more information to proceed, say "NEED MORE INFO" and specify what you need.
 
 Your decision:"""
 
@@ -392,6 +447,17 @@ Your decision:"""
                                     "execution_history": execution_history,
                                     "success": True
                                 }
+
+                            if "NEED MORE INFO" in text_content:
+                                print(f"Agent requests more information to proceed.")
+                                return {
+                                    "type": "agent_response",
+                                    "answer": part.text.strip(),
+                                    "tools_used": [],
+                                    "execution_history": execution_history,
+                                    "success": False
+                                }
+                                
                         
                         if hasattr(part, 'function_call') and part.function_call:
                             has_function_call = True
@@ -406,15 +472,19 @@ Your decision:"""
                                         tool_name = full_name
                                         break
 
-                            # Check if agent is repeating a failed tool
-                            if execution_history:
+                            # Check if agent is repeating a failed tool (block only after 2 consecutive failures)
+                            if len(execution_history) >= 2:
                                 last_event = execution_history[-1]
-                                if last_event.get('tool') == tool_name and not last_event.get('success'):
-                                    print(f"Agent tried to repeat failed tool '{tool_name}' - skipping and prompting for alternative")
+                                prev_event = execution_history[-2]
+                                if (
+                                    last_event.get('tool') == tool_name and not last_event.get('success')
+                                    and prev_event.get('tool') == tool_name and not prev_event.get('success')
+                                ):
+                                    print(f"Agent tried to repeat tool '{tool_name}' after 2 consecutive failures - skipping and prompting for alternative")
                                     execution_history.append({
                                         "tool": tool_name,
                                         "success": False,
-                                        "error": f"Repetition prevented: Tool '{tool_name}' already failed. Try a different tool."
+                                        "error": f"Repetition prevented: Tool '{tool_name}' failed twice consecutively. Try a different tool."
                                     })
                                     continue
 

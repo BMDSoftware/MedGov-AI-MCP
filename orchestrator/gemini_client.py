@@ -12,7 +12,7 @@ load_dotenv()
 class GeminiClient:
     """Handles Gemini AI client setup, tool schema conversion, and stateful chat generation"""
 
-    def __init__(self, available_tools: Dict[str, Any]):
+    def __init__(self, available_tools: Dict[str, Any], skills):
         self.genai_client = None
         self.chat_session = None  # Tracks the stateful conversation history
         self.available_tools = available_tools
@@ -20,6 +20,7 @@ class GeminiClient:
         self.agent_config = None
         self.gemini_tools_list = []
         self.custom_system_prompt = None  # Store custom system prompt
+        self.skills = skills  # Reference to skills manager for dynamic prompt generation
         
         self._initialize_gemini()
         self.start_chat() # Initialize the chat session immediately
@@ -132,29 +133,35 @@ class GeminiClient:
             for name, info in self.available_tools.items()
         ])
 
-        return f"""You are a healthcare AI assistant.
+        return f"""
+# ROLE
+You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
 
-CRITICAL - DO NOT call tools for:
-- Greetings ("Hello", "Hi") → Reply: "Hello! How can I help you? Ask me what tools I have available."
-- If user asks to list tools → Reply with the tools available
+# AVAILABLE SKILLS (DIRECTORY)
+{self.skills}
 
-- General questions → Answer directly with text
+# SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
+You do not have all instructions loaded into your memory at once. You must follow this tiered workflow:
 
-YOUR TOOLS (always use FULL name with prefix):
-{tool_descriptions}
+1. **DISCOVERY (Current State):** You can see the "Available Skills" list above. If a user asks "What can you do?", explain these skills based on their descriptions. Do NOT call a tool just to list them.
+2. **READ SKILL:** When a task requires a specific skill, call `skills.read_skill_file(skill_name)` to get the detailed instructions and rules (SKILL.md) for that domain.
+3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, first use `skills.list_skill_files(skill_name)` to see available files, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
+4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
 
-WHEN USER REQUESTS AN ACTION:
-1. Read the tool descriptions above carefully
-2. Decide which tool best fits the request
-3. Say: "I'll use [tool_name] because [reason based on description]"
-4. Call the tool with the full prefixed name (e.g., monai.list_models)
-5. Report the result
-6. Say "GOAL_ACHIEVED" when done
+# OPERATIONAL RULES
+- **One at a Time:** Work with only one skill at a time. 
+- **No Hallucinations:** If you do not have a skill that matches the user's request, state: "I do not have the specific clinical skill required for this task." Do not attempt to guess or simulate skill outputs.
+- **Independence:** Skills are external resources. Treat their outputs as clinical observations that require your professional interpretation.
 
+# INTERACTION GUIDELINES
+- **If the user asks for information/capabilities:** Read from the "Available Skills" list above and describe them.
+- **If the user requests a clinical action (e.g., "Analyze the labs"):** 
+    1. Identify the correct skill from the directory.
+    2. Call `skills.read_skill_file(skill_name)`.
+    3. Follow the instructions returned by that tool to complete the request.
 
-Would you like me to execute a specific tool? Just tell me which one."
-
-TOOL NAME FORMAT: Always use full name with prefix (monai.list_models, fhir.search, radlex.generate_report)"""
+# EMERGENCY & SAFETY
+If the patient's data appears critical or the tools return error codes, prioritize clear communication of the status over performing complex analysis."""
     
     def generate_content(self, prompt: str, imageList: Any = None) -> Any:
         """Send a message to the stateful chat session with optional image handling."""

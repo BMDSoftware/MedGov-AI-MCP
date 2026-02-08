@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "monai": {
-      "command": "python3",
-      "args": ["../../mcp-monai/server2.py"],
-      "transport": "stdio"
-    }
-  }
-}

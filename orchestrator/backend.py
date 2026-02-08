@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
     # Startup code
     await agent_decision._initialize_components()
     yield
-    # Shutdown code - clean up files and close MCP sessions
+    # Shutdown code - clean up files, session context, and close MCP sessions
     uploaded_files.clear()
     for temp_path in temp_file_paths.values():
         try:
@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
         except:
             pass
     temp_file_paths.clear()
+    agent_decision.reset_session_context()
 
     # Close MCP sessions properly
     try:
@@ -244,7 +245,7 @@ async def deny_tool():
 
 @app.post("/api/clear-files")
 async def clear_files():
-    """Manually clear uploaded files"""
+    """Manually clear uploaded files and session context"""
     global uploaded_files, temp_file_paths
     for temp_path in temp_file_paths.values():
         try:
@@ -253,7 +254,26 @@ async def clear_files():
             pass
     temp_file_paths.clear()
     uploaded_files.clear()
+    agent_decision.reset_session_context()
     return {"status": "cleared"}
+
+
+@app.post("/api/reset-session")
+async def reset_session():
+    """Clear session context, uploaded files, and LLM chat history"""
+    global uploaded_files, temp_file_paths
+    for temp_path in temp_file_paths.values():
+        try:
+            os.unlink(temp_path)
+        except:
+            pass
+    temp_file_paths.clear()
+    uploaded_files.clear()
+    agent_decision.reset_session_context()
+    # Reset LLM chat history too
+    if agent_decision.llm_client:
+        agent_decision.llm_client.start_chat()
+    return {"status": "session_reset"}
 
 
 

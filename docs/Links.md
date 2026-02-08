@@ -39,3 +39,10 @@
 - https://skills.sh/
 - https://developers.openai.com/codex/skills/
 - https://github.com/K-Dense-AI/claude-scientific-skills
+- https://nbia.cancerimagingarchive.net/nbia-search/?CollectionCriteria=Pancreas-CT
+
+
+### GitHub
+- https://github.com/K-Dense-AI/claude-scientific-skills
+
+

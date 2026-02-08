@@ -1,25 +1,25 @@
 {
   "mcpServers": {
     "monai": {
-      "command": "/Users/hemapefe/Desktop/AgenticHealthMCP/.venv/bin/python",
-      "args": ["/Users/hemapefe/Desktop/AgenticHealthMCP/mcp-monai/server.py"],
+      "command": "/home/gabriel/Desktop/AgenticHealthMCP/mcp-monai/venv/bin/python",
+      "args": ["/home/gabriel/Desktop/AgenticHealthMCP/mcp-monai/server.py"],
       "transport": "stdio",
       "env": {
         "PYTHONUNBUFFERED": "1"
       }
     },
     "radlex": {
-      "command": "/Users/hemapefe/Desktop/AgenticHealthMCP/.venv/bin/python",
-      "args": ["/Users/hemapefe/Desktop/AgenticHealthMCP/mcp-radlex/server2.py"],
+      "command": "/home/gabriel/Desktop/AgenticHealthMCP/mcp-radlex/venv/bin/python",
+      "args": ["/home/gabriel/Desktop/AgenticHealthMCP/mcp-radlex/server2.py"],
       "transport": "stdio",
       "env": {
         "PYTHONUNBUFFERED": "1",
-        "RAD_TEMPLATES_DIR": "/Users/hemapefe/Desktop/AgenticHealthMCP/mcp-radlex/templates"
+        "RAD_TEMPLATES_DIR": "/home/gabriel/Desktop/AgenticHealthMCP/mcp-radlex/templates"
       }
     },
     "utils": {
-      "command": "/Users/hemapefe/Desktop/AgenticHealthMCP/.venv/bin/python",
-      "args": ["/Users/hemapefe/Desktop/AgenticHealthMCP/mcp-utils/server.py"],
+      "command": "/home/gabriel/Desktop/AgenticHealthMCP/mcp-utils/venv/bin/python",
+      "args": ["/home/gabriel/Desktop/AgenticHealthMCP/mcp-utils/server.py"],
       "transport": "stdio",
       "env": {
         "PYTHONUNBUFFERED": "1"

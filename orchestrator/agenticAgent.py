@@ -5,10 +5,60 @@ import json
 from re import S
 from typing import Dict, List, Optional, Any
 from pathlib import Path
+from datetime import datetime
 
 import yaml
 
 from tool_registry import ToolRegistry
+
+
+class SessionContext:
+    """Accumulates structured tool results across queries so the agent has memory."""
+
+    def __init__(self):
+        self.entries: List[Dict[str, Any]] = []
+        self.current_patient: Optional[Dict] = None
+        self._max_entries = 50
+
+    def record(self, tool_name: str, result_summary: str, key_data: Dict[str, Any]):
+        """Store a condensed record of a successful tool execution."""
+        self.entries.append({
+            "tool": tool_name,
+            "summary": result_summary,
+            "data": key_data,
+            "timestamp": datetime.now().isoformat()
+        })
+        if len(self.entries) > self._max_entries:
+            self.entries = self.entries[-self._max_entries:]
+
+    def build_context_string(self) -> str:
+        """Build a concise text block to inject into prompts."""
+        if not self.entries:
+            return ""
+
+        lines = ["# SESSION CONTEXT (previous interactions this session)"]
+        for i, entry in enumerate(self.entries, 1):
+            lines.append(f"{i}. [{entry['tool']}] {entry['summary']}")
+            if entry["data"]:
+                for k, v in entry["data"].items():
+                    if v is None:
+                        continue
+                    val_str = str(v)
+                    if len(val_str) > 200:
+                        val_str = val_str[:200] + "..."
+                    lines.append(f"   {k}: {val_str}")
+        return "\n".join(lines)
+
+    def clear(self):
+        """Reset all session context."""
+        self.entries.clear()
+        self.current_patient = None
+
+    def set_patient(self, patient_id: str, patient_name: str):
+        """Set patient focus. Clears context if patient changes."""
+        if self.current_patient and self.current_patient["id"] != patient_id:
+            self.clear()
+        self.current_patient = {"id": patient_id, "name": patient_name}
 
 # LLM Backend selection: "ollama" (local) or "gemini" (API)
 LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
@@ -35,7 +85,7 @@ class AgenticAgent:
         self.agent_tools: Set[str] = set()
         self.callback = callback  # Callback function for real-time event tracking
         self.llm_client = None
-        self.workflow_state = {}  # Track workflow progress
+        self.session_context = SessionContext()  # Persists tool results across queries
         self.require_confirmation = True  # Require user confirmation before tool execution
         self.pending_tool_call = None  # Stores tool call waiting for confirmation
         self.pending_task_context = None  # Stores context for resuming after confirmation
@@ -126,6 +176,96 @@ If the patient's data appears critical or the tools return error codes, prioriti
         
         if self.llm_client:
             self.llm_client.update_system_prompt(patient_prompt)
+        self.session_context.set_patient(patient_id, patient_name)
+
+    def reset_session_context(self):
+        """Clear all accumulated session context."""
+        self.session_context.clear()
+        print("Session context cleared.")
+
+    def _extract_key_data(self, tool_name: str, result: Any) -> Dict[str, Any]:
+        """Extract the key facts from a tool result for session context."""
+        if not isinstance(result, dict):
+            return {}
+
+        # DICOM parsing - most critical for cross-query context
+        if tool_name == "utils.parse_dicom":
+            tags = result.get("tags", {})
+            return {
+                "modality": tags.get("Modality"),
+                "body_part": tags.get("BodyPartExamined"),
+                "patient_name": tags.get("PatientName"),
+                "patient_id": tags.get("PatientID"),
+                "study_description": tags.get("StudyDescription"),
+                "dimensions": result.get("dimensions"),
+                "is_valid": result.get("is_valid"),
+            }
+
+        if tool_name == "utils.parse_dicom_directory":
+            return {
+                "total_files": result.get("total_files"),
+                "num_series": result.get("num_series"),
+                "modalities_found": result.get("modalities", []),
+            }
+
+        # MONAI tools
+        if tool_name == "monai.analyze_image":
+            analysis = result.get("analysis", {})
+            return {
+                "detected_modalities": analysis.get("detected_modalities", []),
+                "shape": result.get("shape"),
+                "path": result.get("path") or result.get("file_path"),
+            }
+
+        if tool_name == "monai.list_models":
+            models = result.get("models", [])
+            return {
+                "total_models": result.get("total", 0),
+                "models": [
+                    {"name": m.get("name"), "modality": m.get("modality"),
+                     "body_part": m.get("body_part"), "downloaded": m.get("downloaded")}
+                    for m in models
+                ],
+            }
+
+        if tool_name == "monai.download_model":
+            return {
+                "model_name": result.get("model_name"),
+                "status": result.get("status"),
+            }
+
+        if tool_name == "monai.run_inference":
+            results_data = result.get("results", {})
+            return {
+                "status": result.get("status"),
+                "model_used": result.get("model_name"),
+                "detected_structures": results_data.get("detected_structures", []),
+                "output_path": results_data.get("output_path"),
+            }
+
+        # FHIR tools
+        if tool_name.startswith("fhir."):
+            resource_type = result.get("resourceType")
+            if resource_type == "Bundle":
+                entries = result.get("entry", [])
+                return {
+                    "resource_type": "Bundle",
+                    "entry_count": len(entries),
+                    "entry_types": list(set(
+                        e.get("resource", {}).get("resourceType", "?") for e in entries
+                    )),
+                }
+            elif resource_type:
+                return {"resource_type": resource_type, "id": result.get("id")}
+
+        # RadLex tools
+        if tool_name.startswith("radlex."):
+            return {
+                "operation": tool_name.split(".")[-1],
+                "status": result.get("status", "completed"),
+            }
+
+        return {}
 
     async def refresh_available_tools(self):
         previous_tools = set(self.available_tools.keys())
@@ -203,6 +343,9 @@ If the patient's data appears critical or the tools return error codes, prioriti
                 "result_summary": result_summary,
                 "result": result
             })
+            # Record to session context for cross-query memory
+            key_data = self._extract_key_data(tool_name, result)
+            self.session_context.record(tool_name, result_summary, key_data)
             print(f"Tool succeeded: {result_summary}")
         else:
             error_msg = result.get("error") if result else "No result"
@@ -397,9 +540,13 @@ If the patient's data appears critical or the tools return error codes, prioriti
                     else:
                         image_context = f"\n\nIMAGES AVAILABLE:\nImage data provided"
 
+                # Build session context from previous queries
+                session_ctx = self.session_context.build_context_string()
+                session_block = f"\n\n{session_ctx}" if session_ctx else ""
+
                 if not execution_history:
-                    # First iteration - let agent decide what to do
-                    prompt = f"""GOAL: {goal}{data_context}{image_context}
+                    # First iteration - include session context so agent knows what happened before
+                    prompt = f"""GOAL: {goal}{data_context}{image_context}{session_block}
 
 Analyze the goal and decide your next action."""
                 else:
@@ -531,6 +678,10 @@ Your decision:"""
                                     "result_summary": result_summary,
                                     "result": result  # Store actual result
                                 })
+
+                                # Record to session context for cross-query memory
+                                key_data = self._extract_key_data(tool_name, result)
+                                self.session_context.record(tool_name, result_summary, key_data)
 
                                 final_result = result
                                 print(f"Tool succeeded: {result_summary}")

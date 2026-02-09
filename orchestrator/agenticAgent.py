@@ -508,7 +508,11 @@ If the patient's data appears critical or the tools return error codes, prioriti
                                 else:
                                     history_text += f"   Response data: {result_str}\n"
                         else:
-                            history_text += f"Failed: {event.get('error', 'Unknown error')}"
+                            error_msg = event.get('error') or 'Unknown error'
+                            # Ensure error is never None
+                            if error_msg is None or (isinstance(error_msg, str) and not error_msg.strip()):
+                                error_msg = 'Tool execution failed'
+                            history_text += f"Failed: {error_msg}"
                         history_text += "\n"
                 
                 # Prompt agent to decide next action OR declare success
@@ -686,11 +690,14 @@ Your decision:"""
                                 final_result = result
                                 print(f"Tool succeeded: {result_summary}")
                             elif result and is_error:
+                                # Ensure error_msg is always a string, never None
                                 error_msg = result.get("error") or result.get("text") or "Unknown error"
+                                if error_msg is None or (isinstance(error_msg, str) and not error_msg.strip()):
+                                    error_msg = "Tool execution failed without error details"
                                 execution_history.append({
                                     "tool": tool_name,
                                     "success": False,
-                                    "error": error_msg,
+                                    "error": str(error_msg),  # Ensure it's a string
                                     "result": result
                                 })
                                 print(f"Tool failed: {error_msg}")
@@ -738,10 +745,11 @@ Your decision:"""
                     
             except Exception as e:
                 print(f"Error in agentic workflow: {type(e).__name__}: {e}")
+                error_message = str(e) if e else "Unknown workflow error"
                 execution_history.append({
-                    "tool": None,
+                    "tool": "workflow",  # Changed from None to "workflow" for clarity
                     "success": False,
-                    "error": str(e),
+                    "error": error_message,
                     "result": None
                 })
         print("Max iterations reached or goal not achieved.")

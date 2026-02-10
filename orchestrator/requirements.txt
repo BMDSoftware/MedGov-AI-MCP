@@ -16,5 +16,8 @@ requests>=2.31.0
 
 google-genai
 
+# YAML parsing (skills frontmatter)
+pyyaml>=6.0
+
 # MCP core
 mcp

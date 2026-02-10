@@ -70,8 +70,9 @@ class ToolRegistry:
                 
                 
 
-            except Exception as e:
+            except BaseException as e:
                 print(f"{name}: Failed to start: {e}")
+                continue
 
         '''
         #run radlex.get_template_schema test

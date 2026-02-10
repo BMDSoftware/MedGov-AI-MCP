@@ -138,41 +138,41 @@ class AgenticAgent:
     def set_patient_focus(self, patient_id: str, patient_name: str):
         """Set the agent to focus on a specific patient for healthcare conversations"""
 
-        patient_prompt = f"""
-# ROLE
-You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
+        # # Old skills-based patient prompt:
+        # patient_prompt = f"""
+        # # ROLE
+        # You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
+        # # PATIENT CONTEXT
+        # - **Name:** {patient_name}
+        # - **Patient ID:** {patient_id}
+        # # AVAILABLE SKILLS (DIRECTORY)
+        # {self.load_all_skills()}
+        # # SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
+        # ... (progressive disclosure workflow removed - agent now uses MCP tools directly)
+        # """
 
-# PATIENT CONTEXT
-- **Name:** {patient_name}
-- **Patient ID:** {patient_id}
+        patient_prompt = f"""You are a healthcare AI assistant. You help medical professionals by analyzing medical images, parsing DICOM files, generating radiology reports, and retrieving patient data.
 
-# AVAILABLE SKILLS (DIRECTORY)
-{self.load_all_skills()}
+You are currently focused on a specific patient:
+- Name: {patient_name}
+- Patient ID: {patient_id}
 
-# SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
-You do not have all instructions loaded into your memory at once. You must follow this tiered workflow:
+All tool calls and analysis should be in the context of this patient. If any tool returns data for a different patient, flag it immediately.
 
-1. **DISCOVERY (Current State):** You can see the "Available Skills" list above. If a user asks "What can you do?", explain these skills based on their descriptions. Do NOT call a tool just to list them.
-2. **READ SKILL:** When a task requires a specific skill, call `skills.read_skill_file(skill_name)` to get the detailed instructions and rules (SKILL.md) for that domain.
-3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, first use `skills.list_skill_files(skill_name)` to see available files, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
-4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
+You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
 
-# OPERATIONAL RULES
-- **One at a Time:** Work with only one skill at a time. 
-- **Tool Reasoning:** Before calling any tool, you must state: "I am using [tool_name] because [reasoning related to patient {patient_id}]."
-- **ID Verification:** Every time a tool returns data, verify that the Patient ID in the data matches "{patient_id}". If there is a mismatch, stop and alert the user immediately.
-- **No Hallucinations:** If you do not have a skill that matches the user's request, state: "I do not have the specific clinical skill required for this task." Do not attempt to guess or simulate skill outputs.
-- **Independence:** Skills are external resources. Treat their outputs as clinical observations that require your professional interpretation.
+CONVERSATION RULES:
+1. Be conversational. If the user greets you, greet them back. If they ask a question you can answer from context, answer it directly without calling any tool.
+2. You have memory of previous interactions in this session. If the user asks about something that was already retrieved (e.g. patient name, modality, body part), answer from what you already know - do not re-call the tool.
+3. Respond concisely and directly. Do not over-explain your reasoning.
 
-# INTERACTION GUIDELINES
-- **If the user asks for information/capabilities:** Read from the "Available Skills" list above and describe them.
-- **If the user requests a clinical action (e.g., "Analyze the labs"):** 
-    1. Identify the correct skill from the directory.
-    2. Call `skills.read_skill_file(skill_name)`.
-    3. Follow the instructions returned by that tool to complete the request.
-
-# EMERGENCY & SAFETY
-If the patient's data appears critical or the tools return error codes, prioritize clear communication of the status over performing complex analysis."""
+TOOL USAGE RULES:
+1. Only call a tool when the user requests an action that requires it AND the required parameters are available.
+2. NEVER invent file paths. If a tool needs a file path, use the one from "IMAGES AVAILABLE" in the context. If none is available, ask the user to upload or provide one.
+3. For DICOM files (.dcm): parse the metadata first to extract modality and body part before selecting models or running inference.
+4. MONAI models require 3D volumes (.nii, .nii.gz). If the image is a single 2D slice, inform the user.
+5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
+6. After a tool returns results, summarize them clearly for the user."""
         
         if self.llm_client:
             self.llm_client.update_system_prompt(patient_prompt)
@@ -715,39 +715,47 @@ Your decision:"""
                     # Check if it's a GOAL_ACHIEVED response
                     if "GOAL_ACHIEVED" in text_response.upper() or "GOAL ACHIEVED" in text_response.upper():
                         pass  # Already handled above
-                    # Check if this is a valid conversational response (no successful tools, or no tools at all)
-                    elif not execution_history or all(not e.get('success') for e in execution_history):
-                        # No successful tool calls - accept text response if it's substantial
-                        if len(text_response) > 20:  # More than a short error
-                            print(f"Agent responded with text (no tools needed for this query)")
-                            return {
-                                "type": "agent_response",
-                                "answer": text_response,
-                                "tools_used": [],
-                                "execution_history": execution_history,
-                                "success": True
-                            }
+                    elif len(text_response) > 20:
+                        # Agent gave a substantial text response - return it
+                        # This covers: conversational replies, error explanations, asking user for info
+                        last_failed = execution_history and not execution_history[-1].get('success')
+                        if last_failed:
+                            print(f"Agent explaining tool error to user")
                         else:
-                            print(f"Agent response too short, continuing...")
-                            execution_history.append({
-                                "tool": "none",
-                                "success": False,
-                                "error": "Agent response was not actionable"
-                            })
+                            print(f"Agent responded with text (no tools needed for this query)")
+                        tools_used = [event['tool'] for event in execution_history if event.get('success')]
+                        return {
+                            "type": "agent_response",
+                            "answer": text_response,
+                            "tools_used": tools_used,
+                            "execution_history": execution_history,
+                            "success": not last_failed
+                        }
                     else:
-                        # Agent has successful history but didn't declare GOAL_ACHIEVED
-                        print(f"Agent didn't declare goal achieved despite successful tools")
+                        print(f"Agent response too short, continuing...")
                         execution_history.append({
                             "tool": "none",
                             "success": False,
-                            "error": "Agent did not declare GOAL_ACHIEVED"
+                            "error": "Agent response was not actionable"
                         })
                     
             except Exception as e:
-                print(f"Error in agentic workflow: {type(e).__name__}: {e}")
                 error_message = str(e) if e else "Unknown workflow error"
+
+                # Stop immediately on rate limit errors - no point retrying
+                if "429" in error_message or "RESOURCE_EXHAUSTED" in error_message or "quota" in error_message.lower():
+                    print(f"Rate limit hit - stopping: {error_message}")
+                    return {
+                        "type": "agent_response",
+                        "answer": "API rate limit reached. Please wait a few minutes before trying again, or check your API quota.",
+                        "tools_used": [],
+                        "execution_history": execution_history,
+                        "success": False
+                    }
+
+                print(f"Error in agentic workflow: {type(e).__name__}: {e}")
                 execution_history.append({
-                    "tool": "workflow",  # Changed from None to "workflow" for clarity
+                    "tool": "workflow",
                     "success": False,
                     "error": error_message,
                     "result": None

@@ -29,7 +29,8 @@ synthea/output/
 Thumbs.db
 
 # Logs
-*.log
+
+orchestrator/logs/
 
 # Database
 *.db

@@ -212,5 +212,19 @@ TOOL USAGE RULES:
             message=content_parts,
             config=self.agent_config
         )
-
-
+    
+    def send_function_response(self, function_name: str, response_data: Any) -> Any:
+        """Send a function/tool result back to Gemini using proper FunctionResponse format.
+        This sends the COMPLETE result without truncation."""
+        
+        # Wrap the complete result in a FunctionResponse Part
+        function_response = types.Part.from_function_response(
+            name=function_name,
+            response={"result": response_data}  # Send the WHOLE result here
+        )
+        
+        # Send it back to the chat session
+        return self.chat_session.send_message(
+            message=[function_response],
+            config=self.agent_config
+        )

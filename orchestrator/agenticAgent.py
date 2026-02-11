@@ -6,80 +6,23 @@ from re import S
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 from datetime import datetime
+import logging
 
 import yaml
 
 from tool_registry import ToolRegistry
+from sessionContext import SessionContext
 
-
-class SessionContext:
-    """Accumulates structured tool results across queries so the agent has memory."""
-
-    def __init__(self):
-        self.entries: List[Dict[str, Any]] = []
-        self.current_patient: Optional[Dict] = None
-        self._max_entries = 50
-
-    def record(self, tool_name: str, result_summary: str, key_data: Dict[str, Any]):
-        """Store a condensed record of a successful tool execution."""
-        self.entries.append({
-            "tool": tool_name,
-            "summary": result_summary,
-            "data": key_data,
-            "timestamp": datetime.now().isoformat()
-        })
-        if len(self.entries) > self._max_entries:
-            self.entries = self.entries[-self._max_entries:]
-
-    def build_context_string(self) -> str:
-        """Build a concise text block to inject into prompts."""
-        if not self.entries:
-            return ""
-
-        lines = ["# SESSION CONTEXT (previous interactions this session)"]
-        for i, entry in enumerate(self.entries, 1):
-            lines.append(f"{i}. [{entry['tool']}] {entry['summary']}")
-            if entry["data"]:
-                for k, v in entry["data"].items():
-                    if v is None:
-                        continue
-                    val_str = str(v)
-                    if len(val_str) > 200:
-                        val_str = val_str[:200] + "..."
-                    lines.append(f"   {k}: {val_str}")
-        return "\n".join(lines)
-
-    def clear(self):
-        """Reset all session context."""
-        self.entries.clear()
-        self.current_patient = None
-
-    def set_patient(self, patient_id: str, patient_name: str):
-        """Set patient focus. Clears context if patient changes."""
-        if self.current_patient and self.current_patient["id"] != patient_id:
-            self.clear()
-        self.current_patient = {"id": patient_id, "name": patient_name}
 
 # LLM Backend selection: "ollama" (local) or "gemini" (API)
 LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
 
 SKILL_DIR_PATH = Path(__file__).parent / "skills"
 
-# NOTE: Guided workflow removed - now using true agentic approach
-# The LLM (Gemini or Ollama) decides which tools to call based on context
-# Keeping this comment for future reference if deterministic mode is needed
-# WORKFLOW_STEPS = [
-#     {"name": "analyze", "tool": "monai.analyze_image", "required": True},
-#     {"name": "list", "tool": "monai.list_models", "required": True},
-#     {"name": "download", "tool": "monai.download_model", "required": False},
-#     {"name": "inference", "tool": "monai.run_inference", "required": True},
-# ]
-
-
 class AgenticAgent:
     """AI agent that decides which MCP tools to call based on context and data"""
 
-    def __init__(self, callback=None):
+    def __init__(self, callback=None, enable_debug_logging=True, log_level=logging.DEBUG):
         self.tool_registry = ToolRegistry()
         self.available_tools = {}
         self.agent_tools: Set[str] = set()
@@ -89,15 +32,64 @@ class AgenticAgent:
         self.require_confirmation = True  # Require user confirmation before tool execution
         self.pending_tool_call = None  # Stores tool call waiting for confirmation
         self.pending_task_context = None  # Stores context for resuming after confirmation
+        
+        # Setup debug logging
+        self.logger = None
+        if enable_debug_logging:
+            self.logger = self._setup_logging(log_level)
+        
         # Use async init pattern for tool discovery
         # You must call await self._initialize_components() after instantiation
 
+    def _setup_logging(self, log_level):
+        """Setup file-based logging for debugging agent interactions"""
+        # Create logs directory if it doesn't exist
+        log_dir = Path(__file__).parent / "logs"
+        log_dir.mkdir(exist_ok=True)
+        
+        # Create timestamped log file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = log_dir / f"agent_debug_{timestamp}.txt"
+        
+        # Create logger
+        logger = logging.getLogger(f"AgenticAgent_{timestamp}")
+        logger.setLevel(log_level)
+        
+        # Create file handler
+        file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+        file_handler.setLevel(log_level)
+        
+        # Create formatter
+        formatter = logging.Formatter(
+            '[%(asctime)s] [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(formatter)
+        
+        # Add handler to logger
+        logger.addHandler(file_handler)
+        
+        logger.info(f"=" * 80)
+        logger.info(f"Agent Debug Session Started")
+        logger.info(f"Log file: {log_file}")
+        logger.info(f"=" * 80)
+        
+        return logger
+
     async def _initialize_components(self):
         """Initialize LLM client and tool registry with discovered tools"""
+        if self.logger:
+            self.logger.info("Initializing agent components...")
+        
         self.available_tools = await self.tool_registry.discover_tools()
         self.agent_tools = set(self.available_tools.keys())
         skills = self.load_all_skills()
         enabled_tools = self.get_enabled_agent_tools()
+        
+        if self.logger:
+            self.logger.info(f"Discovered {len(self.available_tools)} tools: {list(self.available_tools.keys())}")
+            self.logger.info(f"LLM Backend: {LLM_BACKEND}")
+        
         if LLM_BACKEND.lower() == "ollama":
             print("Using Ollama (local) for orchestration")
             from ollama_client import OllamaClient
@@ -138,41 +130,41 @@ class AgenticAgent:
     def set_patient_focus(self, patient_id: str, patient_name: str):
         """Set the agent to focus on a specific patient for healthcare conversations"""
 
-        # # Old skills-based patient prompt:
-        # patient_prompt = f"""
-        # # ROLE
-        # You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
-        # # PATIENT CONTEXT
-        # - **Name:** {patient_name}
-        # - **Patient ID:** {patient_id}
-        # # AVAILABLE SKILLS (DIRECTORY)
-        # {self.load_all_skills()}
-        # # SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
-        # ... (progressive disclosure workflow removed - agent now uses MCP tools directly)
-        # """
+        patient_prompt = f"""
+# ROLE
+You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
 
-        patient_prompt = f"""You are a healthcare AI assistant. You help medical professionals by analyzing medical images, parsing DICOM files, generating radiology reports, and retrieving patient data.
+# PATIENT CONTEXT
+- **Name:** {patient_name}
+- **Patient ID:** {patient_id}
 
-You are currently focused on a specific patient:
-- Name: {patient_name}
-- Patient ID: {patient_id}
+# AVAILABLE SKILLS (DIRECTORY)
+{self.load_all_skills()}
 
-All tool calls and analysis should be in the context of this patient. If any tool returns data for a different patient, flag it immediately.
+# SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
+You do not have all instructions loaded into your memory at once. You must follow this tiered workflow:
 
-You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
+1. **DISCOVERY (Current State):** You can see the "Available Skills" list above. If a user asks "What can you do?", explain these skills based on their descriptions. Do NOT call a tool just to list them.
+2. **READ SKILL:** When a task requires a specific skill, call `skills.read_skill_file(skill_name)` to get the detailed instructions and rules (SKILL.md) for that domain.
+3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
+4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
 
-CONVERSATION RULES:
-1. Be conversational. If the user greets you, greet them back. If they ask a question you can answer from context, answer it directly without calling any tool.
-2. You have memory of previous interactions in this session. If the user asks about something that was already retrieved (e.g. patient name, modality, body part), answer from what you already know - do not re-call the tool.
-3. Respond concisely and directly. Do not over-explain your reasoning.
+# OPERATIONAL RULES
+- **One at a Time:** Work with only one skill at a time. 
+- **Tool Reasoning:** Before calling any tool, you must state: "I am using [tool_name] because [reasoning related to patient {patient_id}]."
+- **ID Verification:** Every time a tool returns data, verify that the Patient ID in the data matches "{patient_id}". If there is a mismatch, stop and alert the user immediately.
+- **No Hallucinations:** If you do not have a skill that matches the user's request, state: "I do not have the specific clinical skill required for this task." Do not attempt to guess or simulate skill outputs.
+- **Independence:** Skills are external resources. Treat their outputs as clinical observations that require your professional interpretation.
 
-TOOL USAGE RULES:
-1. Only call a tool when the user requests an action that requires it AND the required parameters are available.
-2. NEVER invent file paths. If a tool needs a file path, use the one from "IMAGES AVAILABLE" in the context. If none is available, ask the user to upload or provide one.
-3. For DICOM files (.dcm): parse the metadata first to extract modality and body part before selecting models or running inference.
-4. MONAI models require 3D volumes (.nii, .nii.gz). If the image is a single 2D slice, inform the user.
-5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
-6. After a tool returns results, summarize them clearly for the user."""
+# INTERACTION GUIDELINES
+- **If the user asks for information/capabilities:** Read from the "Available Skills" list above and describe them.
+- **If the user requests a clinical action (e.g., "Analyze the labs"):** 
+    1. Identify the correct skill from the directory.
+    2. Call `skills.read_skill_file(skill_name)`.
+    3. Follow the instructions returned by that tool to complete the request.
+
+# EMERGENCY & SAFETY
+If the patient's data appears critical or the tools return error codes, prioritize clear communication of the status over performing complex analysis."""
         
         if self.llm_client:
             self.llm_client.update_system_prompt(patient_prompt)
@@ -356,8 +348,22 @@ TOOL USAGE RULES:
         tool_name = pending["tool_name"]
         arguments = pending["arguments"]
         print(f"Confirmed - Executing: {tool_name}")
+        
+        if self.logger:
+            self.logger.info(f"\nTOOL CONFIRMATION APPROVED:")
+            self.logger.info(f"  Tool: {tool_name}")
+            self.logger.info(f"  User confirmed execution")
+            self.logger.info(f"\nTOOL CALL REQUESTED:")
+            self.logger.info(f"  Tool: {tool_name}")
+            self.logger.info(f"  Arguments: {json.dumps(arguments, indent=4)}")
 
         result = await self.tool_registry.execute_tool(tool_name, arguments, logs=True)
+        
+        if self.logger:
+            self.logger.info(f"\nTOOL RESULT:")
+            self.logger.info(f"  Tool: {tool_name}")
+            result_full = json.dumps(result, indent=4) if isinstance(result, dict) else str(result)
+            self.logger.info(f"  Result: {result_full}")
 
         # Check if result contains an error
         is_error = False
@@ -378,6 +384,23 @@ TOOL USAGE RULES:
             key_data = self._extract_key_data(tool_name, result)
             self._record_and_persist(tool_name, result_summary, key_data, session_id)
             print(f"Tool succeeded: {result_summary}")
+            
+            if self.logger:
+                self.logger.info(f"  Status: SUCCESS")
+                self.logger.info(f"  Summary: {result_summary}")
+            
+            # Send tool result back to LLM (Gemini only)
+            # For Ollama: Skip this, execution history will be in the next prompt
+            is_gemini = LLM_BACKEND.lower() != "ollama"
+            
+            if is_gemini:
+                if self.logger:
+                    self.logger.info(f"\nSENDING FULL RESULT TO LLM via function_response")
+                llm_response = self.llm_client.send_function_response(tool_name, result)
+                if self.logger:
+                    self.logger.info(f"Captured LLM response from send_function_response (Gemini)")
+            else:
+                llm_response = None
         else:
             error_msg = result.get("error") if result else "No result"
             execution_history.append({
@@ -386,15 +409,33 @@ TOOL USAGE RULES:
                 "error": error_msg
             })
             print(f"Tool failed: {error_msg}")
+            
+            if self.logger:
+                self.logger.error(f"  Status: FAILED")
+                self.logger.error(f"SENDING ERROR TO LLM via function_response")
+                self.logger.error(f"  Error: {error_msg}")
+            
+            # Send error back to LLM (Gemini only)
+            # For Ollama: Skip this, execution history will be in the next prompt
+            is_gemini = LLM_BACKEND.lower() != "ollama"
+            
+            if is_gemini:
+                llm_response = self.llm_client.send_function_response(tool_name, error_msg)
+                if self.logger:
+                    self.logger.info(f"Captured LLM response from send_function_response (Gemini)")
+            else:
+                llm_response = None
 
         # Continue the task from where we left off
+        # Only pass _resume_response if using Gemini
         return await self.execute_task(
             goal=pending["goal"],
             data=pending["data"],
             imageList=pending["imageList"],
             max_iterations=pending["max_iterations"] - pending["iterations_used"],
             metadata=pending["metadata"],
-            _resume_history=execution_history
+            _resume_history=execution_history,
+            _resume_response=llm_response if is_gemini else None
         )
 
     def deny_tool_execution(self) -> Dict:
@@ -485,7 +526,7 @@ TOOL USAGE RULES:
     #         return {"tool_name": "monai.run_inference", "arguments": {"image_path": state["image_path"] or image_path, "model_name": state["model_name"]}}
     #     return None
 
-    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, session_id: str = None) -> Optional[Dict]:
+    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 
@@ -495,11 +536,24 @@ TOOL USAGE RULES:
             imageList: Optional list of images for processing
             max_iterations: Maximum number of tool executions allowed
             metadata: Optional dict with modality, body_part for filtering models
+            _resume_history: Optional execution history to resume from
+            _resume_response: Optional LLM response to use instead of generating new one
 
         Returns:
             Final result if successful, None if goal not achieved
         """
         print(f"Starting autonomous task: {goal}")
+        if self.logger:
+            self.logger.info("=" * 80)
+            self.logger.info(f"TASK START: {goal}")
+            self.logger.info(f"Max iterations: {max_iterations}")
+            if metadata:
+                self.logger.info(f"Metadata: {json.dumps(metadata, indent=2)}")
+            if imageList:
+                self.logger.info(f"Images provided: {len(imageList)} file(s)")
+            if data:
+                self.logger.info(f"Data provided: {len(str(data))} chars")
+        
         if metadata:
             print(f"Metadata: modality={metadata.get('modality')}, body_part={metadata.get('body_part')}")
 
@@ -520,31 +574,8 @@ TOOL USAGE RULES:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
             try:
-                # Build context with execution history including MCP responses
-                history_text = ""
-                if execution_history:
-                    history_text = "\n\nExecution history:\n"
-                    for i, event in enumerate(execution_history, 1):
-                        history_text += f"{i}. Called {event['tool']} → "
-                        if event['success']:
-                            # Show the actual result so agent can evaluate
-                            result_summary = event.get('result_summary', 'Success')
-                            result_data = event.get('result', {})
-                            history_text += f"Success. Result: {result_summary}\n"
-                            if result_data:
-                                # Add truncated response for context
-                                result_str = json.dumps(result_data, indent=2)
-                                if len(result_str) > 500:
-                                    history_text += f"   Response data (truncated): {result_str[:500]}...\n"
-                                else:
-                                    history_text += f"   Response data: {result_str}\n"
-                        else:
-                            error_msg = event.get('error') or 'Unknown error'
-                            # Ensure error is never None
-                            if error_msg is None or (isinstance(error_msg, str) and not error_msg.strip()):
-                                error_msg = 'Tool execution failed'
-                            history_text += f"Failed: {error_msg}"
-                        history_text += "\n"
+                # Note: Execution history is now managed by Gemini's chat session
+                # We don't need to build history_text anymore - it's redundant!
                 
                 # Prompt agent to decide next action OR declare success
                 data_context = ""
@@ -579,33 +610,82 @@ TOOL USAGE RULES:
                 session_ctx = self.session_context.build_context_string()
                 session_block = f"\n\n{session_ctx}" if session_ctx else ""
 
-                if not execution_history:
-                    # First iteration - include session context so agent knows what happened before
-                    prompt = f"""GOAL: {goal}{data_context}{image_context}{session_block}
+                # Check if we're using Gemini and have a response from previous send_function_response
+                is_gemini = LLM_BACKEND.lower() != "ollama"
+                
+                if is_gemini and _resume_response is not None:
+                    # Gemini optimization: Use the response we already got from send_function_response
+                    response = _resume_response
+                    _resume_response = None  # Clear for next iteration
+                    
+                    if self.logger:
+                        self.logger.info(f"\n{'='*60}")
+                        self.logger.info(f"ITERATION {iterations}/{max_iterations}")
+                        self.logger.info(f"{'='*60}")
+                        self.logger.info(f"\nUSING RESPONSE FROM send_function_response (no redundant prompt)\n")
+                        self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
+                    
+                    print(f"Using response from send_function_response (Gemini optimization)")
+                else:
+                    # Standard flow: prompt the LLM (always for Ollama, or first iteration for Gemini)
+                    if not execution_history:
+                        # First iteration - include session context so agent knows what happened before
+                        prompt = f"""GOAL: {goal}{data_context}{image_context}{session_block}
 
 Analyze the goal and decide your next action."""
-                else:
-                    # Subsequent iterations - evaluate previous result
-                    last_event = execution_history[-1]
-                    prompt = f"""GOAL: {goal}{data_context}{image_context}
-{history_text}
-
-The last tool returned: {last_event.get('result_summary', 'a result')}
-
+                    else:
+                        # After tool execution - ask for evaluation
+                        # For Ollama: Build execution history into the prompt since we don't use send_function_response
+                        history_text = ""
+                        if not is_gemini and execution_history:
+                            history_text = "\n\nExecution history:\n"
+                            for i, event in enumerate(execution_history, 1):
+                                history_text += f"{i}. Called {event['tool']} → "
+                                if event['success']:
+                                    # Show the actual result so agent can evaluate
+                                    result_summary = event.get('result_summary', 'Success')
+                                    result_data = event.get('result', {})
+                                    history_text += f"Success. Result: {result_summary}\n"
+                                    if result_data:
+                                        # Add truncated response for context
+                                        result_str = json.dumps(result_data, indent=2)
+                                        if len(result_str) > 500:
+                                            history_text += f"   Response data (truncated): {result_str[:500]}...\n"
+                                        else:
+                                            history_text += f"   Response data: {result_str}\n"
+                                else:
+                                    error_msg = event.get('error') or 'Unknown error'
+                                    # Ensure error is never None
+                                    if error_msg is None or (isinstance(error_msg, str) and not error_msg.strip()):
+                                        error_msg = 'Tool execution failed'
+                                    history_text += f"Failed: {error_msg}\n"
+                        
+                        prompt = f"""{history_text}
 Does this accomplish the goal?
-- If YES: Respond with explicitaly "GOAL_ACHIEVED" and provide the final result
-- If NO: Take the next action
-- If you need more information to proceed, say "NEED MORE INFO" and specify what you need.
+- If YES: Respond with explicitly "GOAL_ACHIEVED" and provide the final result
+- If NO: Call the next tool you need
+- If you need more information, say "NEED MORE INFO" and specify what you need.
 
 Your decision:"""
 
-                print(f"Prompt: {prompt}")
-                
-                # Prepare content with actual images for Gemini
-                content_parts = [prompt]
-                
-                response = self.llm_client.generate_content(content_parts, images_for_llm)
-                print(f"Response: {response}")
+                    print(f"Prompt: {prompt}")
+                    
+                    if self.logger:
+                        self.logger.info(f"\n{'='*60}")
+                        self.logger.info(f"ITERATION {iterations}/{max_iterations}")
+                        self.logger.info(f"{'='*60}")
+                        self.logger.info(f"\nPROMPT SENT TO LLM:\n{prompt}\n")
+                        if images_for_llm:
+                            self.logger.info(f"Images attached: {len(images_for_llm)} file(s)")
+                    
+                    # Prepare content with actual images for Gemini
+                    content_parts = [prompt]
+                    
+                    response = self.llm_client.generate_content(content_parts, images_for_llm)
+                    print(f"Response: {response}")
+                    
+                    if self.logger:
+                        self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
                 
                 # Check if agent declares success (text response, no tool call)
                 has_text = False
@@ -621,6 +701,14 @@ Your decision:"""
                                 # Return detailed response with execution history
                                 answer = self._extract_answer_from_results(part.text, execution_history, final_result)
                                 tools_used = [event['tool'] for event in execution_history if event['success']]
+                                
+                                if self.logger:
+                                    self.logger.info(f"\n{'='*60}")
+                                    self.logger.info(f"TASK COMPLETED SUCCESSFULLY")
+                                    self.logger.info(f"  Iterations used: {iterations}")
+                                    self.logger.info(f"  Tools used: {tools_used}")
+                                    self.logger.info(f"  Answer: {answer}")
+                                    self.logger.info(f"{'='*80}\n")
                                 
                                 return {
                                     "type": "agent_response",
@@ -673,6 +761,12 @@ Your decision:"""
                             # Check if confirmation is required
                             if self.require_confirmation:
                                 print(f"Tool confirmation required: {tool_name}")
+                                
+                                if self.logger:
+                                    self.logger.info(f"\nTOOL CONFIRMATION REQUIRED:")
+                                    self.logger.info(f"  Tool: {tool_name}")
+                                    self.logger.info(f"  Arguments: {json.dumps(arguments, indent=4)}")
+                                
                                 self.pending_tool_call = {
                                     "tool_name": tool_name,
                                     "arguments": arguments,
@@ -694,8 +788,19 @@ Your decision:"""
 
                             # Execute the tool
                             print(f"Executing: {tool_name}")
+                            
+                            if self.logger:
+                                self.logger.info(f"\nTOOL CALL REQUESTED:")
+                                self.logger.info(f"  Tool: {tool_name}")
+                                self.logger.info(f"  Arguments: {json.dumps(arguments, indent=4)}")
 
                             result = await self.tool_registry.execute_tool(tool_name, arguments, logs=True)
+                            
+                            if self.logger:
+                                self.logger.info(f"\nTOOL RESULT:")
+                                self.logger.info(f"  Tool: {tool_name}")
+                                result_full = json.dumps(result, indent=4) if isinstance(result, dict) else str(result)
+                                self.logger.info(f"  Result: {result_full}")
 
                             # Check if result contains an error
                             is_error = False
@@ -703,6 +808,7 @@ Your decision:"""
                                 is_error = result.get("is_error") or result.get("error") or "error" in str(result.get("text", "")).lower()
 
                             # Record execution with result details
+                            print(f"TOOL EXECUTION RESULT: {result}")
                             if result and not is_error:
                                 # Create human-readable summary based on tool type
                                 result_summary = self._create_result_summary(tool_name, result)
@@ -720,6 +826,19 @@ Your decision:"""
 
                                 final_result = result
                                 print(f"Tool succeeded: {result_summary}")
+                                
+                                if self.logger:
+                                    self.logger.info(f"  Status: SUCCESS")
+                                    self.logger.info(f"  Summary: {result_summary}")
+                                
+                                # Send tool result back to LLM (Gemini only)
+                                # For Ollama: Skip this, execution history will be in the next prompt
+                                if is_gemini:
+                                    if self.logger:
+                                        self.logger.info(f"\nSENDING FULL RESULT TO LLM via function_response")
+                                    _resume_response = self.llm_client.send_function_response(tool_name, result)
+                                    if self.logger:
+                                        self.logger.info(f"Captured response from send_function_response - will use on next iteration")
                             elif result and is_error:
                                 # Ensure error_msg is always a string, never None
                                 error_msg = result.get("error") or result.get("text") or "Unknown error"
@@ -731,14 +850,38 @@ Your decision:"""
                                     "error": str(error_msg),  # Ensure it's a string
                                     "result": result
                                 })
+                                
+                                # Send error back to LLM (Gemini only)
+                                # For Ollama: Skip this, execution history will be in the next prompt
+                                if is_gemini:
+                                    error_response = {"error": str(error_msg), "is_error": True}
+                                    if self.logger:
+                                        self.logger.info(f"\nSENDING ERROR TO LLM via function_response")
+                                    _resume_response = self.llm_client.send_function_response(tool_name, error_response)
+                                
                                 print(f"Tool failed: {error_msg}")
+                                
+                                if self.logger:
+                                    self.logger.error(f"  Status: FAILED")
+                                    self.logger.error(f"  Error: {error_msg}")
                             else:
+                                # Send error back to LLM (Gemini only)
+                                # For Ollama: Skip this, execution history will be in the next prompt
+                                if is_gemini:
+                                    error_response = {"error": "Execution returned no result", "is_error": True}
+                                    if self.logger:
+                                        self.logger.info(f"\nSENDING NO-RESULT ERROR TO LLM via function_response")
+                                    _resume_response = self.llm_client.send_function_response(tool_name, error_response)
+                                
                                 execution_history.append({
                                     "tool": tool_name,
                                     "success": False,
                                     "error": "Execution returned no result"
                                 })
                                 print(f"Tool execution failed")
+                                
+                                if self.logger:
+                                    self.logger.error(f"  Status: FAILED - No result returned")
                 
                 # If agent responded with text but no tool call
                 if has_text and not has_function_call:
@@ -771,6 +914,9 @@ Your decision:"""
                         })
                     
             except Exception as e:
+                print(f"Error in agentic workflow: {type(e).__name__}: {e}")
+                if self.logger:
+                    self.logger.error(f"Exception in workflow: {type(e).__name__}: {e}", exc_info=True)
                 error_message = str(e) if e else "Unknown workflow error"
 
                 # Stop immediately on rate limit errors - no point retrying
@@ -791,7 +937,12 @@ Your decision:"""
                     "error": error_message,
                     "result": None
                 })
+        
         print("Max iterations reached or goal not achieved.")
+        if self.logger:
+            self.logger.warning(f"TASK ENDED: Max iterations reached ({max_iterations}) - goal not achieved")
+            self.logger.info(f"Total successful tools: {sum(1 for e in execution_history if e.get('success'))}")
+            self.logger.info(f"={'='*80}\n")
         return None
     
     def _create_result_summary(self, tool_name: str, result: Any) -> str:

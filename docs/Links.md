@@ -46,3 +46,6 @@
 - https://github.com/K-Dense-AI/claude-scientific-skills
 
 
+### MCP NEWS
+
+- https://www.pulsemcp.com/

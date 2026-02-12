@@ -183,6 +183,37 @@ TOOL USAGE RULES:
         self.session_context.clear()
         print("Session context cleared.")
 
+    def save_context_to_db(self, session_id: str):
+        """Persist current session context entries to the database."""
+        import database as db
+        # Clear existing DB entries for this session, then save current state
+        db.clear_session_context(session_id)
+        for entry in self.session_context.entries:
+            db.save_context_entry(
+                session_id,
+                entry["tool"],
+                entry["summary"],
+                entry.get("data", {}),
+                entry.get("timestamp", datetime.now().isoformat())
+            )
+        print(f"Saved {len(self.session_context.entries)} context entries to DB.")
+
+    def load_context_from_db(self, session_id: str):
+        """Restore session context from the database."""
+        import database as db
+        entries = db.load_session_context(session_id)
+        self.session_context.clear()
+        self.session_context.entries = entries
+        print(f"Loaded {len(entries)} context entries from DB.")
+
+    def _record_and_persist(self, tool_name: str, result_summary: str, key_data: Dict, session_id: str = None):
+        """Record to in-memory context AND persist to DB."""
+        self.session_context.record(tool_name, result_summary, key_data)
+        if session_id:
+            import database as db
+            timestamp = self.session_context.entries[-1].get("timestamp", datetime.now().isoformat())
+            db.save_context_entry(session_id, tool_name, result_summary, key_data, timestamp)
+
     def _extract_key_data(self, tool_name: str, result: Any) -> Dict[str, Any]:
         """Extract the key facts from a tool result for session context."""
         if not isinstance(result, dict):
@@ -313,7 +344,7 @@ TOOL USAGE RULES:
         return "\n".join(skills_text) if skills_text else "No skills available"
     
 
-    async def confirm_tool_execution(self) -> Optional[Dict]:
+    async def confirm_tool_execution(self, session_id: str = None) -> Optional[Dict]:
         """Execute the pending tool after user confirmation"""
         if not self.pending_tool_call:
             return {"error": "No pending tool call to confirm"}
@@ -345,7 +376,7 @@ TOOL USAGE RULES:
             })
             # Record to session context for cross-query memory
             key_data = self._extract_key_data(tool_name, result)
-            self.session_context.record(tool_name, result_summary, key_data)
+            self._record_and_persist(tool_name, result_summary, key_data, session_id)
             print(f"Tool succeeded: {result_summary}")
         else:
             error_msg = result.get("error") if result else "No result"
@@ -454,7 +485,7 @@ TOOL USAGE RULES:
     #         return {"tool_name": "monai.run_inference", "arguments": {"image_path": state["image_path"] or image_path, "model_name": state["model_name"]}}
     #     return None
 
-    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None) -> Optional[Dict]:
+    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, session_id: str = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 
@@ -685,7 +716,7 @@ Your decision:"""
 
                                 # Record to session context for cross-query memory
                                 key_data = self._extract_key_data(tool_name, result)
-                                self.session_context.record(tool_name, result_summary, key_data)
+                                self._record_and_persist(tool_name, result_summary, key_data, session_id)
 
                                 final_result = result
                                 print(f"Tool succeeded: {result_summary}")

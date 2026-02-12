@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import asyncio
-from email.mime import image
 import json
 import os
-import tempfile
+import shutil
+import uuid
 import python_multipart
-from typing import AsyncGenerator, Optional
+from typing import Optional
 from dotenv import load_dotenv
 
 # Load env BEFORE importing agenticAgent so LLM_BACKEND is set
@@ -13,28 +13,22 @@ load_dotenv()
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from agenticAgent import agent_decision
+import database as db
 
-workflow_queue = []
+current_session_id: Optional[str] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup code
+    global current_session_id
+    # Startup
+    db.init_db()
+    current_session_id = db.create_session()
     await agent_decision._initialize_components()
     yield
-    # Shutdown code - clean up files, session context, and close MCP sessions
-    uploaded_files.clear()
-    for temp_path in temp_file_paths.values():
-        try:
-            os.unlink(temp_path)
-        except:
-            pass
-    temp_file_paths.clear()
+    # Shutdown - close MCP sessions
     agent_decision.reset_session_context()
-
-    # Close MCP sessions properly
     try:
         await agent_decision.close()
     except Exception as e:
@@ -50,8 +44,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-uploaded_files = []  # Store uploaded files in memory
-temp_file_paths = {}  # Store temporary file paths for processing
+uploaded_files = []  # In-memory buffer for current upload (before query)
+temp_file_paths = {}  # Temp file paths mapped by filename
 
 
 async def send_step(step_type: str, message: str, **kwargs) -> str:
@@ -83,33 +77,35 @@ async def set_metadata(data: dict = Body(...)):
 async def process_query(query: str = Body(..., media_type="text/plain")):
     print(f"Processing ad-hoc query: {query}")
     try:
-        if not uploaded_files:
-            result = await agent_decision.execute_task(query, )
+        # Get files for current session from DB (persistent paths)
+        session_files = db.get_session_files(current_session_id)
+
+        if not uploaded_files and not session_files:
+            result = await agent_decision.execute_task(query, session_id=current_session_id)
         else:
-            # Use existing uploaded files
             image_data = []
-            try:
+            # Use in-memory files first (just uploaded), fall back to DB files
+            if uploaded_files:
                 for filename, contents in uploaded_files:
-                    # Create temporary file with original extension
-                    # Handle double extensions like .nii.gz
-                    if filename.endswith('.nii.gz'):
-                        file_extension = '.nii.gz'
-                    else:
-                        file_extension = os.path.splitext(filename)[1] or '.tmp'
-                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_extension)
-                    temp_file.write(contents)
-                    temp_file.close()
-                    temp_file_paths[filename] = temp_file.name
-                    
-                    # Add tuple of (temp_filepath, content) to the list
-                    image_data.append((temp_file.name, contents))
-                    print(f"Saved {filename} to {temp_file.name}")
-                
-                
-                result = await agent_decision.execute_task(query, imageList=image_data)
-            except Exception as e:
-                print(f"Error preparing files for query: {e}")
-                return {"result": {"error": str(e)}}
+                    stored_path = temp_file_paths.get(filename)
+                    if stored_path and os.path.exists(stored_path):
+                        image_data.append((stored_path, contents))
+                        print(f"Using persistent file: {stored_path}")
+            elif session_files:
+                # Load from persistent storage
+                for f in session_files:
+                    path = f["stored_path"]
+                    if os.path.exists(path):
+                        with open(path, "rb") as fh:
+                            contents = fh.read()
+                        image_data.append((path, contents))
+                        print(f"Using DB file: {path}")
+
+            if image_data:
+                result = await agent_decision.execute_task(query, imageList=image_data, session_id=current_session_id)
+            else:
+                result = await agent_decision.execute_task(query, session_id=current_session_id)
+
         return {"result": result}
     except Exception as e:
         print(f"Error processing query: {e}")
@@ -122,19 +118,30 @@ async def upload_file(file: UploadFile = File(...)):
     global uploaded_files, temp_file_paths
     print(f"Received file: {file.filename}")
     try:
-        # Clear previous files when uploading a new one
-        for temp_path in temp_file_paths.values():
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
-        temp_file_paths.clear()
+        # Clear previous in-memory buffer
         uploaded_files.clear()
+        temp_file_paths.clear()
 
         contents = await file.read()
+
+        # Persist to data/uploads/ with unique name
+        ext = os.path.splitext(file.filename)[1] if not file.filename.endswith('.nii.gz') else '.nii.gz'
+        stored_name = f"{uuid.uuid4().hex[:12]}_{file.filename}"
+        stored_path = str(db.UPLOADS_DIR / stored_name)
+
+        with open(stored_path, "wb") as f:
+            f.write(contents)
+
+        # Track in database
+        file_type = ext.lstrip('.') or 'unknown'
+        file_id = db.save_uploaded_file(current_session_id, file.filename, stored_path, file_type, len(contents))
+
+        # Keep in memory for immediate query use
         uploaded_files.append((file.filename, contents))
-        print(f"Uploaded files list now has {len(uploaded_files)} file(s)")
-        return {"status": "success", "filename": file.filename, "size": len(contents)}
+        temp_file_paths[file.filename] = stored_path
+
+        print(f"Uploaded {file.filename} -> {stored_path} (file_id={file_id})")
+        return {"status": "success", "filename": file.filename, "size": len(contents), "file_id": file_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -231,7 +238,7 @@ async def get_pending_tool():
 @app.post("/api/confirm-tool")
 async def confirm_tool():
     """Confirm and execute the pending tool"""
-    result = await agent_decision.confirm_tool_execution()
+    result = await agent_decision.confirm_tool_execution(session_id=current_session_id)
     return {"result": result}
 
 
@@ -245,35 +252,110 @@ async def deny_tool():
 
 @app.post("/api/clear-files")
 async def clear_files():
-    """Manually clear uploaded files and session context"""
+    """Clear in-memory file buffer"""
     global uploaded_files, temp_file_paths
-    for temp_path in temp_file_paths.values():
-        try:
-            os.unlink(temp_path)
-        except:
-            pass
     temp_file_paths.clear()
     uploaded_files.clear()
-    agent_decision.reset_session_context()
     return {"status": "cleared"}
 
 
 @app.post("/api/reset-session")
 async def reset_session():
-    """Clear session context, uploaded files, and LLM chat history"""
-    global uploaded_files, temp_file_paths
-    for temp_path in temp_file_paths.values():
-        try:
-            os.unlink(temp_path)
-        except:
-            pass
+    """Start a fresh session - clears context and LLM history, creates new session"""
+    global current_session_id, uploaded_files, temp_file_paths
     temp_file_paths.clear()
     uploaded_files.clear()
     agent_decision.reset_session_context()
-    # Reset LLM chat history too
     if agent_decision.llm_client:
         agent_decision.llm_client.start_chat()
-    return {"status": "session_reset"}
+    # Create a new session
+    current_session_id = db.create_session()
+    return {"status": "session_reset", "session_id": current_session_id}
+
+
+# --- Session Management ---
+
+@app.post("/api/save-session")
+async def save_session(data: dict = Body(...)):
+    """Save/persist the current session with a name"""
+    name = data.get("name")
+    if not name:
+        return {"error": "name is required"}
+    db.update_session(current_session_id, name=name, persisted=True)
+    # Save current in-memory context to DB
+    agent_decision.save_context_to_db(current_session_id)
+    return {"status": "saved", "session_id": current_session_id, "name": name}
+
+
+@app.get("/api/sessions")
+async def list_sessions(persisted_only: bool = False):
+    """List all sessions"""
+    sessions = db.list_sessions(persisted_only=persisted_only)
+    for s in sessions:
+        files = db.get_session_files(s["id"])
+        s["file_count"] = len(files)
+        s["total_size"] = db.get_session_total_size(s["id"])
+    return {"sessions": sessions, "current_session_id": current_session_id}
+
+
+@app.delete("/api/delete-session")
+async def delete_session(data: dict = Body(...)):
+    """Delete a session and all its files"""
+    global current_session_id
+    session_id = data.get("session_id")
+    if not session_id:
+        return {"error": "session_id is required"}
+    if session_id == current_session_id:
+        return {"error": "Cannot delete the active session. Switch to another session first."}
+    session = db.get_session(session_id)
+    if not session:
+        return {"error": "Session not found"}
+    db.delete_session(session_id)
+    return {"status": "deleted", "session_id": session_id}
+
+
+@app.post("/api/load-session")
+async def load_session(data: dict = Body(...)):
+    """Load a saved session - restores context and file references"""
+    global current_session_id, uploaded_files, temp_file_paths
+    session_id = data.get("session_id")
+    if not session_id:
+        return {"error": "session_id is required"}
+
+    session = db.get_session(session_id)
+    if not session:
+        return {"error": "Session not found"}
+
+    # Switch to this session
+    current_session_id = session_id
+    uploaded_files.clear()
+    temp_file_paths.clear()
+
+    # Restore context into the agent
+    agent_decision.load_context_from_db(session_id)
+
+    # Reset LLM chat (context comes from SessionContext injection, not chat history)
+    if agent_decision.llm_client:
+        agent_decision.llm_client.start_chat()
+
+    # Restore patient focus if session had one
+    if session.get("patient_id") and session.get("patient_name"):
+        agent_decision.set_patient_focus(session["patient_id"], session["patient_name"])
+
+    return {
+        "status": "loaded",
+        "session_id": session_id,
+        "name": session["name"],
+        "files": db.get_session_files(session_id)
+    }
+
+
+@app.get("/api/session-files")
+async def get_session_files(session_id: Optional[str] = None):
+    """Get files for a session (defaults to current)"""
+    sid = session_id or current_session_id
+    files = db.get_session_files(sid)
+    return {"session_id": sid, "files": files}
 
 
 

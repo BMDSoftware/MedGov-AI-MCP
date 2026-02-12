@@ -3,6 +3,7 @@ import { API_CONFIG, getApiUrl } from './config';
 import './App.css';
 import Settings from './components/Settings';
 import PatientSelection from './components/PatientSelection';
+import Sessions from './components/Sessions';
 
 function App() {
   // --- State and refs ---
@@ -299,6 +300,26 @@ function App() {
           <Settings />
         ) : page === 'patient-selection' ? (
           <PatientSelection onPatientSelect={handlePatientSelection} />
+        ) : page === 'history' ? (
+          <Sessions onLoadSession={(data) => {
+            if (data) {
+              // Session loaded - switch to analysis view
+              if (data.name) {
+                addMessage({ type: 'bot', content: `Session "${data.name}" loaded. You can continue where you left off.` });
+              }
+              setPage('analysis');
+            } else {
+              // New session created
+              setMessages([{
+                type: 'bot',
+                content: 'New session started. Select a patient or upload a file to begin.',
+                actions: []
+              }]);
+              setSelectedPatient(null);
+              setUploadedFile(null);
+              setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null, selectedPatient: null, patientContext: null });
+            }
+          }} />
         ) : (
           <div className="chat">
             <div className="messages">

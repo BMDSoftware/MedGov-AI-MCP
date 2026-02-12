@@ -35,6 +35,9 @@ Thumbs.db
 *.db
 *.sqlite
 
+# Persistent data (uploads, cache)
+orchestrator/data/
+
 node_modules/
 
 # MCP config (machine-specific paths)

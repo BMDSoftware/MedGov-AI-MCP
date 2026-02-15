@@ -100,8 +100,9 @@ class SkillsManager:
         
         return self.skill_cache[name]
     
+    
     def _list_skill_files(self, name: str) -> List[str]:
-        """List all files in a skill directory (excluding SKILL.md).
+        """List all files in a skill directory (excluding SKILL.md and hidden files).
         
         Returns relative paths from skill directory root.
         """
@@ -111,26 +112,17 @@ class SkillsManager:
         skill_dir = self.skills[name].path.parent
         files = []
         
+        
         for path in skill_dir.rglob("*"):
-            if path.is_file() and path.name != "SKILL.md":
+            # 3. Filter out hidden files (those starting with '.')
+            if path.is_file() and not path.name.startswith('.') and not path.name == "SKILL.md":
                 # Get relative path from skill directory
                 rel_path = path.relative_to(skill_dir)
                 files.append(str(rel_path))
         
         return sorted(files)
     
-    def list_skill_files(self, name: str) -> Optional[List[str]]:
-        """Public method to list available files in a skill.
-        
-        Args:
-            name: Skill name
-            
-        Returns:
-            List of relative file paths or None if skill doesn't exist
-        """
-        if name not in self.skills:
-            return None
-        return self._list_skill_files(name)
+
     
     def load_skill_file(self, name: str, file_path: str) -> Optional[str]:
         """Load a specific file from a skill directory with security validation.

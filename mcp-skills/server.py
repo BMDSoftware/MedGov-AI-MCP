@@ -65,7 +65,7 @@ def read_references(skill_name: str, file_path: str) -> Dict[str, Any]:
     Read a specific reference/helper file from a skill directory.
     
     Use this to load detailed documentation, schemas, or configuration files
-    that are referenced in SKILL.md or listed by list_skill_files.
+    that are referenced in SKILL.md.
     
     :param skill_name: Name of the skill
     :param file_path: Relative path to the file within the skill directory (e.g., "references/pipeline.md")
@@ -77,7 +77,7 @@ def read_references(skill_name: str, file_path: str) -> Dict[str, Any]:
     if content is None:
         return {
             "error": f"File '{file_path}' not found in skill '{skill_name}'",
-            "available_files": skills_manager.list_skill_files(skill_name) or []
+            "available_files": skills_manager._list_skill_files(skill_name) or []
         }
     
     log(f"Read {len(content)} characters from {file_path}")

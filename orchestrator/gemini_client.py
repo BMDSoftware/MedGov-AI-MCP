@@ -16,7 +16,7 @@ class GeminiClient:
         self.genai_client = None
         self.chat_session = None  # Tracks the stateful conversation history
         self.available_tools = available_tools
-        self.model_id = "gemini-2.5-flash"
+        self.model_id = "gemini-2.0-flash"
         self.agent_config = None
         self.gemini_tools_list = []
         self.custom_system_prompt = None  # Store custom system prompt
@@ -132,35 +132,35 @@ class GeminiClient:
         #     f"- {name}: {info['description']}"
         #     for name, info in self.available_tools.items()
         # ])
-        # return f"""
-        # # ROLE
-        # You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
-        #
-        # # AVAILABLE SKILLS (DIRECTORY)
-        # {self.skills}
-        #
-        # # SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
-        # You do not have all instructions loaded into your memory at once. You must follow this tiered workflow:
-        #
-        # 1. **DISCOVERY (Current State):** You can see the "Available Skills" list above. If a user asks "What can you do?", explain these skills based on their descriptions. Do NOT call a tool just to list them.
-        # 2. **READ SKILL:** When a task requires a specific skill, call `skills.read_skill_file(skill_name)` to get the detailed instructions and rules (SKILL.md) for that domain.
-        # 3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, first use `skills.list_skill_files(skill_name)` to see available files, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
-        # 4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
-        #
-        # # OPERATIONAL RULES
-        # - **One at a Time:** Work with only one skill at a time.
-        # - **No Hallucinations:** If you do not have a skill that matches the user's request, state: "I do not have the specific clinical skill required for this task." Do not attempt to guess or simulate skill outputs.
-        # - **Independence:** Skills are external resources. Treat their outputs as clinical observations that require your professional interpretation.
-        #
-        # # INTERACTION GUIDELINES
-        # - **If the user asks for information/capabilities:** Read from the "Available Skills" list above and describe them.
-        # - **If the user requests a clinical action (e.g., "Analyze the labs"):**
-        #     1. Identify the correct skill from the directory.
-        #     2. Call `skills.read_skill_file(skill_name)`.
-        #     3. Follow the instructions returned by that tool to complete the request.
-        #
-        # # EMERGENCY & SAFETY
-        # If the patient's data appears critical or the tools return error codes, prioritize clear communication of the status over performing complex analysis."""
+        return f"""
+         # ROLE
+         You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
+        
+         # AVAILABLE SKILLS (DIRECTORY)
+         {self.skills}
+        
+         # SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
+         You do not have all instructions loaded into your memory at once. You must follow this tiered workflow:
+        
+         1. **DISCOVERY (Current State):** You can see the "Available Skills" list above. If a user asks "What can you do?", explain these skills based on their descriptions. Do NOT call a tool just to list them.
+         2. **READ SKILL:** When a task requires a specific skill, call `skills.read_skill_file(skill_name)` to get the detailed instructions and rules (SKILL.md) for that domain.
+         3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
+         4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
+        
+         # OPERATIONAL RULES
+         - **One at a Time:** Work with only one skill at a time.
+         - **No Hallucinations:** If you do not have a skill that matches the user's request, state: "I do not have the specific clinical skill required for this task." Do not attempt to guess or simulate skill outputs.
+         - **Independence:** Skills are external resources. Treat their outputs as clinical observations that require your professional interpretation.
+        
+         # INTERACTION GUIDELINES
+         - **If the user asks for information/capabilities:** Read from the "Available Skills" list above and describe them.
+         - **If the user requests a clinical action (e.g., "Analyze the labs"):**
+             1. Identify the correct skill from the directory.
+             2. Call `skills.read_skill_file(skill_name)`.
+             3. Follow the instructions returned by that tool to complete the request.
+        
+        # EMERGENCY & SAFETY
+        If the patient's data appears critical or the tools return error codes, prioritize clear communication of the status over performing complex analysis."""
 
         return """You are a healthcare AI assistant. You help medical professionals by analyzing medical images, parsing DICOM files, generating radiology reports, and retrieving patient data.
 
@@ -212,5 +212,19 @@ TOOL USAGE RULES:
             message=content_parts,
             config=self.agent_config
         )
-
-
+    
+    def send_function_response(self, function_name: str, response_data: Any) -> Any:
+        """Send a function/tool result back to Gemini using proper FunctionResponse format.
+        This sends the COMPLETE result without truncation."""
+        
+        # Wrap the complete result in a FunctionResponse Part
+        function_response = types.Part.from_function_response(
+            name=function_name,
+            response={"result": response_data}  # Send the WHOLE result here
+        )
+        
+        # Send it back to the chat session
+        return self.chat_session.send_message(
+            message=[function_response],
+            config=self.agent_config
+        )

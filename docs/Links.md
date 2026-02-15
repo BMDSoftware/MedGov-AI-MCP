@@ -49,3 +49,4 @@
 ### MCP NEWS
 
 - https://www.pulsemcp.com/
+- https://mcpmarket.com/news

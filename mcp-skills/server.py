@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from mcp.server.fastmcp import FastMCP
 
-# Add parent directory to path to import SkillsManager
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add current directory to path to import SkillsManager
+sys.path.insert(0, str(Path(__file__).parent))
 from skillsManager import SkillsManager
 
 

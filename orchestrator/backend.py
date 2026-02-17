@@ -6,6 +6,7 @@ import shutil
 import uuid
 import python_multipart
 from typing import Optional
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load env BEFORE importing agenticAgent so LLM_BACKEND is set
@@ -31,8 +32,8 @@ async def lifespan(app: FastAPI):
     agent_decision.reset_session_context()
     try:
         await agent_decision.close()
-    except Exception as e:
-        print(f"Error closing agent: {e}")
+    except BaseException:
+        pass
 
 app = FastAPI(title="Agentic Health Assistant API", lifespan=lifespan)
 
@@ -141,7 +142,7 @@ async def upload_file(file: UploadFile = File(...)):
         temp_file_paths[file.filename] = stored_path
 
         print(f"Uploaded {file.filename} -> {stored_path} (file_id={file_id})")
-        return {"status": "success", "filename": file.filename, "size": len(contents), "file_id": file_id}
+        return {"status": "success", "filename": file.filename, "size": len(contents), "file_id": file_id, "stored_path": stored_path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -359,6 +360,116 @@ async def get_session_files(session_id: Optional[str] = None):
 
 
 
+
+
+# --- Test Endpoints: Direct MONAI Tool Calls ---
+# These bypass the LLM agent entirely and call MCP tools directly via tool_registry.
+# Used by the frontend "Test" tab for manually stepping through the inference pipeline
+# (select file -> analyze -> pick model -> download -> run inference).
+
+@app.get("/api/monai/sample-data")
+async def list_sample_data():
+    """List available sample data files for testing"""
+    base = Path(__file__).parent.parent
+    # Scan known sample/test directories for medical images
+    scan_dirs = [
+        (base / "mcp-monai" / "sample_data" / "Task09_Spleen" / "Task09_Spleen" / "imagesTr", "spleen_dataset"),
+        (base / "test_data", "test_data"),
+    ]
+
+    files = []
+    for scan_dir, source_label in scan_dirs:
+        if not scan_dir.exists():
+            continue
+        for f in sorted(scan_dir.iterdir()):
+            if not f.is_file():
+                continue
+            if f.suffix == '.dcm':
+                ftype = "dcm"
+            elif f.name.endswith('.nii.gz'):
+                ftype = "nii.gz"
+            elif f.suffix == '.nii':
+                ftype = "nii"
+            else:
+                continue
+            files.append({
+                "name": f.name,
+                "path": str(f.resolve()),
+                "size": f.stat().st_size,
+                "type": ftype,
+                "source": source_label,
+            })
+
+    # Also include files uploaded to the DB (across all sessions)
+    conn = db._get_conn()
+    rows = conn.execute(
+        "SELECT original_name, stored_path, file_type, file_size FROM uploaded_files ORDER BY uploaded_at DESC"
+    ).fetchall()
+    conn.close()
+    for row in rows:
+        path = row["stored_path"]
+        if os.path.exists(path):
+            files.append({
+                "name": row["original_name"],
+                "path": path,
+                "size": row["file_size"] or 0,
+                "type": row["file_type"] or "unknown",
+                "source": "uploaded",
+            })
+
+    return {"files": files}
+
+
+@app.post("/api/monai/analyze")
+async def monai_analyze(data: dict = Body(...)):
+    """Analyze a medical image - direct MONAI tool call"""
+    path = data.get("path")
+    if not path:
+        raise HTTPException(status_code=400, detail="path is required")
+    result = await agent_decision.tool_registry.execute_tool(
+        "monai.analyze_image", {"path": path}, logs=True
+    )
+    return result
+
+
+@app.post("/api/monai/list-models")
+async def monai_list_models(data: dict = Body(...)):
+    """List available MONAI models"""
+    args = {}
+    if data.get("category"): args["category"] = data["category"]
+    if data.get("modality"): args["modality"] = data["modality"]
+    if data.get("body_part"): args["body_part"] = data["body_part"]
+    result = await agent_decision.tool_registry.execute_tool(
+        "monai.list_models", args, logs=True
+    )
+    return result
+
+
+@app.post("/api/monai/download-model")
+async def monai_download_model(data: dict = Body(...)):
+    """Download a model bundle from MONAI Model Zoo"""
+    model_name = data.get("model_name")
+    if not model_name:
+        raise HTTPException(status_code=400, detail="model_name is required")
+    result = await agent_decision.tool_registry.execute_tool(
+        "monai.download_model", {"model_name": model_name}, logs=True
+    )
+    return result
+
+
+@app.post("/api/monai/run-inference")
+async def monai_run_inference(data: dict = Body(...)):
+    """Run inference on a medical image"""
+    image_path = data.get("image_path")
+    model_name = data.get("model_name")
+    if not image_path or not model_name:
+        raise HTTPException(status_code=400, detail="image_path and model_name required")
+    result = await agent_decision.tool_registry.execute_tool(
+        "monai.run_inference",
+        {"image_path": image_path, "model_name": model_name},
+        logs=True
+    )
+    return result
 
 
 @app.get("/api/patients")

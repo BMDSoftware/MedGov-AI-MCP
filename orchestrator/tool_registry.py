@@ -70,8 +70,12 @@ class ToolRegistry:
                 
                 
 
+            except Exception as e:
+                print(f"[{name}] Not available - skipping ({type(e).__name__})")
+                continue
             except BaseException as e:
-                print(f"{name}: Failed to start: {e}")
+                # CancelledError, KeyboardInterrupt, etc.
+                print(f"[{name}] Not available - skipping ({type(e).__name__})")
                 continue
 
         '''

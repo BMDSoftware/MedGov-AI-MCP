@@ -4,6 +4,7 @@ import './App.css';
 import Settings from './components/Settings';
 import PatientSelection from './components/PatientSelection';
 import Sessions from './components/Sessions';
+import InferenceTest from './components/InferenceTest';
 
 function App() {
   // --- State and refs ---
@@ -250,6 +251,7 @@ function App() {
           <a href="#" className={`nav-item${page === 'patient-selection' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('patient-selection'); }}>Patients</a>
           <a href="#" className={`nav-item${page === 'analysis' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('analysis'); }}>Analysis</a>
           <a href="#" className={`nav-item${page === 'history' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('history'); }}>History</a>
+          <a href="#" className={`nav-item${page === 'test' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('test'); }}>Test</a>
           <a href="#" className={`nav-item${page === 'settings' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('settings'); }}>Settings</a>
         </nav>
         <div className="sidebar-footer">
@@ -300,6 +302,8 @@ function App() {
           <Settings />
         ) : page === 'patient-selection' ? (
           <PatientSelection onPatientSelect={handlePatientSelection} />
+        ) : page === 'test' ? (
+          <InferenceTest />
         ) : page === 'history' ? (
           <Sessions onLoadSession={(data) => {
             if (data) {

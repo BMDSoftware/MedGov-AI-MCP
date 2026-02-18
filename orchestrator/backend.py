@@ -37,6 +37,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Agentic Health Assistant API", lifespan=lifespan)
 
+
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
@@ -166,8 +169,14 @@ async def remove_file(filename: str):
 
 
 @app.post("/api/upload-directory")
-async def upload_directory(files: List[UploadFile] = File(...)):
-    """Upload a directory of DICOM slices. Stores all files in a subdirectory under uploads."""
+async def upload_directory(request: Request):
+    """Upload a directory of medical image files. Supports up to 10k files."""
+    from starlette.formparsers import MultiPartParser
+    parser = MultiPartParser(request.headers, request.stream(), max_files=10000, max_fields=10000)
+    multipart = await parser.parse()
+    files = multipart.multi_items()
+    # Filter to just UploadFile objects
+    files = [v for k, v in files if hasattr(v, 'read')]
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
     try:
@@ -185,8 +194,8 @@ async def upload_directory(files: List[UploadFile] = File(...)):
             contents = await f.read()
             # Use just the filename (strip any subdirectory from browser path)
             fname = f.filename.split("/")[-1] if f.filename else f"slice_{saved_count}"
-            # Skip non-DICOM junk files
-            if fname.startswith('.') or fname.endswith(('.png', '.sql', '.txt', '.zip')):
+            # Skip junk files (keep medical images: DICOM, JPEG, PNG, NIfTI, etc.)
+            if fname.startswith('.') or fname.endswith(('.sql', '.txt', '.zip', '.DS_Store')):
                 continue
             file_path = dir_path / fname
             with open(file_path, "wb") as out:
@@ -483,16 +492,23 @@ async def list_sample_data():
     if db.UPLOADS_DIR.exists():
         for d in sorted(db.UPLOADS_DIR.iterdir()):
             if d.is_dir():
-                slice_count = sum(1 for f in d.iterdir() if f.is_file() and not f.name.startswith('.'))
-                if slice_count > 0:
-                    total_size = sum(f.stat().st_size for f in d.iterdir() if f.is_file())
-                    files.append({
-                        "name": f"{d.name} ({slice_count} slices)",
-                        "path": str(d.resolve()),
-                        "size": total_size,
-                        "type": "dicom_series",
-                        "source": "uploaded",
-                    })
+                dir_files = [f for f in d.iterdir() if f.is_file() and not f.name.startswith('.')]
+                if not dir_files:
+                    continue
+                total_size = sum(f.stat().st_size for f in dir_files)
+                # Detect type from file extensions
+                sample_ext = dir_files[0].suffix.lower()
+                if sample_ext in ('.jpg', '.jpeg', '.png'):
+                    dir_type = "image_series"
+                else:
+                    dir_type = "dicom_series"
+                files.append({
+                    "name": f"{d.name} ({len(dir_files)} files)",
+                    "path": str(d.resolve()),
+                    "size": total_size,
+                    "type": dir_type,
+                    "source": "uploaded",
+                })
 
     # Also include single files uploaded to the DB
     conn = db._get_conn()

@@ -6,6 +6,8 @@
 
 - https://project-monai.github.io/deploy.html#getting-started
 - https://colab.research.google.com/github/Project-MONAI/tutorials/blob/main/modules/developer_guide.ipynb
+- https://monai.readthedocs.io/en/1.5.0/inferers.html
+- https://github.com/Project-MONAI/tutorials
 
 ### MEDMNIST
 

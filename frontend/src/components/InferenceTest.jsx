@@ -372,7 +372,14 @@ function InferenceTest() {
           {validationResult?.warnings?.map((w, i) => (
             <div key={i} className="validation-warning">{w}</div>
           ))}
-          {validationResult?.valid && (
+          {validationResult?.valid && validationResult?.is_image_dir && (
+            <div className="series-picker">
+              <p className="loading-text">
+                {validationResult.total_files} image slices detected - will be stacked into a 3D volume for inference
+              </p>
+            </div>
+          )}
+          {validationResult?.valid && !validationResult?.is_image_dir && (
             <div className="series-picker">
               <p className="loading-text">
                 Found {validationResult.total_files} files in {validationResult.series_count} series
@@ -411,7 +418,7 @@ function InferenceTest() {
             <button
               className="action-btn"
               onClick={handleAnalyze}
-              disabled={analyzing || (selectedFile?.type === 'dicom_series' && !validationResult?.valid)}
+              disabled={analyzing || (selectedFile?.type === 'dicom_series' && !validationResult?.is_image_dir && (!validationResult?.valid || !selectedSeries))}
             >
               {analyzing ? 'Analyzing...' : 'Run Analysis'}
             </button>

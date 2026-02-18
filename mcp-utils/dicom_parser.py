@@ -107,11 +107,20 @@ class DicomParser:
         if not os.path.isdir(dir_path):
             return {"error": f"Directory not found: {dir_path}"}
 
+        # Skip non-DICOM file types to avoid unnecessary warnings
+        SKIP_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif',
+                           '.txt', '.sql', '.zip', '.pdf', '.json', '.xml', '.csv', '.py'}
+
         files = []
         series = {}
 
         for root, _, filenames in os.walk(dir_path):
             for filename in filenames:
+                if filename.startswith('.'):
+                    continue
+                ext = os.path.splitext(filename)[1].lower()
+                if ext in SKIP_EXTENSIONS:
+                    continue
                 file_path = os.path.join(root, filename)
                 result = self.parse(file_path)
 

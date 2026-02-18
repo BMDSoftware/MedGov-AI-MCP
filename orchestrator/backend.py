@@ -370,6 +370,18 @@ async def delete_session(data: dict = Body(...)):
     return {"status": "deleted", "session_id": session_id}
 
 
+@app.delete("/api/delete-all-sessions")
+async def delete_all_sessions():
+    """Delete all saved sessions except the currently active one."""
+    sessions = db.list_sessions()
+    deleted = []
+    for s in sessions:
+        if s["id"] != current_session_id:
+            db.delete_session(s["id"])
+            deleted.append(s["id"])
+    return {"status": "deleted", "count": len(deleted)}
+
+
 @app.post("/api/load-session")
 async def load_session(data: dict = Body(...)):
     """Load a saved session - restores context and file references"""
@@ -536,6 +548,26 @@ async def validate_series(data: dict = Body(...)):
     dir_path = data.get("path")
     if not dir_path or not os.path.isdir(dir_path):
         raise HTTPException(status_code=400, detail="Valid directory path is required")
+
+    # Check if this is an image directory (JPEG/PNG) - not a DICOM series
+    IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif'}
+    dir_files = [f for f in Path(dir_path).iterdir() if f.is_file() and not f.name.startswith('.')]
+    if dir_files and Path(dir_files[0].name).suffix.lower() in IMAGE_EXTS:
+        return {
+            "valid": True,
+            "is_image_dir": True,
+            "total_files": len(dir_files),
+            "series_count": 1,
+            "series": [{
+                "uid": "image_dir",
+                "modality": None,
+                "body_part": None,
+                "description": f"Image slice directory ({len(dir_files)} slices)",
+                "slice_count": len(dir_files),
+                "files": [str(f) for f in dir_files[:5]],
+            }],
+            "warnings": [],
+        }
 
     try:
         result = await agent_decision.tool_registry.execute_tool(

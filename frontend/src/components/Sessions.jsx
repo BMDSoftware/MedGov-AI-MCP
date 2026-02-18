@@ -13,6 +13,7 @@ function Sessions({ onLoadSession }) {
   const [expandedSession, setExpandedSession] = useState(null);
   const [sessionFiles, setSessionFiles] = useState({});
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [savePrompt, setSavePrompt] = useState(null); // {targetSessionId} or 'new'
 
   const fetchSessions = async () => {
@@ -91,11 +92,24 @@ function Sessions({ onLoadSession }) {
 
   const doNewSession = async () => {
     try {
-      await fetch(`${API_URL}/api/reset-session`, { method: 'POST' });
+      const res = await fetch(`${API_URL}/api/reset-session`, { method: 'POST' });
+      const data = await res.json();
       await fetchSessions();
-      if (onLoadSession) onLoadSession(null);
+      if (onLoadSession) onLoadSession({ isNew: true, session_id: data.session_id });
     } catch (e) {
       setError('Failed to create new session.');
+    }
+  };
+
+  const handleClearAll = async () => {
+    try {
+      await fetch(`${API_URL}/api/delete-all-sessions`, { method: 'DELETE' });
+      setConfirmClearAll(false);
+      setExpandedSession(null);
+      setSessionFiles({});
+      await fetchSessions();
+    } catch (e) {
+      setError('Failed to clear sessions.');
     }
   };
 
@@ -223,9 +237,27 @@ function Sessions({ onLoadSession }) {
         </div>
       )}
 
+      {confirmClearAll && (
+        <div className="modal-overlay">
+          <div className="modal-box">
+            <p className="modal-title">Clear All Sessions</p>
+            <p className="modal-text">
+              Delete all saved sessions except the current one? This cannot be undone.
+            </p>
+            <div className="modal-actions">
+              <button className="delete-yes" onClick={handleClearAll}>Yes, Delete All</button>
+              <button className="cancel-btn" onClick={() => setConfirmClearAll(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="sessions-header">
         <h2>Sessions</h2>
-        <button className="new-session-btn" onClick={handleNewSession}>New Session</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="new-session-btn" onClick={handleNewSession}>New Session</button>
+          <button className="delete-btn" onClick={() => setConfirmClearAll(true)}>Clear All</button>
+        </div>
       </div>
 
       <div className="save-section">

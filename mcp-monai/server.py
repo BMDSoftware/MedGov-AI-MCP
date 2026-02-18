@@ -47,7 +47,9 @@ MODEL_REGISTRY = {
         "bundle_name": "spleen_ct_segmentation",
         "labels": {1: "spleen"},
         "input_size": [96, 96, 96],
-        "num_classes": 2
+        "num_classes": 2,
+        "sw_batch_size": 4,
+        "overlap": 0.5,
     },
     "swin_unetr_btcv_segmentation": {
         "category": "segmentation",
@@ -62,7 +64,9 @@ MODEL_REGISTRY = {
             11: "pancreas", 12: "right_adrenal_gland", 13: "left_adrenal_gland"
         },
         "input_size": [96, 96, 96],
-        "num_classes": 14
+        "num_classes": 14,
+        "sw_batch_size": 1,
+        "overlap": 0.5,
     },
     "pancreas_ct_dints_segmentation": {
         "category": "segmentation",
@@ -72,7 +76,9 @@ MODEL_REGISTRY = {
         "bundle_name": "pancreas_ct_dints_segmentation",
         "labels": {1: "pancreas", 2: "tumor"},
         "input_size": [96, 96, 96],
-        "num_classes": 3
+        "num_classes": 3,
+        "sw_batch_size": 2,
+        "overlap": 0.5,
     },
     "lung_nodule_ct_detection": {
         "category": "detection",
@@ -82,27 +88,89 @@ MODEL_REGISTRY = {
         "bundle_name": "lung_nodule_ct_detection",
         "labels": {1: "nodule"},
         "input_size": [96, 96, 96],
-        "num_classes": 2
+        "num_classes": 2,
+        "sw_batch_size": 4,
+        "overlap": 0.5,
     },
     "brats_mri_segmentation": {
         "category": "segmentation",
         "modality": "MRI",
         "body_part": "head",
-        "description": "Brain tumor segmentation on MRI (BraTS challenge)",
+        "description": "Brain tumor segmentation on MRI - requires 4-channel input (T1/T1ce/T2/FLAIR)",
         "bundle_name": "brats_mri_segmentation",
         "labels": {1: "necrotic_core", 2: "edema", 3: "enhancing_tumor"},
         "input_size": [128, 128, 128],
-        "num_classes": 4
+        "num_classes": 4,
+        "sw_batch_size": 1,
+        "overlap": 0.5,
     },
     "wholeBody_ct_segmentation": {
         "category": "segmentation",
         "modality": "CT",
         "body_part": "whole_body",
-        "description": "Whole body CT segmentation (104 structures)",
+        "description": "Whole body CT segmentation (104 structures including head/neck)",
         "bundle_name": "wholeBody_ct_segmentation",
-        "labels": {1: "multiple_structures"},
+        "labels": {
+            1: "spleen", 2: "kidney_right", 3: "kidney_left", 4: "gallbladder",
+            5: "liver", 6: "stomach", 7: "aorta", 8: "inferior_vena_cava",
+            9: "portal_vein_and_splenic_vein", 10: "pancreas",
+            11: "adrenal_gland_right", 12: "adrenal_gland_left",
+            13: "lung_upper_lobe_left", 14: "lung_lower_lobe_left",
+            15: "lung_upper_lobe_right", 16: "lung_middle_lobe_right",
+            17: "lung_lower_lobe_right",
+            18: "vertebrae_L5", 19: "vertebrae_L4", 20: "vertebrae_L3",
+            21: "vertebrae_L2", 22: "vertebrae_L1", 23: "vertebrae_T12",
+            24: "vertebrae_T11", 25: "vertebrae_T10", 26: "vertebrae_T9",
+            27: "vertebrae_T8", 28: "vertebrae_T7", 29: "vertebrae_T6",
+            30: "vertebrae_T5", 31: "vertebrae_T4", 32: "vertebrae_T3",
+            33: "vertebrae_T2", 34: "vertebrae_T1", 35: "vertebrae_C7",
+            36: "vertebrae_C6", 37: "vertebrae_C5", 38: "vertebrae_C4",
+            39: "vertebrae_C3", 40: "vertebrae_C2", 41: "vertebrae_C1",
+            42: "esophagus", 43: "trachea",
+            44: "heart_myocardium", 45: "heart_atrium_left",
+            46: "heart_ventricle_left", 47: "heart_atrium_right",
+            48: "heart_ventricle_right", 49: "pulmonary_artery",
+            50: "brain",
+            51: "iliac_artery_left", 52: "iliac_artery_right",
+            53: "iliac_vena_left", 54: "iliac_vena_right",
+            55: "small_bowel", 56: "duodenum", 57: "colon",
+            58: "rib_left_1", 59: "rib_left_2", 60: "rib_left_3",
+            61: "rib_left_4", 62: "rib_left_5", 63: "rib_left_6",
+            64: "rib_left_7", 65: "rib_left_8", 66: "rib_left_9",
+            67: "rib_left_10", 68: "rib_left_11", 69: "rib_left_12",
+            70: "rib_right_1", 71: "rib_right_2", 72: "rib_right_3",
+            73: "rib_right_4", 74: "rib_right_5", 75: "rib_right_6",
+            76: "rib_right_7", 77: "rib_right_8", 78: "rib_right_9",
+            79: "rib_right_10", 80: "rib_right_11", 81: "rib_right_12",
+            82: "humerus_left", 83: "humerus_right",
+            84: "scapula_left", 85: "scapula_right",
+            86: "clavicula_left", 87: "clavicula_right",
+            88: "femur_left", 89: "femur_right",
+            90: "hip_left", 91: "hip_right", 92: "sacrum", 93: "face",
+            94: "gluteus_maximus_left", 95: "gluteus_maximus_right",
+            96: "gluteus_medius_left", 97: "gluteus_medius_right",
+            98: "gluteus_minimus_left", 99: "gluteus_minimus_right",
+            100: "autochthon_left", 101: "autochthon_right",
+            102: "iliopsoas_left", 103: "iliopsoas_right",
+            104: "urinary_bladder",
+        },
         "input_size": [96, 96, 96],
-        "num_classes": 105
+        "num_classes": 105,
+        "sw_batch_size": 1,
+        "overlap": 0.25,
+    },
+    "renalStructures_UNEST_segmentation": {
+        "category": "segmentation",
+        "modality": "CT",
+        "body_part": "abdomen",
+        "description": "Kidney and renal structure segmentation on CT (UNEsT architecture)",
+        "bundle_name": "renalStructures_UNEST_segmentation",
+        "labels": {1: "right_kidney", 2: "left_kidney", 3: "right_renal_cortex",
+                   4: "left_renal_cortex", 5: "right_renal_medulla", 6: "left_renal_medulla"},
+        "input_size": [96, 96, 96],
+        "num_classes": 7,
+        "sw_batch_size": 2,
+        "overlap": 0.5,
     },
 }
 
@@ -208,6 +276,22 @@ def load_model_from_bundle(bundle_path: Path, model_name: str, device: torch.dev
         parser = ConfigParser()
         parser.read_config(str(config_path))
 
+        # Override bundle_root to the actual path (configs default to ".")
+        parser["bundle_root"] = str(bundle_path)
+
+        # Override device to use our detected device (configs may hardcode cuda)
+        parser["device"] = device
+
+        # Override nested device refs that may hardcode cuda (e.g. DiNTS dints_space)
+        if "dints_space" in parser and isinstance(parser["dints_space"], dict):
+            parser["dints_space"]["device"] = device
+
+        # Override arch_ckpt loading device if present (DiNTS bundles)
+        if "arch_ckpt_path" in parser:
+            arch_path = str(bundle_path / "models" / "search_code_18590.pt")
+            if os.path.exists(arch_path):
+                parser["arch_ckpt"] = torch.load(arch_path, map_location=device, weights_only=False)
+
         # Get network from config
         if "network_def" in parser:
             model = parser.get_parsed_content("network_def")
@@ -217,7 +301,7 @@ def load_model_from_bundle(bundle_path: Path, model_name: str, device: torch.dev
             raise KeyError("No network definition found in config")
 
         # Load weights
-        checkpoint = torch.load(str(model_path), map_location=device)
+        checkpoint = torch.load(str(model_path), map_location=device, weights_only=False)
         if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
             model.load_state_dict(checkpoint["state_dict"])
         elif isinstance(checkpoint, dict) and "model" in checkpoint:
@@ -225,14 +309,19 @@ def load_model_from_bundle(bundle_path: Path, model_name: str, device: torch.dev
         else:
             model.load_state_dict(checkpoint)
 
-    except Exception as e:
-        log(f"ConfigParser failed: {e}, trying direct load...")
+        log(f"Model loaded via ConfigParser: {type(model).__name__}")
 
-        # Fallback: Load TorchScript model directly
-        if model_path.suffix == ".ts":
-            model = torch.jit.load(str(model_path), map_location=device)
+    except Exception as e:
+        log(f"ConfigParser failed: {e}, trying fallback...")
+
+        # Fallback 1: TorchScript model
+        ts_path = bundle_path / "models" / "model.ts"
+        if ts_path.exists():
+            log(f"Loading TorchScript model from {ts_path}")
+            model = torch.jit.load(str(ts_path), map_location=device)
         else:
-            # Create UNet matching the bundle config (with batch norm)
+            # Fallback 2: Create UNet (only works for UNet-based bundles)
+            log("Falling back to generic UNet architecture")
             model = UNet(
                 spatial_dims=3,
                 in_channels=1,
@@ -240,9 +329,9 @@ def load_model_from_bundle(bundle_path: Path, model_name: str, device: torch.dev
                 channels=(16, 32, 64, 128, 256),
                 strides=(2, 2, 2, 2),
                 num_res_units=2,
-                norm="batch",  # Important: bundle uses batch normalization
+                norm="batch",
             )
-            checkpoint = torch.load(str(model_path), map_location=device)
+            checkpoint = torch.load(str(model_path), map_location=device, weights_only=False)
             if isinstance(checkpoint, dict):
                 if "state_dict" in checkpoint:
                     state_dict = checkpoint["state_dict"]
@@ -267,6 +356,56 @@ def load_model_from_bundle(bundle_path: Path, model_name: str, device: torch.dev
     return model
 
 
+IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif'}
+
+
+def load_image_dir_as_volume(dir_path: str, max_slices: int = 512) -> torch.Tensor:
+    """
+    Stack sorted 2D image slices from a directory into a 3D volume tensor.
+
+    Samples evenly up to max_slices rather than loading all files at once.
+    A typical CT/MRI has 100-500 slices; 512 covers most real scans.
+    """
+    from PIL import Image as PILImage
+    all_files = sorted([
+        f for f in Path(dir_path).iterdir()
+        if f.is_file() and not f.name.startswith('.') and f.suffix.lower() in IMAGE_EXTS
+    ])
+    if not all_files:
+        raise ValueError(f"No image files found in {dir_path}")
+
+    # Sample evenly if there are more files than max_slices
+    if len(all_files) > max_slices:
+        step = len(all_files) / max_slices
+        dir_files = [all_files[int(i * step)] for i in range(max_slices)]
+        log(f"Sampling {max_slices} of {len(all_files)} slices (step={step:.1f})")
+    else:
+        dir_files = all_files
+
+    slices = []
+    target_size = None
+    for f in dir_files:
+        img = PILImage.open(str(f)).convert('L')  # grayscale
+        if target_size is None:
+            target_size = img.size  # (W, H)
+        elif img.size != target_size:
+            img = img.resize(target_size, PILImage.BILINEAR)
+        slices.append(np.array(img, dtype=np.float32))
+
+    # Stack: (Z, H, W) -> add channel -> (1, H, W, Z)
+    volume = np.stack(slices, axis=0)            # (Z, H, W)
+    volume = volume[np.newaxis, ...]              # (1, Z, H, W)
+    volume = np.transpose(volume, (0, 2, 3, 1))  # (1, H, W, Z)
+
+    # Normalize to [0, 1]
+    vmin, vmax = volume.min(), volume.max()
+    if vmax > vmin:
+        volume = (volume - vmin) / (vmax - vmin)
+
+    log(f"Stacked {len(slices)} slices into volume shape {volume.shape}")
+    return torch.from_numpy(volume)
+
+
 def preprocess_image(image_path: str, model_name: str = None) -> torch.Tensor:
     """Preprocess an image for inference using model-specific transforms."""
     is_dir = os.path.isdir(image_path)
@@ -274,9 +413,15 @@ def preprocess_image(image_path: str, model_name: str = None) -> torch.Tensor:
     if not is_dir and image_path.endswith('.nii.gz'):
         ext = '.nii.gz'
 
+    # Directory of 2D image slices: stack into 3D volume
+    if is_dir:
+        dir_files = [f for f in Path(image_path).iterdir() if f.is_file() and not f.name.startswith('.')]
+        if dir_files and dir_files[0].suffix.lower() in IMAGE_EXTS:
+            return load_image_dir_as_volume(image_path)
+
     # Build preprocessing pipeline
-    if not is_dir and ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif']:
-        # 2D image - need special handling
+    if not is_dir and ext in IMAGE_EXTS:
+        # Single 2D image - expand to pseudo-3D
         transforms = Compose([
             LoadImage(image_only=True, reader=PILReader()),
             EnsureChannelFirst(),
@@ -285,17 +430,15 @@ def preprocess_image(image_path: str, model_name: str = None) -> torch.Tensor:
             EnsureType(),
         ])
         image = transforms(image_path)
-        # Add a dummy depth dimension for 3D models
+        # Repeat along depth to create a 3D volume (1, H, W, D)
         image = image.unsqueeze(-1).repeat(1, 1, 1, 96)
     else:
-        # 3D medical image - use proper CT preprocessing
-        # Based on MONAI bundle inference.json
+        # 3D medical image - standard CT preprocessing
         transforms = Compose([
             LoadImage(image_only=True),
             EnsureChannelFirst(),
             Orientation(axcodes="RAS"),
             Spacing(pixdim=(1.5, 1.5, 2.0), mode="bilinear"),
-            # CT windowing for spleen/abdomen: [-57, 164] HU -> [0, 1]
             ScaleIntensityRange(a_min=-57, a_max=164, b_min=0.0, b_max=1.0, clip=True),
             EnsureType(),
         ])
@@ -305,38 +448,54 @@ def preprocess_image(image_path: str, model_name: str = None) -> torch.Tensor:
 
 
 def postprocess_segmentation(output: torch.Tensor, labels: Dict[int, str]) -> Dict[str, Any]:
-    """Post-process segmentation output."""
-    # Apply softmax and get predictions
-    if output.shape[1] > 1:  # Multi-class
-        probs = torch.softmax(output, dim=1)
-        pred = torch.argmax(probs, dim=1)
-    else:  # Binary
-        probs = torch.sigmoid(output)
-        pred = (probs > 0.5).float()
+    """Post-process segmentation output in depth slices to avoid large memory allocation."""
+    is_binary = output.shape[1] == 1
+    depth = output.shape[-1]
+    total_voxels = output.shape[2] * output.shape[3] * depth
+    chunk_size = 16  # slices per chunk - keeps peak memory ~chunk_size/depth of full tensor
 
-    pred_np = pred.cpu().numpy().squeeze()
+    # Accumulate voxel counts per label across all chunks
+    label_counts: Dict[int, int] = {}
+    foreground_count = 0
+    output_shape = list(output.shape[2:])  # [H, W, D]
 
-    # Calculate statistics for each label
+    for z in range(0, depth, chunk_size):
+        chunk = output[..., z:z + chunk_size]  # [1, C, H, W, chunk]
+
+        if is_binary:
+            pred_chunk = (chunk.squeeze(1) > 0).long()  # [1, H, W, chunk]
+        else:
+            pred_chunk = torch.argmax(chunk, dim=1)  # [1, H, W, chunk]
+
+        del chunk
+        pred_np = pred_chunk.cpu().numpy().squeeze(0)  # [H, W, chunk]
+        del pred_chunk
+
+        foreground_count += int((pred_np > 0).sum())
+        for label_id in labels:
+            label_counts[label_id] = label_counts.get(label_id, 0) + int((pred_np == label_id).sum())
+
+        del pred_np
+
+    del output
+
     detected_structures = []
     for label_id, label_name in labels.items():
-        mask = (pred_np == label_id)
-        voxel_count = int(mask.sum())
+        voxel_count = label_counts.get(label_id, 0)
         if voxel_count > 0:
-            volume_percentage = float(voxel_count / pred_np.size * 100)
             detected_structures.append({
                 "label_id": label_id,
                 "name": label_name,
                 "voxel_count": voxel_count,
-                "volume_percentage": round(volume_percentage, 2),
+                "volume_percentage": round(voxel_count / total_voxels * 100, 2),
                 "detected": True
             })
 
     return {
-        "prediction_shape": list(pred_np.shape),
-        "unique_labels": [int(x) for x in np.unique(pred_np)],
+        "prediction_shape": output_shape,
         "detected_structures": detected_structures,
-        "total_foreground_voxels": int((pred_np > 0).sum()),
-        "background_percentage": round(float((pred_np == 0).sum() / pred_np.size * 100), 2)
+        "total_foreground_voxels": foreground_count,
+        "background_percentage": round((total_voxels - foreground_count) / total_voxels * 100, 2)
     }
 
 
@@ -375,19 +534,42 @@ def analyze_image(path: str) -> Dict[str, Any]:
         load_path = path
         ext = Path(path).suffix.lower() if not is_dir else ""
 
-        # For directories, check if it's a DICOM series or an image folder
+        # For directories, check if it's an image slice directory or DICOM series
+        is_image_dir = False
+        num_dir_files = 0
         if is_dir:
             dir_files = sorted([f for f in Path(path).iterdir() if f.is_file() and not f.name.startswith('.')])
             if not dir_files:
                 return {"error": "Directory is empty", "path": path}
+            num_dir_files = len(dir_files)
             sample_ext = dir_files[0].suffix.lower()
-            if sample_ext in ('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif'):
-                # Image folder - analyze the first image as a sample
-                load_path = str(dir_files[0])
-                ext = sample_ext
-                is_dir = False  # treat as single file for loading
+            if sample_ext in IMAGE_EXTS:
+                # Sample a small subset of slices for analysis (not all files)
+                is_image_dir = True
+                image_array = load_image_dir_as_volume(path, max_slices=20).numpy()
+                detection = detect_modality_from_metadata(image_array, path, is_dir=False)
+                detection["file_format"] = f"Image slice directory ({num_dir_files} slices)"
+                detection["is_3d"] = True
+                modalities = detection.get("detected_modalities", [])
+                primary_modality = modalities[0] if modalities else "unknown"
+                recommended = get_recommended_models(primary_modality)
+                return {
+                    "path": path,
+                    "shape": [int(s) for s in image_array.shape],
+                    "dtype": str(image_array.dtype),
+                    "analysis": detection,
+                    "statistics": {
+                        "min": float(image_array.min()),
+                        "max": float(image_array.max()),
+                        "mean": float(image_array.mean()),
+                        "std": float(image_array.std())
+                    },
+                    "recommended_models": recommended,
+                    "metadata_keys": [],
+                    "ready_for_inference": True
+                }
 
-        if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif']:
+        if ext in IMAGE_EXTS:
             loader = LoadImage(image_only=False, reader=PILReader())
         else:
             loader = LoadImage(image_only=False)
@@ -494,16 +676,33 @@ def download_model(model_name: str) -> Dict[str, Any]:
 
     try:
         log(f"Downloading {bundle_name} from MONAI Model Zoo...")
-        # Redirect all logging to stderr so it doesn't pollute stdio JSON-RPC
+
+        # Aggressively redirect stdout to stderr for the duration of the download.
+        # MONAI's download adds its own logging handlers after basicConfig, so we
+        # must swap sys.stdout itself to prevent any output from reaching the
+        # stdio JSON-RPC channel.
         import logging
-        for handler in logging.root.handlers[:]:
-            logging.root.removeHandler(handler)
-        logging.basicConfig(stream=sys.stderr, level=logging.INFO)
-        download(
-            name=bundle_name,
-            bundle_dir=str(BUNDLE_ROOT),
-            source="monaihosting"
-        )
+        import io
+
+        # Flush anything pending before swapping
+        sys.stdout.flush()
+        original_stdout = sys.stdout
+        sys.stdout = sys.stderr
+
+        try:
+            # Also redirect all logging handlers to stderr
+            logging.root.handlers.clear()
+            logging.basicConfig(stream=sys.stderr, level=logging.INFO, force=True)
+
+            download(
+                name=bundle_name,
+                bundle_dir=str(BUNDLE_ROOT),
+                source="monaihosting"
+            )
+        finally:
+            sys.stdout.flush()
+            sys.stdout = original_stdout
+
         return {
             "status": "downloaded",
             "model_name": model_name,
@@ -568,17 +767,41 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
 
         # Run inference using sliding window (handles any size input)
         roi_size = model_info.get("input_size", [96, 96, 96])
-        log(f"Running sliding window inference with ROI size {roi_size}...")
-        with torch.no_grad():
-            output = sliding_window_inference(
-                image,
-                roi_size=roi_size,
-                sw_batch_size=4,
-                predictor=model,
-                overlap=0.5
-            )
+        sw_batch_size = model_info.get("sw_batch_size", 2)
+        overlap = model_info.get("overlap", 0.5)
+        log(f"Running sliding window inference with ROI={roi_size}, sw_batch={sw_batch_size}, overlap={overlap}...")
+
+        def _run_sliding_window(img, mdl, dev):
+            with torch.no_grad():
+                return sliding_window_inference(
+                    img,
+                    roi_size=roi_size,
+                    sw_batch_size=sw_batch_size,
+                    predictor=mdl,
+                    overlap=overlap,
+                )
+
+        try:
+            output = _run_sliding_window(image, model, device)
+        except torch.OutOfMemoryError:
+            log("CUDA out of memory - retrying on CPU (this will be slower)...")
+            torch.cuda.empty_cache()
+            # Evict from cache so it reloads on CPU
+            cache_key = f"{model_name}_{device}"
+            _model_cache.pop(cache_key, None)
+            device = torch.device("cpu")
+            model = model.cpu()
+            image = image.cpu()
+            output = _run_sliding_window(image, model, device)
 
         log(f"Output tensor shape: {output.shape}")
+
+        # Move output to CPU before postprocessing to free GPU memory.
+        # Softmax over 105 classes on a large volume (e.g. 258x258x126) needs
+        # ~3 GiB extra VRAM which exceeds most consumer GPUs.
+        if output.device.type == 'cuda':
+            torch.cuda.empty_cache()
+            output = output.cpu()
 
         # Post-process based on model type
         if model_info["category"] == "segmentation":

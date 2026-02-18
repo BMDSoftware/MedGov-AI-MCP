@@ -32,6 +32,7 @@ function App() {
   const [userQuery, setUserQuery] = useState("");
   const [pendingTool, setPendingTool] = useState(null); // {tool_name, arguments}
   const [runningTool, setRunningTool] = useState(null); // tool currently executing
+  const [currentSessionId, setCurrentSessionId] = useState(null);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -39,6 +40,21 @@ function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Fetch initial session ID on mount
+  useEffect(() => {
+    fetch(getApiUrl('/api/sessions'))
+      .then(r => r.json())
+      .then(d => setCurrentSessionId(d.current_session_id))
+      .catch(() => {});
+  }, []);
+
+  // Persist messages to localStorage whenever they change (filter out transient states)
+  useEffect(() => {
+    if (!currentSessionId) return;
+    const toSave = messages.filter(m => !m.isLoading);
+    localStorage.setItem(`messages_${currentSessionId}`, JSON.stringify(toSave));
+  }, [messages, currentSessionId]);
 
   // --- Logic functions ---
   const addMessage = (message) => setMessages(prev => [...prev, message]);
@@ -306,14 +322,10 @@ function App() {
           <InferenceTest />
         ) : page === 'history' ? (
           <Sessions onLoadSession={(data) => {
-            if (data) {
-              // Session loaded - switch to analysis view
-              if (data.name) {
-                addMessage({ type: 'bot', content: `Session "${data.name}" loaded. You can continue where you left off.` });
-              }
-              setPage('analysis');
-            } else {
-              // New session created
+            if (!data) return;
+            if (data.isNew) {
+              // New session created - clear everything
+              setCurrentSessionId(data.session_id);
               setMessages([{
                 type: 'bot',
                 content: 'New session started. Select a patient or upload a file to begin.',
@@ -322,7 +334,21 @@ function App() {
               setSelectedPatient(null);
               setUploadedFile(null);
               setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null, selectedPatient: null, patientContext: null });
+            } else {
+              // Existing session loaded - restore chat history
+              setCurrentSessionId(data.session_id);
+              const saved = localStorage.getItem(`messages_${data.session_id}`);
+              if (saved) {
+                try {
+                  setMessages(JSON.parse(saved));
+                } catch {
+                  setMessages([{ type: 'bot', content: `Session "${data.name}" loaded.`, actions: [] }]);
+                }
+              } else {
+                setMessages([{ type: 'bot', content: `Session "${data.name}" loaded. No previous chat history found.`, actions: [] }]);
+              }
             }
+            setPage('analysis');
           }} />
         ) : (
           <div className="chat">

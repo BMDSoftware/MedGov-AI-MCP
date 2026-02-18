@@ -372,13 +372,27 @@ def analyze_image(path: str) -> Dict[str, Any]:
         return {"error": f"File not found: {path}", "path": path}
 
     try:
+        load_path = path
         ext = Path(path).suffix.lower() if not is_dir else ""
+
+        # For directories, check if it's a DICOM series or an image folder
+        if is_dir:
+            dir_files = sorted([f for f in Path(path).iterdir() if f.is_file() and not f.name.startswith('.')])
+            if not dir_files:
+                return {"error": "Directory is empty", "path": path}
+            sample_ext = dir_files[0].suffix.lower()
+            if sample_ext in ('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif'):
+                # Image folder - analyze the first image as a sample
+                load_path = str(dir_files[0])
+                ext = sample_ext
+                is_dir = False  # treat as single file for loading
+
         if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif']:
             loader = LoadImage(image_only=False, reader=PILReader())
         else:
             loader = LoadImage(image_only=False)
 
-        image_data = loader(path)
+        image_data = loader(load_path)
 
         if isinstance(image_data, tuple):
             image_array, metadata = image_data
@@ -390,7 +404,8 @@ def analyze_image(path: str) -> Dict[str, Any]:
             image_array = image_array.numpy()
 
         detection = detect_modality_from_metadata(image_array, path, is_dir=is_dir)
-        primary_modality = detection["detected_modalities"][0]
+        modalities = detection.get("detected_modalities", [])
+        primary_modality = modalities[0] if modalities else "unknown"
         recommended = get_recommended_models(primary_modality)
 
         return {

@@ -70,12 +70,10 @@ function InferenceTest() {
     setSelectedFile(file);
     resetDownstream();
 
-    // DICOM series need validation first
+    setCurrentStep(2);
+    // DICOM series need validation first, image series skip validation
     if (file.type === 'dicom_series') {
-      setCurrentStep(2);
       validateSeries(file.path);
-    } else {
-      setCurrentStep(2);
     }
   };
 
@@ -343,8 +341,8 @@ function InferenceTest() {
                 className={`sample-item ${selectedFile?.path === f.path ? 'selected' : ''}`}
                 onClick={() => handleFileSelect(f)}
               >
-                <span className={`sample-type-badge ${f.type === 'dicom_series' ? 'series-badge' : ''}`}>
-                  {f.type === 'dicom_series' ? 'SERIES' : f.type.toUpperCase()}
+                <span className={`sample-type-badge ${(f.type === 'dicom_series' || f.type === 'image_series') ? 'series-badge' : ''}`}>
+                  {f.type === 'dicom_series' ? 'SERIES' : f.type === 'image_series' ? 'IMAGES' : f.type.toUpperCase()}
                 </span>
                 <span className="sample-name">{f.name}</span>
                 <span className="sample-size">{formatSize(f.size)}</span>
@@ -358,6 +356,7 @@ function InferenceTest() {
           <div className="selected-file-banner">
             Selected: <strong>{selectedFile.name}</strong>
             {selectedFile.type === 'dicom_series' && ' (DICOM Series)'}
+            {selectedFile.type === 'image_series' && ' (Image Series)'}
           </div>
         )}
       </div>
@@ -463,6 +462,13 @@ function InferenceTest() {
         <h3>3. Select Model</h3>
         {currentStep >= 3 && (
           <>
+            <button
+              className="reset-btn"
+              onClick={() => fetchModels(null)}
+              style={{ marginBottom: '10px' }}
+            >
+              Show All Models
+            </button>
             {loadingModels ? (
               <p className="loading-text">Loading models...</p>
             ) : (

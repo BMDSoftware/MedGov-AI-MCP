@@ -499,6 +499,83 @@
   margin-bottom: 16px;
 }
 
+/* Directory upload button */
+.upload-dir-label {
+  margin-left: 10px;
+  border-color: #10b981;
+  color: #10b981;
+}
+
+.upload-dir-label:hover {
+  background: rgba(16, 185, 129, 0.1);
+}
+
+/* Series badge */
+.series-badge {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #10b981 !important;
+}
+
+/* Validation warning */
+.validation-warning {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+/* Series picker */
+.series-picker {
+  margin-top: 10px;
+}
+
+.series-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.series-card {
+  background: var(--bg-primary, #121218);
+  border: 1px solid var(--border, #2d2d3d);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.series-card:hover {
+  border-color: var(--accent, #6366f1);
+}
+
+.series-card.selected {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.series-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.series-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #fafafa);
+}
+
+.series-meta {
+  font-size: 12px;
+  color: var(--text-secondary, #a1a1aa);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .inference-test-container {

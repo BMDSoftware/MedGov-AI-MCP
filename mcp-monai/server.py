@@ -120,7 +120,7 @@ EXTENSION_HINTS = {
 }
 
 
-def detect_modality_from_metadata(image_array: np.ndarray, path: str) -> Dict[str, Any]:
+def detect_modality_from_metadata(image_array: np.ndarray, path: str, is_dir: bool = False) -> Dict[str, Any]:
     """Detect image modality and characteristics from the image itself."""
     shape = image_array.shape
     is_3d = len(shape) >= 3 and (shape[0] > 4 if len(shape) == 3 else True)
@@ -134,8 +134,8 @@ def detect_modality_from_metadata(image_array: np.ndarray, path: str) -> Dict[st
     # Hounsfield units range suggests CT (-1000 to +3000 typical)
     if min_val < -500 and max_val > 200:
         modality_hints.append("CT")
-    # MRI typically has positive values with high dynamic range
-    elif min_val >= 0 and max_val > 1000:
+    # MRI typically has positive values with moderate-to-high dynamic range
+    elif min_val >= 0 and max_val > 100:
         modality_hints.append("MRI")
     # X-ray/radiograph typically 2D with moderate range
     elif not is_3d and min_val >= 0:
@@ -145,7 +145,10 @@ def detect_modality_from_metadata(image_array: np.ndarray, path: str) -> Dict[st
     if path.endswith('.nii.gz'):
         ext = '.nii.gz'
 
-    format_info = EXTENSION_HINTS.get(ext, {"format": "unknown", "likely_3d": None})
+    if is_dir:
+        format_info = {"format": "DICOM series", "likely_3d": True}
+    else:
+        format_info = EXTENSION_HINTS.get(ext, {"format": "unknown", "likely_3d": None})
 
     return {
         "detected_modalities": modality_hints if modality_hints else ["unknown"],
@@ -266,12 +269,13 @@ def load_model_from_bundle(bundle_path: Path, model_name: str, device: torch.dev
 
 def preprocess_image(image_path: str, model_name: str = None) -> torch.Tensor:
     """Preprocess an image for inference using model-specific transforms."""
-    ext = Path(image_path).suffix.lower()
-    if image_path.endswith('.nii.gz'):
+    is_dir = os.path.isdir(image_path)
+    ext = "" if is_dir else Path(image_path).suffix.lower()
+    if not is_dir and image_path.endswith('.nii.gz'):
         ext = '.nii.gz'
 
     # Build preprocessing pipeline
-    if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif']:
+    if not is_dir and ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif']:
         # 2D image - need special handling
         transforms = Compose([
             LoadImage(image_only=True, reader=PILReader()),
@@ -361,13 +365,14 @@ def analyze_image(path: str) -> Dict[str, Any]:
 
     Returns image metadata, detected modality, and recommended models for analysis.
 
-    :param path: Path to the medical image file (DICOM, NIfTI, PNG, etc.)
+    :param path: Path to the medical image file or DICOM series directory
     """
-    if not os.path.exists(path):
+    is_dir = os.path.isdir(path)
+    if not os.path.exists(path) and not is_dir:
         return {"error": f"File not found: {path}", "path": path}
 
     try:
-        ext = Path(path).suffix.lower()
+        ext = Path(path).suffix.lower() if not is_dir else ""
         if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif']:
             loader = LoadImage(image_only=False, reader=PILReader())
         else:
@@ -384,7 +389,7 @@ def analyze_image(path: str) -> Dict[str, Any]:
         if hasattr(image_array, 'numpy'):
             image_array = image_array.numpy()
 
-        detection = detect_modality_from_metadata(image_array, path)
+        detection = detect_modality_from_metadata(image_array, path, is_dir=is_dir)
         primary_modality = detection["detected_modalities"][0]
         recommended = get_recommended_models(primary_modality)
 
@@ -401,7 +406,7 @@ def analyze_image(path: str) -> Dict[str, Any]:
             },
             "recommended_models": recommended,
             "metadata_keys": list(metadata.keys()) if isinstance(metadata, dict) else [],
-            "ready_for_inference": detection["is_3d"] or ext in ['.nii', '.nii.gz', '.dcm']
+            "ready_for_inference": detection["is_3d"] or is_dir or ext in ['.nii', '.nii.gz', '.dcm']
         }
     except Exception as e:
         return {"error": f"Failed to analyze image: {str(e)}", "path": path}
@@ -474,6 +479,11 @@ def download_model(model_name: str) -> Dict[str, Any]:
 
     try:
         log(f"Downloading {bundle_name} from MONAI Model Zoo...")
+        # Redirect all logging to stderr so it doesn't pollute stdio JSON-RPC
+        import logging
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+        logging.basicConfig(stream=sys.stderr, level=logging.INFO)
         download(
             name=bundle_name,
             bundle_dir=str(BUNDLE_ROOT),
@@ -503,10 +513,10 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
     For best results, use 3D medical images (NIfTI, DICOM).
     2D images (JPEG, PNG) will be converted to pseudo-3D for compatibility.
 
-    :param image_path: Path to the input medical image
+    :param image_path: Path to the input medical image file or DICOM series directory
     :param model_name: Name of the model to use (from list_models)
     """
-    if not os.path.exists(image_path):
+    if not os.path.exists(image_path) and not os.path.isdir(image_path):
         return {"error": f"Image not found: {image_path}"}
 
     if model_name not in MODEL_REGISTRY:

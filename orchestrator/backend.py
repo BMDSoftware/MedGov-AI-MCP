@@ -5,7 +5,7 @@ import os
 import shutil
 import uuid
 import python_multipart
-from typing import Optional
+from typing import Optional, List
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -164,6 +164,52 @@ async def remove_file(filename: str):
             return {"status": "success", "message": f"Removed {filename}"}
     raise HTTPException(status_code=404, detail="File not found")
 
+
+@app.post("/api/upload-directory")
+async def upload_directory(files: List[UploadFile] = File(...)):
+    """Upload a directory of DICOM slices. Stores all files in a subdirectory under uploads."""
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+    try:
+        # Use the first file's relative path to get the directory name
+        first_path = files[0].filename or "unknown"
+        # Browser sends paths like "dirname/file1" - extract the top-level dir name
+        dirname = first_path.split("/")[0] if "/" in first_path else "dicom_upload"
+        dir_id = f"{uuid.uuid4().hex[:12]}_{dirname}"
+        dir_path = db.UPLOADS_DIR / dir_id
+        dir_path.mkdir(parents=True, exist_ok=True)
+
+        saved_count = 0
+        total_size = 0
+        for f in files:
+            contents = await f.read()
+            # Use just the filename (strip any subdirectory from browser path)
+            fname = f.filename.split("/")[-1] if f.filename else f"slice_{saved_count}"
+            # Skip non-DICOM junk files
+            if fname.startswith('.') or fname.endswith(('.png', '.sql', '.txt', '.zip')):
+                continue
+            file_path = dir_path / fname
+            with open(file_path, "wb") as out:
+                out.write(contents)
+            saved_count += 1
+            total_size += len(contents)
+
+        if saved_count == 0:
+            shutil.rmtree(dir_path, ignore_errors=True)
+            raise HTTPException(status_code=400, detail="No valid DICOM files found in upload")
+
+        print(f"Uploaded directory: {dir_path} ({saved_count} files, {total_size} bytes)")
+        return {
+            "status": "success",
+            "dir_path": str(dir_path),
+            "dirname": dirname,
+            "file_count": saved_count,
+            "total_size": total_size,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/available-tools")
@@ -371,7 +417,7 @@ async def get_session_files(session_id: Optional[str] = None):
 async def list_sample_data():
     """List available sample data files for testing"""
     base = Path(__file__).parent.parent
-    # Scan known sample/test directories for medical images
+    # Scan known sample/test directories for medical image files
     scan_dirs = [
         (base / "mcp-monai" / "sample_data" / "Task09_Spleen" / "Task09_Spleen" / "imagesTr", "spleen_dataset"),
         (base / "test_data", "test_data"),
@@ -382,7 +428,7 @@ async def list_sample_data():
         if not scan_dir.exists():
             continue
         for f in sorted(scan_dir.iterdir()):
-            if not f.is_file():
+            if not f.is_file() or f.name.startswith('.'):
                 continue
             if f.suffix == '.dcm':
                 ftype = "dcm"
@@ -400,7 +446,55 @@ async def list_sample_data():
                 "source": source_label,
             })
 
-    # Also include files uploaded to the DB (across all sessions)
+    # Scan for DICOM series directories (folders of 2D slices)
+    def _is_dicom_series(d: Path) -> int:
+        """Returns slice count if dir looks like a DICOM series, 0 otherwise."""
+        if not d.is_dir():
+            return 0
+        count = 0
+        for child in d.iterdir():
+            if child.is_file() and not child.name.startswith('.'):
+                if child.suffix == '.dcm' or not child.suffix:
+                    count += 1
+        return count
+
+    dicom_root = base / "test_data" / "DICOM"
+    if dicom_root.exists():
+        for study_dir in sorted(dicom_root.iterdir()):
+            if not study_dir.is_dir() or study_dir.name.startswith('.'):
+                continue
+            for series_dir in sorted(study_dir.iterdir()):
+                slice_count = _is_dicom_series(series_dir)
+                if slice_count == 0:
+                    continue
+                total_size = sum(
+                    f.stat().st_size for f in series_dir.iterdir()
+                    if f.is_file() and not f.name.startswith('.')
+                )
+                files.append({
+                    "name": f"{series_dir.name} ({slice_count} slices)",
+                    "path": str(series_dir.resolve()),
+                    "size": total_size,
+                    "type": "dicom_series",
+                    "source": "dicom_series",
+                })
+
+    # Also check uploaded directories in UPLOADS_DIR
+    if db.UPLOADS_DIR.exists():
+        for d in sorted(db.UPLOADS_DIR.iterdir()):
+            if d.is_dir():
+                slice_count = sum(1 for f in d.iterdir() if f.is_file() and not f.name.startswith('.'))
+                if slice_count > 0:
+                    total_size = sum(f.stat().st_size for f in d.iterdir() if f.is_file())
+                    files.append({
+                        "name": f"{d.name} ({slice_count} slices)",
+                        "path": str(d.resolve()),
+                        "size": total_size,
+                        "type": "dicom_series",
+                        "source": "uploaded",
+                    })
+
+    # Also include single files uploaded to the DB
     conn = db._get_conn()
     rows = conn.execute(
         "SELECT original_name, stored_path, file_type, file_size FROM uploaded_files ORDER BY uploaded_at DESC"
@@ -418,6 +512,53 @@ async def list_sample_data():
             })
 
     return {"files": files}
+
+
+@app.post("/api/monai/validate-series")
+async def validate_series(data: dict = Body(...)):
+    """Validate a DICOM series directory using utils.parse_dicom_directory"""
+    dir_path = data.get("path")
+    if not dir_path or not os.path.isdir(dir_path):
+        raise HTTPException(status_code=400, detail="Valid directory path is required")
+
+    try:
+        result = await agent_decision.tool_registry.execute_tool(
+            "utils.parse_dicom_directory", {"dir_path": dir_path}, logs=True
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Validation failed: {e}")
+
+    if result.get("error") or result.get("is_error"):
+        return {"valid": False, "error": result.get("error", "Unknown error"), "warnings": []}
+
+    total_files = result.get("total_files", 0)
+    raw_series = result.get("series", {})
+    warnings = []
+
+    if total_files == 0:
+        return {"valid": False, "error": "No valid DICOM files found in directory", "warnings": []}
+
+    if len(raw_series) > 1:
+        warnings.append(f"Multiple series found ({len(raw_series)}). Select one to proceed.")
+
+    series_list = []
+    for uid, info in raw_series.items():
+        series_list.append({
+            "uid": uid,
+            "modality": info.get("modality"),
+            "body_part": info.get("body_part"),
+            "description": info.get("series_description"),
+            "slice_count": info.get("num_slices", len(info.get("files", []))),
+            "files": info.get("files", []),
+        })
+
+    return {
+        "valid": True,
+        "total_files": total_files,
+        "series_count": len(series_list),
+        "series": series_list,
+        "warnings": warnings,
+    }
 
 
 @app.post("/api/monai/analyze")

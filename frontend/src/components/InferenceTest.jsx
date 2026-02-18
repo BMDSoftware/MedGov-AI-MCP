@@ -11,7 +11,13 @@ function InferenceTest() {
   // Step 1: File selection
   const [sampleFiles, setSampleFiles] = useState([]);
   const [loadingSamples, setLoadingSamples] = useState(true);
-  const [selectedFile, setSelectedFile] = useState(null); // {name, path, source}
+  const [selectedFile, setSelectedFile] = useState(null); // {name, path, source, type}
+  const [uploadingDir, setUploadingDir] = useState(false);
+
+  // Step 1.5: Validation (for DICOM series)
+  const [validationResult, setValidationResult] = useState(null);
+  const [validating, setValidating] = useState(false);
+  const [selectedSeries, setSelectedSeries] = useState(null);
 
   // Step 2: Analysis
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -43,26 +49,34 @@ function InferenceTest() {
     setLoadingSamples(false);
   };
 
-  const handleFileSelect = (file) => {
-    // Toggle: clicking the same file again unselects it
-    if (selectedFile?.path === file.path) {
-      setSelectedFile(null);
-      setCurrentStep(1);
-      setAnalysisResult(null);
-      setModels([]);
-      setSelectedModel(null);
-      setInferenceResult(null);
-      setError(null);
-      return;
-    }
-    setSelectedFile(file);
-    setCurrentStep(2);
-    // Reset downstream steps
+  const resetDownstream = () => {
+    setValidationResult(null);
+    setSelectedSeries(null);
     setAnalysisResult(null);
     setModels([]);
     setSelectedModel(null);
     setInferenceResult(null);
     setError(null);
+  };
+
+  const handleFileSelect = (file) => {
+    // Toggle: clicking the same file again unselects it
+    if (selectedFile?.path === file.path) {
+      setSelectedFile(null);
+      setCurrentStep(1);
+      resetDownstream();
+      return;
+    }
+    setSelectedFile(file);
+    resetDownstream();
+
+    // DICOM series need validation first
+    if (file.type === 'dicom_series') {
+      setCurrentStep(2);
+      validateSeries(file.path);
+    } else {
+      setCurrentStep(2);
+    }
   };
 
   const handleFileUpload = async (e) => {
@@ -75,13 +89,72 @@ function InferenceTest() {
       const res = await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData });
       const data = await res.json();
       if (data.stored_path) {
-        handleFileSelect({ name: file.name, path: data.stored_path, source: 'upload' });
+        handleFileSelect({ name: file.name, path: data.stored_path, source: 'upload', type: file.name.endsWith('.dcm') ? 'dcm' : 'nii.gz' });
       } else {
         setError('Upload succeeded but no stored path returned.');
       }
     } catch (e) {
       setError('Upload failed.');
     }
+  };
+
+  const handleDirectoryUpload = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setError(null);
+    setUploadingDir(true);
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i], files[i].webkitRelativePath || files[i].name);
+      }
+      const res = await fetch(`${API_URL}/api/upload-directory`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.dir_path) {
+        handleFileSelect({
+          name: `${data.dirname} (${data.file_count} files)`,
+          path: data.dir_path,
+          source: 'upload',
+          type: 'dicom_series',
+        });
+        // Refresh sample list to show the new upload
+        fetchSampleData();
+      } else {
+        setError(data.detail || 'Directory upload failed.');
+      }
+    } catch (e) {
+      setError('Directory upload failed.');
+    }
+    setUploadingDir(false);
+  };
+
+  const validateSeries = async (dirPath) => {
+    setValidating(true);
+    setValidationResult(null);
+    try {
+      const res = await fetch(`${API_URL}/api/monai/validate-series`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: dirPath })
+      });
+      const data = await res.json();
+      setValidationResult(data);
+      // Auto-select if only one series
+      if (data.valid && data.series?.length === 1) {
+        setSelectedSeries(data.series[0]);
+      }
+    } catch (e) {
+      setError('Series validation failed.');
+    }
+    setValidating(false);
+  };
+
+  const getAnalyzePath = () => {
+    // For DICOM series, use the directory path (MONAI handles it)
+    if (selectedFile?.type === 'dicom_series') {
+      return selectedFile.path;
+    }
+    return selectedFile?.path;
   };
 
   const handleAnalyze = async () => {
@@ -92,7 +165,7 @@ function InferenceTest() {
       const res = await fetch(`${API_URL}/api/monai/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: selectedFile.path })
+        body: JSON.stringify({ path: getAnalyzePath() })
       });
       const data = await res.json();
       if (data.error) {
@@ -100,9 +173,9 @@ function InferenceTest() {
       } else {
         setAnalysisResult(data);
         setCurrentStep(3);
-        // Auto-fetch models based on detected modality
         const modality = data.analysis?.detected_modalities?.[0];
-        fetchModels(modality);
+        // Don't filter by modality if detection failed
+        fetchModels(modality === 'unknown' ? null : modality);
       }
     } catch (e) {
       setError('Analysis failed.');
@@ -141,9 +214,8 @@ function InferenceTest() {
       if (data.error) {
         setError(data.error);
       } else {
-        // Refresh model list to update download status
         const modality = analysisResult?.analysis?.detected_modalities?.[0];
-        await fetchModels(modality);
+        await fetchModels(modality === 'unknown' ? null : modality);
       }
     } catch (e) {
       setError('Download failed.');
@@ -166,7 +238,7 @@ function InferenceTest() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          image_path: selectedFile.path,
+          image_path: getAnalyzePath(),
           model_name: selectedModel.name
         })
       });
@@ -185,11 +257,7 @@ function InferenceTest() {
   const handleReset = () => {
     setCurrentStep(1);
     setSelectedFile(null);
-    setAnalysisResult(null);
-    setModels([]);
-    setSelectedModel(null);
-    setInferenceResult(null);
-    setError(null);
+    resetDownstream();
   };
 
   const formatSize = (bytes) => {
@@ -250,6 +318,17 @@ function InferenceTest() {
               className="file-input-hidden"
             />
           </label>
+          <label className="upload-label upload-dir-label">
+            {uploadingDir ? 'Uploading...' : 'Upload DICOM directory'}
+            <input
+              type="file"
+              webkitdirectory=""
+              directory=""
+              onChange={handleDirectoryUpload}
+              className="file-input-hidden"
+              disabled={uploadingDir}
+            />
+          </label>
         </div>
 
         <div className="divider"><span>or select sample data</span></div>
@@ -264,7 +343,9 @@ function InferenceTest() {
                 className={`sample-item ${selectedFile?.path === f.path ? 'selected' : ''}`}
                 onClick={() => handleFileSelect(f)}
               >
-                <span className="sample-type-badge">{f.type}</span>
+                <span className={`sample-type-badge ${f.type === 'dicom_series' ? 'series-badge' : ''}`}>
+                  {f.type === 'dicom_series' ? 'SERIES' : f.type.toUpperCase()}
+                </span>
                 <span className="sample-name">{f.name}</span>
                 <span className="sample-size">{formatSize(f.size)}</span>
                 <span className="sample-source">{f.source}</span>
@@ -276,16 +357,63 @@ function InferenceTest() {
         {selectedFile && (
           <div className="selected-file-banner">
             Selected: <strong>{selectedFile.name}</strong>
+            {selectedFile.type === 'dicom_series' && ' (DICOM Series)'}
           </div>
         )}
       </div>
+
+      {/* Validation panel (for DICOM series) */}
+      {selectedFile?.type === 'dicom_series' && currentStep >= 2 && (
+        <div className="test-step">
+          <h3>Series Validation</h3>
+          {validating && <p className="loading-text">Validating DICOM series...</p>}
+          {validationResult && !validationResult.valid && (
+            <div className="test-error">{validationResult.error || 'Invalid series'}</div>
+          )}
+          {validationResult?.warnings?.map((w, i) => (
+            <div key={i} className="validation-warning">{w}</div>
+          ))}
+          {validationResult?.valid && (
+            <div className="series-picker">
+              <p className="loading-text">
+                Found {validationResult.total_files} files in {validationResult.series_count} series
+              </p>
+              <div className="series-list">
+                {validationResult.series.map((s, i) => (
+                  <div
+                    key={s.uid || i}
+                    className={`series-card ${selectedSeries?.uid === s.uid ? 'selected' : ''}`}
+                    onClick={() => setSelectedSeries(s)}
+                  >
+                    <div className="series-info">
+                      <span className="series-title">
+                        {s.description || `Series ${i + 1}`}
+                      </span>
+                      <span className="series-meta">
+                        {s.modality || 'Unknown'} | {s.body_part || 'Unknown'} | {s.slice_count} slices
+                      </span>
+                    </div>
+                    {selectedSeries?.uid === s.uid && (
+                      <span className="ready-badge">Selected</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Step 2: Analyze */}
       <div className={`test-step ${currentStep >= 2 ? '' : 'disabled'}`}>
         <h3>2. Analyze Image</h3>
         {currentStep >= 2 && (
           <>
-            <button className="action-btn" onClick={handleAnalyze} disabled={analyzing}>
+            <button
+              className="action-btn"
+              onClick={handleAnalyze}
+              disabled={analyzing || (selectedFile?.type === 'dicom_series' && !validationResult?.valid)}
+            >
               {analyzing ? 'Analyzing...' : 'Run Analysis'}
             </button>
 

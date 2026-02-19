@@ -222,9 +222,14 @@ function InferenceTest() {
   };
 
   const handleSelectModel = (model) => {
-    setSelectedModel(model);
-    setCurrentStep(4);
-    setInferenceResult(null);
+    if (selectedModel?.name === model.name) {
+      setSelectedModel(null);
+      setCurrentStep(3);
+    } else {
+      setSelectedModel(model);
+      setCurrentStep(4);
+      setInferenceResult(null);
+    }
   };
 
   const handleRunInference = async () => {
@@ -503,8 +508,11 @@ function InferenceTest() {
                         </button>
                       )}
                       {m.downloaded && (
-                        <button className="select-model-btn" onClick={() => handleSelectModel(m)}>
-                          Select
+                        <button
+                          className={`select-model-btn ${selectedModel?.name === m.name ? 'selected' : ''}`}
+                          onClick={() => handleSelectModel(m)}
+                        >
+                          {selectedModel?.name === m.name ? 'Unselect' : 'Select'}
                         </button>
                       )}
                     </div>

@@ -438,6 +438,17 @@
   background: #5856eb;
 }
 
+.select-model-btn.selected {
+  background: #374151;
+  color: #9ca3af;
+  border: 1px solid #4b5563;
+}
+
+.select-model-btn.selected:hover {
+  background: #4b5563;
+  color: #e5e7eb;
+}
+
 /* Inference */
 .inference-summary {
   display: flex;

@@ -43,3 +43,17 @@ node_modules/
 
 # MCP config (machine-specific paths)
 orchestrator/mcp-config.json
+
+# Test data - large medical imaging files
+test_data/*.deb
+test_data/*.tcia
+test_data/*.zip
+test_data/__MACOSX/
+test_data/download.txt
+test_data/DICOM/
+test_data/pancreas_ct/
+test_data/CALGB50303/
+*.dcm
+*.nii
+*.nii.gz
+mcp-monai/sample_data/

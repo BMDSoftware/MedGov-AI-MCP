@@ -1,0 +1,253 @@
+import { useEffect, useState } from 'react';
+import './Report.css';
+
+const API_URL = 'http://localhost:5001';
+
+function Report({ refreshSignal }) {
+  const [inferenceTasks, setInferenceTasks] = useState([]);
+  const [selected, setSelected] = useState(new Set());
+  const [generating, setGenerating] = useState(false);
+  const [reportTask, setReportTask] = useState(null); // the queued report task
+  const [error, setError] = useState(null);
+
+  const fetchInferenceTasks = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/tasks`);
+      const data = await res.json();
+      const done = (data.tasks || []).filter(
+        t => t.task_type === 'inference' && t.status === 'done'
+      );
+      setInferenceTasks(done);
+    } catch {
+      // silently fail
+    }
+  };
+
+  useEffect(() => {
+    fetchInferenceTasks();
+  }, []);
+
+  // Refresh when SSE event arrives
+  useEffect(() => {
+    if (refreshSignal) fetchInferenceTasks();
+  }, [refreshSignal]);
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleGenerate = async () => {
+    if (selected.size === 0) return;
+    setGenerating(true);
+    setError(null);
+    setReportTask(null);
+    try {
+      const res = await fetch(`${API_URL}/api/generate-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_ids: Array.from(selected) }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setReportTask({ id: data.task_id, status: 'queued', description: data.description });
+      }
+    } catch (e) {
+      setError('Failed to start report generation.');
+    }
+    setGenerating(false);
+  };
+
+  // Poll for the report task result once it's queued
+  useEffect(() => {
+    if (!reportTask?.id || reportTask.status === 'done' || reportTask.status === 'failed') return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/tasks`);
+        const data = await res.json();
+        const t = (data.tasks || []).find(t => t.id === reportTask.id);
+        if (t && (t.status === 'done' || t.status === 'failed')) {
+          setReportTask(t);
+          clearInterval(interval);
+        }
+      } catch {}
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [reportTask?.id, reportTask?.status]);
+
+  const formatTime = (iso) => iso ? new Date(iso).toLocaleString() : '';
+
+  return (
+    <div className="report-container">
+      <div className="report-header">
+        <h2>Report</h2>
+      </div>
+
+      {/* Step 1: Select inference results */}
+      <div className="report-section">
+        <h3>1. Select Inference Results</h3>
+        {inferenceTasks.length === 0 ? (
+          <p className="report-empty">No completed inference tasks yet. Run an inference from the Test tab or ask the assistant.</p>
+        ) : (
+          <div className="inference-select-list">
+            {inferenceTasks.map(t => (
+              <div
+                key={t.id}
+                className={`inference-select-item ${selected.has(t.id) ? 'selected' : ''}`}
+                onClick={() => toggleSelect(t.id)}
+              >
+                <span className="inference-select-checkbox">
+                  {selected.has(t.id) ? '✓' : ''}
+                </span>
+                <div className="inference-select-info">
+                  <span className="inference-select-name">{t.description}</span>
+                  <span className="inference-select-meta">
+                    {t.result?.model_used || '—'} · {formatTime(t.completed_at)}
+                  </span>
+                </div>
+                <span className="inference-select-structures">
+                  {t.result?.results?.detected_structures?.length || 0} structures
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          className="generate-btn"
+          onClick={handleGenerate}
+          disabled={selected.size === 0 || generating}
+        >
+          {generating ? 'Queuing...' : `Generate Report (${selected.size} selected)`}
+        </button>
+        {error && <div className="report-error">{error}</div>}
+      </div>
+
+      {/* Step 2: Report result */}
+      {reportTask && (
+        <div className="report-section">
+          <h3>2. Report</h3>
+
+          {(reportTask.status === 'queued' || reportTask.status === 'running') && (
+            <p className="report-loading">
+              {reportTask.status === 'queued' ? 'Waiting in queue...' : 'Generating report...'}
+            </p>
+          )}
+
+          {reportTask.status === 'failed' && (
+            <div className="report-error">{reportTask.error}</div>
+          )}
+
+          {reportTask.status === 'done' && reportTask.result && (
+            <RenderedReport result={reportTask.result} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function RenderedReport({ result }) {
+  const { patient_context, findings, narrative, radlex_template, generated_at } = result;
+  const pc = patient_context || {};
+  const narr = narrative || {};
+
+  return (
+    <div className="rendered-report">
+      <div className="report-print-header">
+        <h1 className="report-title">RADIOLOGY REPORT</h1>
+        <p className="report-generated">Generated: {new Date(generated_at).toLocaleString()}</p>
+      </div>
+
+      {/* Patient */}
+      {Object.keys(pc).length > 0 && (
+        <div className="report-block">
+          <h4 className="report-block-title">Patient</h4>
+          <p>{pc.name || pc.id || 'Unknown'}</p>
+          {pc.birthDate && <p>DOB: {pc.birthDate}</p>}
+          {pc.gender && <p>Gender: {pc.gender}</p>}
+        </div>
+      )}
+
+      {/* Technique */}
+      {findings.length > 0 && (
+        <div className="report-block">
+          <h4 className="report-block-title">Technique</h4>
+          {findings.map((f, i) => (
+            <p key={i}>{f.description} — model: {f.model}</p>
+          ))}
+        </div>
+      )}
+
+      {/* Quantitative Findings */}
+      {findings.map((f, fi) => (
+        f.structures?.length > 0 && (
+          <div key={fi} className="report-block">
+            <h4 className="report-block-title">Quantitative Findings</h4>
+            <p className="report-block-subtitle">{f.description}</p>
+            <table className="report-table">
+              <thead>
+                <tr>
+                  <th>Structure</th>
+                  <th>Volume (cm³)</th>
+                  <th>% of scan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {f.structures.map((s, si) => (
+                  <tr key={si}>
+                    <td>{s.name}</td>
+                    <td>{s.volume_cm3 != null ? s.volume_cm3 : '—'}</td>
+                    <td>{s.volume_percentage?.toFixed(2)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      ))}
+
+      {/* RadLex template section (if available) */}
+      {radlex_template && !radlex_template.error && (
+        <div className="report-block">
+          <h4 className="report-block-title">Template Output</h4>
+          <pre className="report-template-raw">
+            {typeof radlex_template === 'string'
+              ? radlex_template
+              : JSON.stringify(radlex_template, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      {/* LLM narrative sections */}
+      {narr.findings_narrative && (
+        <div className="report-block">
+          <h4 className="report-block-title">Findings</h4>
+          <p className="report-narrative-text">{narr.findings_narrative}</p>
+        </div>
+      )}
+
+      {narr.impression && (
+        <div className="report-block">
+          <h4 className="report-block-title">Impression</h4>
+          <p className="report-narrative-text">{narr.impression}</p>
+        </div>
+      )}
+
+      {narr.recommendations && (
+        <div className="report-block">
+          <h4 className="report-block-title">Recommendations</h4>
+          <p className="report-narrative-text">{narr.recommendations}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default Report;

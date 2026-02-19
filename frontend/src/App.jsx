@@ -5,6 +5,9 @@ import Settings from './components/Settings';
 import PatientSelection from './components/PatientSelection';
 import Sessions from './components/Sessions';
 import InferenceTest from './components/InferenceTest';
+import Results from './components/Results';
+import Report from './components/Report';
+import Toast from './components/Toast';
 
 function App() {
   // --- State and refs ---
@@ -33,6 +36,10 @@ function App() {
   const [pendingTool, setPendingTool] = useState(null); // {tool_name, arguments}
   const [runningTool, setRunningTool] = useState(null); // tool currently executing
   const [currentSessionId, setCurrentSessionId] = useState(null);
+  const [taskRefreshSignal, setTaskRefreshSignal] = useState(null);
+  const [runningTaskCount, setRunningTaskCount] = useState(0);
+  const [uploadedDir, setUploadedDir] = useState(null); // {name, path} for directories
+  const [uploadingDir, setUploadingDir] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -46,6 +53,17 @@ function App() {
     fetch(getApiUrl('/api/sessions'))
       .then(r => r.json())
       .then(d => setCurrentSessionId(d.current_session_id))
+      .catch(() => {});
+  }, []);
+
+  // Initialise running task count from DB on mount
+  useEffect(() => {
+    fetch(getApiUrl('/api/tasks'))
+      .then(r => r.json())
+      .then(d => {
+        const active = (d.tasks || []).filter(t => t.status === 'queued' || t.status === 'running').length;
+        setRunningTaskCount(active);
+      })
       .catch(() => {});
   }, []);
 
@@ -136,6 +154,44 @@ function App() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleChatDirectoryUpload = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploadingDir(true);
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i], files[i].webkitRelativePath || files[i].name);
+      }
+      const res = await fetch(getApiUrl('/api/upload-directory'), { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.dir_path) {
+        // Register with backend so process-query picks it up
+        await fetch(getApiUrl('/api/set-directory'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dir_path: data.dir_path }),
+        });
+        setUploadedDir({ name: `${data.dirname} (${data.file_count} files)`, path: data.dir_path });
+        addMessage({ type: 'bot', content: `Directory "${data.dirname}" uploaded (${data.file_count} files). You can now ask me to analyze it.` });
+      } else {
+        addMessage({ type: 'bot', content: `Directory upload failed: ${data.detail || 'unknown error'}` });
+      }
+    } catch {
+      addMessage({ type: 'bot', content: 'Directory upload failed.' });
+    }
+    setUploadingDir(false);
+  };
+
+  const handleRemoveDir = async () => {
+    await fetch(getApiUrl('/api/set-directory'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dir_path: null }),
+    }).catch(() => {});
+    setUploadedDir(null);
   };
 
   const handleAction = async (actionId) => {
@@ -258,6 +314,13 @@ function App() {
   // --- Render ---
   return (
     <div className="app">
+      {/* Global SSE toast notifications - lives outside tab routing */}
+      <Toast onTaskUpdate={(event) => {
+        setTaskRefreshSignal(event);
+        if (event.type === 'task_started') setRunningTaskCount(n => n + 1);
+        if (event.type === 'task_done' || event.type === 'task_failed') setRunningTaskCount(n => Math.max(0, n - 1));
+      }} />
+
       <aside className="sidebar">
         <div className="logo">
           <span className="logo-icon">H</span>
@@ -268,6 +331,10 @@ function App() {
           <a href="#" className={`nav-item${page === 'analysis' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('analysis'); }}>Analysis</a>
           <a href="#" className={`nav-item${page === 'history' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('history'); }}>History</a>
           <a href="#" className={`nav-item${page === 'test' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('test'); }}>Test</a>
+          <a href="#" className={`nav-item${page === 'results' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('results'); }}>
+            Results{runningTaskCount > 0 && <span className="nav-task-badge">{runningTaskCount}</span>}
+          </a>
+          <a href="#" className={`nav-item${page === 'report' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('report'); }}>Report</a>
           <a href="#" className={`nav-item${page === 'settings' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('settings'); }}>Settings</a>
         </nav>
         <div className="sidebar-footer">
@@ -312,6 +379,12 @@ function App() {
           ) : (
             <p>Multi-Agent Orchestrator for Healthcare</p>
           )}
+          {runningTaskCount > 0 && (
+            <div className="header-task-indicator">
+              <span className="header-task-dot" />
+              {runningTaskCount} task{runningTaskCount > 1 ? 's' : ''} running in background
+            </div>
+          )}
         </header>
 
         {page === 'settings' ? (
@@ -320,6 +393,10 @@ function App() {
           <PatientSelection onPatientSelect={handlePatientSelection} />
         ) : page === 'test' ? (
           <InferenceTest />
+        ) : page === 'results' ? (
+          <Results refreshSignal={taskRefreshSignal} />
+        ) : page === 'report' ? (
+          <Report refreshSignal={taskRefreshSignal} />
         ) : page === 'history' ? (
           <Sessions onLoadSession={(data) => {
             if (!data) return;
@@ -333,6 +410,7 @@ function App() {
               }]);
               setSelectedPatient(null);
               setUploadedFile(null);
+              setUploadedDir(null);
               setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null, selectedPatient: null, patientContext: null });
             } else {
               // Existing session loaded - restore chat history
@@ -346,6 +424,13 @@ function App() {
                 }
               } else {
                 setMessages([{ type: 'bot', content: `Session "${data.name}" loaded. No previous chat history found.`, actions: [] }]);
+              }
+              // Restore uploaded directory if the session had one
+              const dirEntry = (data.files || []).find(f => f.file_type === 'dicom_dir');
+              if (dirEntry) {
+                setUploadedDir({ name: dirEntry.original_name, path: dirEntry.stored_path });
+              } else {
+                setUploadedDir(null);
               }
             }
             setPage('analysis');
@@ -464,6 +549,19 @@ function App() {
                   setIsProcessing(false);
                 }
               }}>
+                {/* Directory preview */}
+                {uploadedDir && (
+                  <div className="chatbot-preview">
+                    <div className="chatbot-file-chip">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                      </svg>
+                      <span className="file-name">{uploadedDir.name}</span>
+                      <button type="button" className="remove-btn" onClick={handleRemoveDir} title="Remove directory">✕</button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Always render preview above the input row */}
                 {uploadedFile && (
                   <div className="chatbot-preview">
@@ -544,8 +642,20 @@ function App() {
                     className="chatbot-file-input"
                     onChange={handleFileSelect}
                   />
-                  <label htmlFor="fileInput" className="chatbot-file-label" title="Attach image">
+                  <label htmlFor="fileInput" className="chatbot-file-label" title="Attach file">
                     <svg width="22" height="22" fill="none" stroke="#6366f1" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                  </label>
+                  <input
+                    type="file"
+                    id="dirInput"
+                    className="chatbot-file-input"
+                    webkitdirectory=""
+                    directory=""
+                    onChange={handleChatDirectoryUpload}
+                    disabled={uploadingDir}
+                  />
+                  <label htmlFor="dirInput" className="chatbot-file-label" title="Attach directory" style={{ opacity: uploadingDir ? 0.5 : 1 }}>
+                    <svg width="22" height="22" fill="none" stroke="#10b981" strokeWidth="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                   </label>
                   <button type="submit" className="chatbot-send-btn">
                     <span>Send</span>

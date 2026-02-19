@@ -447,12 +447,26 @@ def preprocess_image(image_path: str, model_name: str = None) -> torch.Tensor:
     return image
 
 
-def postprocess_segmentation(output: torch.Tensor, labels: Dict[int, str]) -> Dict[str, Any]:
-    """Post-process segmentation output in depth slices to avoid large memory allocation."""
+def postprocess_segmentation(
+    output: torch.Tensor,
+    labels: Dict[int, str],
+    voxel_spacing_mm: Optional[tuple] = None,
+) -> Dict[str, Any]:
+    """Post-process segmentation output in depth slices to avoid large memory allocation.
+
+    voxel_spacing_mm: (x, y, z) spacing in mm after resampling, e.g. (1.5, 1.5, 2.0).
+    When provided, volume_cm3 is computed for each structure.
+    """
     is_binary = output.shape[1] == 1
     depth = output.shape[-1]
     total_voxels = output.shape[2] * output.shape[3] * depth
     chunk_size = 16  # slices per chunk - keeps peak memory ~chunk_size/depth of full tensor
+
+    # Voxel volume in cm³ (1 cm³ = 1000 mm³)
+    voxel_vol_cm3: Optional[float] = None
+    if voxel_spacing_mm is not None:
+        mm3_per_voxel = voxel_spacing_mm[0] * voxel_spacing_mm[1] * voxel_spacing_mm[2]
+        voxel_vol_cm3 = mm3_per_voxel / 1000.0
 
     # Accumulate voxel counts per label across all chunks
     label_counts: Dict[int, int] = {}
@@ -483,13 +497,16 @@ def postprocess_segmentation(output: torch.Tensor, labels: Dict[int, str]) -> Di
     for label_id, label_name in labels.items():
         voxel_count = label_counts.get(label_id, 0)
         if voxel_count > 0:
-            detected_structures.append({
+            entry: Dict[str, Any] = {
                 "label_id": label_id,
                 "name": label_name,
                 "voxel_count": voxel_count,
                 "volume_percentage": round(voxel_count / total_voxels * 100, 2),
-                "detected": True
-            })
+                "detected": True,
+            }
+            if voxel_vol_cm3 is not None:
+                entry["volume_cm3"] = round(voxel_count * voxel_vol_cm3, 2)
+            detected_structures.append(entry)
 
     return {
         "prediction_shape": output_shape,
@@ -803,9 +820,29 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
             torch.cuda.empty_cache()
             output = output.cpu()
 
+        # Determine voxel spacing: set for 3D medical images (NIfTI, DICOM), None for 2D inputs
+        _is_dir = os.path.isdir(image_path)
+        _ext = "" if _is_dir else Path(image_path).suffix.lower()
+        if not _is_dir and image_path.endswith('.nii.gz'):
+            _ext = '.nii.gz'
+        if not _is_dir and _ext in IMAGE_EXTS:
+            # 2D pseudo-3D: no physical voxel spacing
+            _voxel_spacing: Optional[tuple] = None
+        elif _is_dir:
+            _dir_files = [f for f in Path(image_path).iterdir() if f.is_file() and not f.name.startswith('.')]
+            if _dir_files and _dir_files[0].suffix.lower() in IMAGE_EXTS:
+                # 2D image directory: no physical spacing
+                _voxel_spacing = None
+            else:
+                # DICOM series directory: resampled to (1.5, 1.5, 2.0) mm
+                _voxel_spacing = (1.5, 1.5, 2.0)
+        else:
+            # NIfTI or single DICOM: resampled to (1.5, 1.5, 2.0) mm
+            _voxel_spacing = (1.5, 1.5, 2.0)
+
         # Post-process based on model type
         if model_info["category"] == "segmentation":
-            results = postprocess_segmentation(output, model_info.get("labels", {}))
+            results = postprocess_segmentation(output, model_info.get("labels", {}), voxel_spacing_mm=_voxel_spacing)
         else:
             # For detection/classification, return raw predictions
             output_np = output.cpu().numpy()

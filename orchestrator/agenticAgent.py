@@ -13,6 +13,8 @@ import yaml
 from tool_registry import ToolRegistry
 from sessionContext import SessionContext
 from logger import Logger
+import task_runner
+import database as db
 
 
 # LLM Backend selection: "ollama" (local) or "gemini" (API)
@@ -40,11 +42,62 @@ class AgenticAgent:
         # Use async init pattern for tool discovery
         # You must call await self._initialize_components() after instantiation
 
+    # Built-in tool schema for queue_task - registered alongside MCP tools so the
+    # LLM knows it can call it. Execution is handled locally (never goes to MCP).
+    BUILTIN_TOOLS = {
+        "queue_task": {
+            "description": (
+                "Queue a long-running operation as a background task. "
+                "Use this instead of calling a tool directly whenever the operation may take more than a few seconds "
+                "(e.g. MONAI inference, report generation, bulk analysis). "
+                "The function returns immediately so you can keep talking to the user. "
+                "The user will receive a notification when the task finishes."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "task_type": {
+                        "type": "string",
+                        "description": "Category of the task. Use 'inference' for MONAI model runs, 'report' for report generation, or any descriptive string for other tasks.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Human-readable label shown in the Results tab, e.g. 'WholeBody segmentation on PANCREAS_0001'.",
+                    },
+                    "input_data": {
+                        "type": "object",
+                        "description": "Task-specific inputs as a JSON object. For 'inference': {image_path, model_name}. For 'report': {task_ids, patient_context}.",
+                    },
+                },
+                "required": ["task_type", "description", "input_data"],
+            },
+            "server": "__builtin__",
+            "original_name": "queue_task",
+            "transport": "builtin",
+        },
+        "list_tasks": {
+            "description": (
+                "List all background tasks for the current session and their status. "
+                "Use this when the user asks whether their inference or report tasks have finished, "
+                "or to check how many tasks are still running."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {},
+            },
+            "server": "__builtin__",
+            "original_name": "list_tasks",
+            "transport": "builtin",
+        },
+    }
+
     async def _initialize_components(self):
         """Initialize LLM client and tool registry with discovered tools"""
         self.logger.info("Initializing agent components...")
-        
+
         self.available_tools = await self.tool_registry.discover_tools()
+        # Register built-in tools alongside MCP tools
+        self.available_tools.update(self.BUILTIN_TOOLS)
         self.agent_tools = set(self.available_tools.keys())
         skills = self.load_all_skills()
         enabled_tools = self.get_enabled_agent_tools()
@@ -118,6 +171,15 @@ All tool calls and analysis should be in the context of this patient. If any too
 3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
 4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
+
+BACKGROUND TASK RULES (read carefully):
+- Any operation that takes more than a few seconds MUST be queued with `queue_task` instead of called directly.
+- This includes: MONAI inference (monai.run_inference), report generation, bulk analysis of multiple files.
+- After calling `queue_task`, respond to the user immediately - do NOT wait for the task to finish.
+- The user will receive a notification in the UI when the task is done.
+- For 'inference' tasks: input_data = {{"image_path": "...", "model_name": "..."}}
+- For 'report' tasks: input_data = {{"task_ids": [...], "patient_context": {{...}}}}
+- Short operations (analyze_image, list_models, download_model, FHIR queries) can still be called directly.
 
 CONVERSATION RULES:
 1. Be conversational. If the user greets you, greet them back. If they ask a question you can answer from context, answer it directly without calling any tool.
@@ -393,6 +455,7 @@ TOOL USAGE RULES:
             imageList=pending["imageList"],
             max_iterations=pending["max_iterations"] - pending["iterations_used"],
             metadata=pending["metadata"],
+            session_id=pending.get("session_id"),
             _resume_history=execution_history,
             _resume_response=llm_response if is_gemini else None
         )
@@ -712,6 +775,65 @@ Your decision:"""
                                     })
                                     continue
 
+                            # --- Built-in tool intercept ---
+                            # Handle built-in tools locally without going to MCP
+                            if tool_name == "list_tasks":
+                                tasks = db.list_tasks(session_id=session_id)
+                                summary = [
+                                    {
+                                        "id": t["id"][:8],
+                                        "type": t["task_type"],
+                                        "description": t["description"],
+                                        "status": t["status"],
+                                        "error": t.get("error"),
+                                    }
+                                    for t in tasks
+                                ]
+                                result = {
+                                    "tasks": summary,
+                                    "running": sum(1 for t in tasks if t["status"] in ("queued", "running")),
+                                    "done": sum(1 for t in tasks if t["status"] == "done"),
+                                    "failed": sum(1 for t in tasks if t["status"] == "failed"),
+                                }
+                                result_summary = f"Tasks: {result['running']} running, {result['done']} done, {result['failed']} failed"
+                                execution_history.append({
+                                    "tool": tool_name,
+                                    "success": True,
+                                    "result_summary": result_summary,
+                                    "result": result,
+                                })
+                                final_result = result
+                                if is_gemini:
+                                    _resume_response = self.llm_client.send_function_response(tool_name, result)
+                                continue
+
+                            if tool_name == "queue_task":
+                                task_type = arguments.get("task_type", "generic")
+                                description = arguments.get("description", "Background task")
+                                input_data = arguments.get("input_data", {})
+                                task_id = task_runner.submit_task(
+                                    session_id=session_id or "unknown",
+                                    task_type=task_type,
+                                    description=description,
+                                    input_data=input_data,
+                                )
+                                result = {
+                                    "task_id": task_id,
+                                    "status": "queued",
+                                    "message": f"Task queued: '{description}'. You'll receive a notification when it finishes.",
+                                }
+                                result_summary = f"Queued background task: {description}"
+                                execution_history.append({
+                                    "tool": tool_name,
+                                    "success": True,
+                                    "result_summary": result_summary,
+                                    "result": result,
+                                })
+                                final_result = result
+                                if is_gemini:
+                                    _resume_response = self.llm_client.send_function_response(tool_name, result)
+                                continue
+
                             # Check if confirmation is required
                             if self.require_confirmation:
                                 print(f"Tool confirmation required: {tool_name}")
@@ -729,7 +851,8 @@ Your decision:"""
                                     "data": data,
                                     "metadata": metadata,
                                     "iterations_used": iterations,
-                                    "max_iterations": max_iterations
+                                    "max_iterations": max_iterations,
+                                    "session_id": session_id,
                                 }
                                 return {
                                     "type": "confirmation_required",
@@ -859,7 +982,7 @@ Your decision:"""
                     
             except Exception as e:
                 print(f"Error in agentic workflow: {type(e).__name__}: {e}")
-                self.logger.error(f"Exception in workflow: {type(e).__name__}: {e}", exc_info=True)
+                self.logger.error(f"Exception in workflow: {type(e).__name__}: {e}")
                 error_message = str(e) if e else "Unknown workflow error"
 
                 # Stop immediately on rate limit errors - no point retrying

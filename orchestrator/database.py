@@ -1,5 +1,5 @@
 """
-SQLite database for persisting sessions, uploaded files, and inference jobs.
+SQLite database for persisting sessions, uploaded files, and background tasks.
 Uses Python's built-in sqlite3 - zero external dependencies.
 """
 
@@ -61,11 +61,12 @@ def init_db():
             uploaded_at TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS inference_jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        CREATE TABLE IF NOT EXISTS background_tasks (
+            id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-            file_id INTEGER REFERENCES uploaded_files(id),
-            model_name TEXT,
+            task_type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            input_data TEXT,
             status TEXT DEFAULT 'queued',
             result TEXT,
             error TEXT,
@@ -218,6 +219,17 @@ def save_uploaded_file(session_id: str, original_name: str, stored_path: str, fi
     return file_id
 
 
+def remove_session_dirs(session_id: str):
+    """Remove all dicom_dir entries for a session (called before registering a new directory)."""
+    conn = _get_conn()
+    conn.execute(
+        "DELETE FROM uploaded_files WHERE session_id = ? AND file_type = 'dicom_dir'",
+        (session_id,)
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_session_total_size(session_id: str) -> int:
     """Get total file size in bytes for a session."""
     conn = _get_conn()
@@ -248,58 +260,70 @@ def get_file(file_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 
-# --- Inference Jobs ---
+# --- Background Tasks ---
 
-def create_inference_job(session_id: str, file_id: int, model_name: str) -> int:
-    """Queue an inference job. Returns the job ID."""
+def create_task(session_id: str, task_type: str, description: str, input_data: Dict) -> str:
+    """Create a background task record. Returns the task ID (UUID)."""
+    task_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
     conn = _get_conn()
-    cursor = conn.execute(
-        "INSERT INTO inference_jobs (session_id, file_id, model_name, status, created_at) VALUES (?, ?, ?, 'queued', ?)",
-        (session_id, file_id, model_name, datetime.now().isoformat())
+    conn.execute(
+        "INSERT INTO background_tasks (id, session_id, task_type, description, input_data, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, 'queued', ?)",
+        (task_id, session_id, task_type, description, json.dumps(input_data), now)
     )
-    job_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    return job_id
+    return task_id
 
 
-def update_inference_job(job_id: int, status: str, result: Optional[Dict] = None, error: Optional[str] = None):
-    """Update an inference job's status and result."""
+def update_task(task_id: str, status: str, result: Optional[Dict] = None, error: Optional[str] = None):
+    """Update a background task's status, result, and completion time."""
     conn = _get_conn()
     now = datetime.now().isoformat()
     completed = now if status in ("done", "failed") else None
     conn.execute(
-        "UPDATE inference_jobs SET status = ?, result = ?, error = ?, completed_at = ? WHERE id = ?",
-        (status, json.dumps(result) if result else None, error, completed, job_id)
+        "UPDATE background_tasks SET status = ?, result = ?, error = ?, completed_at = ? WHERE id = ?",
+        (status, json.dumps(result) if result is not None else None, error, completed, task_id)
     )
     conn.commit()
     conn.close()
 
 
-def get_session_jobs(session_id: str) -> List[Dict]:
-    """Get all inference jobs for a session."""
+def get_task(task_id: str) -> Optional[Dict]:
+    """Get a single background task by ID."""
     conn = _get_conn()
-    rows = conn.execute(
-        "SELECT * FROM inference_jobs WHERE session_id = ? ORDER BY created_at",
-        (session_id,)
-    ).fetchall()
+    row = conn.execute("SELECT * FROM background_tasks WHERE id = ?", (task_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    if d.get("input_data"):
+        d["input_data"] = json.loads(d["input_data"])
+    if d.get("result"):
+        d["result"] = json.loads(d["result"])
+    return d
+
+
+def list_tasks(session_id: Optional[str] = None) -> List[Dict]:
+    """List background tasks, optionally filtered by session. Newest first."""
+    conn = _get_conn()
+    if session_id:
+        rows = conn.execute(
+            "SELECT * FROM background_tasks WHERE session_id = ? ORDER BY created_at DESC",
+            (session_id,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM background_tasks ORDER BY created_at DESC"
+        ).fetchall()
     conn.close()
     results = []
     for row in rows:
         d = dict(row)
+        if d.get("input_data"):
+            d["input_data"] = json.loads(d["input_data"])
         if d.get("result"):
             d["result"] = json.loads(d["result"])
         results.append(d)
     return results
-
-
-def get_pending_jobs() -> List[Dict]:
-    """Get all queued inference jobs (for background worker)."""
-    conn = _get_conn()
-    rows = conn.execute(
-        "SELECT ij.*, uf.stored_path, uf.original_name FROM inference_jobs ij "
-        "JOIN uploaded_files uf ON ij.file_id = uf.id "
-        "WHERE ij.status = 'queued' ORDER BY ij.created_at"
-    ).fetchall()
-    conn.close()
-    return [dict(row) for row in rows]

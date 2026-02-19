@@ -14,11 +14,14 @@ load_dotenv()
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from agenticAgent import agent_decision
 import database as db
+import task_runner
 
 current_session_id: Optional[str] = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -27,6 +30,7 @@ async def lifespan(app: FastAPI):
     db.init_db()
     current_session_id = db.create_session()
     await agent_decision._initialize_components()
+    task_runner.init()
     yield
     # Shutdown - close MCP sessions
     agent_decision.reset_session_context()
@@ -50,6 +54,7 @@ app.add_middleware(
 
 uploaded_files = []  # In-memory buffer for current upload (before query)
 temp_file_paths = {}  # Temp file paths mapped by filename
+uploaded_dir: Optional[str] = None  # Directory path registered for the current query
 
 
 async def send_step(step_type: str, message: str, **kwargs) -> str:
@@ -77,6 +82,27 @@ async def set_metadata(data: dict = Body(...)):
 
 
     
+@app.post("/api/set-directory")
+async def set_directory(data: dict = Body(...)):
+    """Register an uploaded directory path for use in the next query and persist to the session."""
+    global uploaded_dir
+    dir_path = data.get("dir_path")
+
+    # Always clear any previous dicom_dir DB entries for this session
+    db.remove_session_dirs(current_session_id)
+
+    if dir_path and os.path.isdir(dir_path):
+        uploaded_dir = dir_path
+        dirname = Path(dir_path).name
+        # Compute size by summing all files in the directory
+        total_size = sum(f.stat().st_size for f in Path(dir_path).iterdir() if f.is_file())
+        db.save_uploaded_file(current_session_id, dirname, dir_path, 'dicom_dir', total_size)
+    else:
+        uploaded_dir = None
+
+    return {"status": "ok", "dir_path": uploaded_dir}
+
+
 @app.post("/api/process-query")
 async def process_query(query: str = Body(..., media_type="text/plain")):
     print(f"Processing ad-hoc query: {query}")
@@ -84,7 +110,7 @@ async def process_query(query: str = Body(..., media_type="text/plain")):
         # Get files for current session from DB (persistent paths)
         session_files = db.get_session_files(current_session_id)
 
-        if not uploaded_files and not session_files:
+        if not uploaded_files and not session_files and not uploaded_dir:
             result = await agent_decision.execute_task(query, session_id=current_session_id)
         else:
             image_data = []
@@ -96,14 +122,21 @@ async def process_query(query: str = Body(..., media_type="text/plain")):
                         image_data.append((stored_path, contents))
                         print(f"Using persistent file: {stored_path}")
             elif session_files:
-                # Load from persistent storage
+                # Load from persistent storage (skip dicom_dir entries - handled via uploaded_dir)
                 for f in session_files:
+                    if f.get("file_type") == "dicom_dir":
+                        continue
                     path = f["stored_path"]
                     if os.path.exists(path):
                         with open(path, "rb") as fh:
                             contents = fh.read()
                         image_data.append((path, contents))
                         print(f"Using DB file: {path}")
+
+            # Include uploaded directory (empty bytes - agent uses the path only)
+            if uploaded_dir and os.path.isdir(uploaded_dir):
+                image_data.append((uploaded_dir, b""))
+                print(f"Using uploaded directory: {uploaded_dir}")
 
             if image_data:
                 result = await agent_decision.execute_task(query, imageList=image_data, session_id=current_session_id)
@@ -309,18 +342,20 @@ async def deny_tool():
 @app.post("/api/clear-files")
 async def clear_files():
     """Clear in-memory file buffer"""
-    global uploaded_files, temp_file_paths
+    global uploaded_files, temp_file_paths, uploaded_dir
     temp_file_paths.clear()
     uploaded_files.clear()
+    uploaded_dir = None
     return {"status": "cleared"}
 
 
 @app.post("/api/reset-session")
 async def reset_session():
     """Start a fresh session - clears context and LLM history, creates new session"""
-    global current_session_id, uploaded_files, temp_file_paths
+    global current_session_id, uploaded_files, temp_file_paths, uploaded_dir
     temp_file_paths.clear()
     uploaded_files.clear()
+    uploaded_dir = None
     agent_decision.reset_session_context()
     if agent_decision.llm_client:
         agent_decision.llm_client.start_chat()
@@ -385,7 +420,7 @@ async def delete_all_sessions():
 @app.post("/api/load-session")
 async def load_session(data: dict = Body(...)):
     """Load a saved session - restores context and file references"""
-    global current_session_id, uploaded_files, temp_file_paths
+    global current_session_id, uploaded_files, temp_file_paths, uploaded_dir
     session_id = data.get("session_id")
     if not session_id:
         return {"error": "session_id is required"}
@@ -398,6 +433,14 @@ async def load_session(data: dict = Body(...)):
     current_session_id = session_id
     uploaded_files.clear()
     temp_file_paths.clear()
+
+    # Restore uploaded directory from DB if the session had one
+    session_files_all = db.get_session_files(session_id)
+    dir_entries = [f for f in session_files_all if f.get("file_type") == "dicom_dir"]
+    if dir_entries and os.path.isdir(dir_entries[-1]["stored_path"]):
+        uploaded_dir = dir_entries[-1]["stored_path"]
+    else:
+        uploaded_dir = None
 
     # Restore context into the agent
     agent_decision.load_context_from_db(session_id)
@@ -792,6 +835,99 @@ def get_mock_patients():
     ]
 
 
+# --- Background Tasks & SSE ---
+
+@app.get("/api/events")
+async def sse_events(request: Request):
+    """
+    Server-Sent Events endpoint.  Polls the database every second and emits
+    an event whenever a task's status changes.  DB-polling is simpler and more
+    reliable than pushing events from background threads.
+    """
+    async def event_generator():
+        yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+        # task_id -> last known status; used to detect transitions
+        task_states: dict = {}
+        keepalive_ticks = 0
+
+        while True:
+            try:
+                await asyncio.sleep(1.0)
+
+                if await request.is_disconnected():
+                    break
+
+                tasks = db.list_tasks()
+                for task in tasks:
+                    tid = task["id"]
+                    status = task["status"]
+                    prev = task_states.get(tid)
+
+                    if prev == status:
+                        continue  # no change
+
+                    task_states[tid] = status
+                    base = {
+                        "task_id": tid,
+                        "task_type": task["task_type"],
+                        "description": task["description"],
+                        "session_id": task["session_id"],
+                    }
+
+                    if prev is None and status == "running":
+                        yield f"data: {json.dumps({**base, 'type': 'task_started'})}\n\n"
+                    elif status == "done":
+                        yield f"data: {json.dumps({**base, 'type': 'task_done'})}\n\n"
+                    elif status == "failed":
+                        yield f"data: {json.dumps({**base, 'type': 'task_failed', 'error': task.get('error', '')})}\n\n"
+
+                keepalive_ticks += 1
+                if keepalive_ticks >= 25:
+                    yield ": keepalive\n\n"
+                    keepalive_ticks = 0
+
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/tasks")
+async def list_tasks(session_id: Optional[str] = None):
+    """Return all background tasks, optionally filtered by session_id."""
+    tasks = db.list_tasks(session_id=session_id)
+    return {"tasks": tasks}
+
+
+@app.post("/api/generate-report")
+async def generate_report(data: dict = Body(...)):
+    """
+    Queue a report-generation background task from selected inference results.
+    Body: {task_ids: [...], patient_context: {...}}
+    """
+    task_ids = data.get("task_ids", [])
+    if not task_ids:
+        raise HTTPException(status_code=400, detail="task_ids is required")
+
+    patient_context = data.get("patient_context", {})
+    description = f"Report from {len(task_ids)} inference result(s)"
+
+    task_id = task_runner.submit_task(
+        session_id=current_session_id,
+        task_type="report",
+        description=description,
+        input_data={"task_ids": task_ids, "patient_context": patient_context},
+    )
+
+    return {"status": "queued", "task_id": task_id, "description": description}
+
+
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy"}
@@ -801,5 +937,5 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     print("Starting server on http://localhost:5001")
-    uvicorn.run(app, host="0.0.0.0", port=5001)
+    uvicorn.run(app, host="0.0.0.0", port=5001, timeout_graceful_shutdown=3)
 

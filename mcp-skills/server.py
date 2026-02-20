@@ -21,8 +21,7 @@ def log(msg: str):
 
 mcp = FastMCP("skills")
 
-# Get skills directory from environment variable or use default
-SKILLS_DIR_PATH = os.getenv("SKILLS_DIR", "./orchestrator/skills")
+SKILLS_DIR_PATH = os.getenv("SKILLS_DIR")
 
 
 
@@ -52,7 +51,7 @@ def read_skill_file(skill_name: str) -> Dict[str, Any]:
     if result is None:
         return {
             "error": f"Skill '{skill_name}' not found",
-            "available_skills": [s.name for s in skills_manager.skills.values()]
+            "available_skills_list": [s.name for s in skills_manager.skills.values()]
         }
     
     log(f"Read SKILL.md with {len(result['available_files'])} helper files available")
@@ -114,7 +113,7 @@ def execute_script(skill_name: str, command: str) -> Dict[str, Any]:
     if skill_name not in skills_manager.skills:
         return {
             "error": f"Skill '{skill_name}' not found",
-            "available_skills": list(skills_manager.skills.keys())
+            "available_skills_list": list(skills_manager.skills.keys())
         }
     
     skill = skills_manager.skills[skill_name]
@@ -149,6 +148,34 @@ def execute_script(skill_name: str, command: str) -> Dict[str, Any]:
             "error": f"Failed to execute command: {str(e)}",
             "success": False
         }
+
+
+@mcp.tool()
+def read_asset(skill_name: str, asset_path: str) -> Dict[str, Any]:
+    """
+    Read or locate a static asset (template, image, data file) from a skill's assets folder.
+    
+    If the file is text-based (CSV, JSON, HTML), the content is returned.
+    If the file is binary (PNG, DOCX, PDF), metadata and the absolute path are returned
+    so it can be passed to 'execute_script'.
+    
+    :param skill_name: Name of the skill
+    :param asset_path: Path to the asset (e.g., "assets/invoice_template.html")
+    """
+    log(f"Accessing asset: {skill_name}/{asset_path}")
+    
+    result = skills_manager.read_asset_content(skill_name, asset_path)
+    
+    if "error" in result:
+        # Fallback: help the LLM find the right file
+        files = skills_manager._list_skill_files(skill_name)
+        asset_files = [f for f in files if f.startswith("assets/")]
+        return {
+            "error": result["error"],
+            "available_assets": asset_files
+        }
+        
+    return result
 
 
 if __name__ == "__main__":

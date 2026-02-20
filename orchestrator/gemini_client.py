@@ -16,7 +16,7 @@ class GeminiClient:
         self.genai_client = None
         self.chat_session = None  # Tracks the stateful conversation history
         self.available_tools = available_tools
-        self.model_id = "gemini-2.5-flash"
+        self.model_id = "gemini-2.0-flash"
         self.agent_config = None
         self.gemini_tools_list = []
         self.custom_system_prompt = None  # Store custom system prompt
@@ -133,11 +133,13 @@ class GeminiClient:
         #     for name, info in self.available_tools.items()
         # ])
         # # Skills-based prompt (from friend's branch - commented out, using conversational prompt instead):
-        # return f"""
+        #return f"""
         #  # ROLE
         #  You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
+        #  
         #  # AVAILABLE SKILLS (DIRECTORY)
         #  {self.skills}
+        #  Only use the skills listed in the directory above. Each skill has specific instructions and rules that you must follow precisely. Do not attempt to use any skill that is not in the directory.
         #  # SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
         #  You do not have all instructions loaded into your memory at once. You must follow this tiered workflow:
         #  1. **DISCOVERY (Current State):** You can see the "Available Skills" list above. If a user asks "What can you do?", explain these skills based on their descriptions. Do NOT call a tool just to list them.

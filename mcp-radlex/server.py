@@ -1,476 +1,319 @@
 #!/usr/bin/env python3
-"""
-MCP Server for RadLex/RadReport - Radiology report templates and terminology
-Exposes radiology reporting functionality via MCP protocol for LLM tool use.
-"""
-import os
-import json
-from typing import Dict, Any, List, Optional
-from datetime import datetime
+import logging
+import sys
+from typing import Any, Dict, List, Optional
+
+import httpx
 from mcp.server.fastmcp import FastMCP
 
-# Initialize FastMCP server
-mcp = FastMCP("RadLex")
+from template_filler import build_template_schema, fill_template_html, validate_findings
 
-# --- Report Templates (based on RadReport.org structure) ---
+# Keep noisy library logs off stdout (MCP uses stdout for the protocol).
+logging.basicConfig(stream=sys.stderr, level=logging.WARNING, force=True)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-REPORT_TEMPLATES = {
-    "ct_abdomen_general": {
-        "name": "CT Abdomen and Pelvis",
-        "modality": "CT",
-        "body_part": "abdomen",
-        "sections": {
-            "clinical_history": "Clinical History: {clinical_history}",
-            "comparison": "Comparison: {comparison}",
-            "technique": "Technique: CT of the abdomen and pelvis was performed {contrast}.",
-            "findings": {
-                "liver": "LIVER: {liver_findings}",
-                "gallbladder": "GALLBLADDER AND BILIARY: {gallbladder_findings}",
-                "spleen": "SPLEEN: {spleen_findings}",
-                "pancreas": "PANCREAS: {pancreas_findings}",
-                "adrenals": "ADRENAL GLANDS: {adrenal_findings}",
-                "kidneys": "KIDNEYS AND URETERS: {kidney_findings}",
-                "bladder": "BLADDER: {bladder_findings}",
-                "bowel": "BOWEL: {bowel_findings}",
-                "lymph_nodes": "LYMPH NODES: {lymph_node_findings}",
-                "vasculature": "VASCULATURE: {vascular_findings}",
-                "bones": "OSSEOUS STRUCTURES: {bone_findings}",
-                "other": "OTHER: {other_findings}"
-            },
-            "impression": "IMPRESSION:\n{impression}"
-        },
-        "default_values": {
-            "clinical_history": "Not provided",
-            "comparison": "None available",
-            "contrast": "with intravenous contrast",
-            "liver_findings": "Normal in size and attenuation. No focal lesions.",
-            "gallbladder_findings": "Normal. No gallstones or wall thickening.",
-            "spleen_findings": "Normal in size.",
-            "pancreas_findings": "Normal in size and attenuation.",
-            "adrenal_findings": "Normal bilaterally.",
-            "kidney_findings": "Normal in size and enhancement bilaterally. No hydronephrosis or stones.",
-            "bladder_findings": "Normal when distended.",
-            "bowel_findings": "Normal caliber throughout. No obstruction.",
-            "lymph_node_findings": "No pathologically enlarged lymph nodes.",
-            "vascular_findings": "Aorta and major vessels are normal in caliber.",
-            "bone_findings": "No aggressive osseous lesions.",
-            "other_findings": "None.",
-            "impression": "1. No acute abnormality."
-        }
-    },
-    "mri_kidney_mass": {
-        "name": "MRI Kidney - Renal Mass Protocol",
-        "modality": "MRI",
-        "body_part": "kidney",
-        "sections": {
-            "clinical_history": "Clinical History: {clinical_history}",
-            "comparison": "Comparison: {comparison}",
-            "technique": "Technique: MRI of the kidneys was performed using renal mass protocol {contrast}.",
-            "findings": {
-                "right_kidney": "RIGHT KIDNEY: {right_kidney_findings}",
-                "left_kidney": "LEFT KIDNEY: {left_kidney_findings}",
-                "mass_characteristics": "MASS CHARACTERISTICS (if applicable):\n  - Size: {mass_size}\n  - Location: {mass_location}\n  - T1 signal: {t1_signal}\n  - T2 signal: {t2_signal}\n  - Enhancement pattern: {enhancement_pattern}\n  - Bosniak classification: {bosniak_class}",
-                "adrenals": "ADRENAL GLANDS: {adrenal_findings}",
-                "other": "OTHER FINDINGS: {other_findings}"
-            },
-            "impression": "IMPRESSION:\n{impression}"
-        },
-        "default_values": {
-            "clinical_history": "Renal mass evaluation",
-            "comparison": "None available",
-            "contrast": "with and without intravenous gadolinium contrast",
-            "right_kidney_findings": "Normal in size and signal intensity. No masses or hydronephrosis.",
-            "left_kidney_findings": "Normal in size and signal intensity. No masses or hydronephrosis.",
-            "mass_size": "N/A",
-            "mass_location": "N/A",
-            "t1_signal": "N/A",
-            "t2_signal": "N/A",
-            "enhancement_pattern": "N/A",
-            "bosniak_class": "N/A",
-            "adrenal_findings": "Normal bilaterally.",
-            "other_findings": "None.",
-            "impression": "1. No renal masses identified."
-        }
-    },
-    "ct_chest": {
-        "name": "CT Chest",
-        "modality": "CT",
-        "body_part": "chest",
-        "sections": {
-            "clinical_history": "Clinical History: {clinical_history}",
-            "comparison": "Comparison: {comparison}",
-            "technique": "Technique: CT of the chest was performed {contrast}.",
-            "findings": {
-                "lungs": "LUNGS: {lung_findings}",
-                "airways": "AIRWAYS: {airway_findings}",
-                "pleura": "PLEURA: {pleural_findings}",
-                "mediastinum": "MEDIASTINUM: {mediastinal_findings}",
-                "heart": "HEART AND PERICARDIUM: {cardiac_findings}",
-                "lymph_nodes": "LYMPH NODES: {lymph_node_findings}",
-                "bones": "OSSEOUS STRUCTURES: {bone_findings}",
-                "upper_abdomen": "UPPER ABDOMEN (visualized): {upper_abdomen_findings}"
-            },
-            "impression": "IMPRESSION:\n{impression}"
-        },
-        "default_values": {
-            "clinical_history": "Not provided",
-            "comparison": "None available",
-            "contrast": "without intravenous contrast",
-            "lung_findings": "Clear bilaterally. No nodules, masses, or consolidation.",
-            "airway_findings": "Patent central airways.",
-            "pleural_findings": "No pleural effusion or pneumothorax.",
-            "mediastinal_findings": "Normal mediastinal contour.",
-            "cardiac_findings": "Normal cardiac size. No pericardial effusion.",
-            "lymph_node_findings": "No pathologically enlarged lymph nodes.",
-            "bone_findings": "No aggressive osseous lesions.",
-            "upper_abdomen_findings": "Visualized upper abdomen unremarkable.",
-            "impression": "1. No acute cardiopulmonary abnormality."
-        }
-    },
-    "xray_chest": {
-        "name": "Chest X-Ray (PA and Lateral)",
-        "modality": "X-ray",
-        "body_part": "chest",
-        "sections": {
-            "clinical_history": "Clinical History: {clinical_history}",
-            "comparison": "Comparison: {comparison}",
-            "technique": "Technique: PA and lateral views of the chest.",
-            "findings": {
-                "lungs": "LUNGS: {lung_findings}",
-                "heart": "HEART: {cardiac_findings}",
-                "mediastinum": "MEDIASTINUM: {mediastinal_findings}",
-                "bones": "BONES: {bone_findings}",
-                "other": "OTHER: {other_findings}"
-            },
-            "impression": "IMPRESSION:\n{impression}"
-        },
-        "default_values": {
-            "clinical_history": "Not provided",
-            "comparison": "None available",
-            "lung_findings": "Clear bilaterally. No focal consolidation, pleural effusion, or pneumothorax.",
-            "cardiac_findings": "Normal cardiac silhouette.",
-            "mediastinal_findings": "Normal mediastinal contour.",
-            "bone_findings": "No acute osseous abnormality.",
-            "other_findings": "None.",
-            "impression": "1. No acute cardiopulmonary process."
-        }
-    }
+# --- Configuration ---
+API_BASE = "https://api3.rsna.org/radreport/v1"
+HEADERS = {
+    "User-Agent": "AgenticHealth-RadReport-Agent/1.0",
+    "Accept": "application/json",
 }
 
-# --- RadLex Terminology (subset for common terms) ---
-
-RADLEX_TERMS = {
-    # Anatomical structures
-    "RID58": {"term": "liver", "definition": "Large glandular organ in the upper right abdomen"},
-    "RID86": {"term": "spleen", "definition": "Lymphoid organ in the left upper quadrant"},
-    "RID29662": {"term": "kidney", "definition": "Bean-shaped organs that filter blood"},
-    "RID170": {"term": "pancreas", "definition": "Gland behind the stomach"},
-    "RID187": {"term": "gallbladder", "definition": "Small organ that stores bile"},
-    "RID1301": {"term": "lung", "definition": "Respiratory organ in the thorax"},
-
-    # Findings
-    "RID3874": {"term": "mass", "definition": "Abnormal growth or lump of tissue"},
-    "RID3875": {"term": "nodule", "definition": "Small mass of tissue"},
-    "RID4865": {"term": "cyst", "definition": "Fluid-filled sac"},
-    "RID5196": {"term": "calcification", "definition": "Calcium deposit in tissue"},
-    "RID34262": {"term": "enhancement", "definition": "Increased signal after contrast"},
-    "RID28694": {"term": "effusion", "definition": "Abnormal fluid collection"},
-
-    # Descriptors
-    "RID5758": {"term": "normal", "definition": "Within expected limits"},
-    "RID5759": {"term": "abnormal", "definition": "Outside expected limits"},
-    "RID39050": {"term": "enlarged", "definition": "Increased in size"},
-    "RID39225": {"term": "decreased", "definition": "Reduced in size or amount"},
-    "RID5978": {"term": "benign", "definition": "Not cancerous"},
-    "RID5979": {"term": "malignant", "definition": "Cancerous"},
-
-    # Modalities
-    "RID10312": {"term": "computed tomography", "definition": "CT imaging"},
-    "RID10313": {"term": "magnetic resonance imaging", "definition": "MRI imaging"},
-    "RID10345": {"term": "radiography", "definition": "X-ray imaging"},
-    "RID10326": {"term": "ultrasonography", "definition": "Ultrasound imaging"}
-}
+mcp = FastMCP("RadReport-Pro")
 
 
-# --- MCP Tools ---
+def _normalize_subspecialty_payload(payload: Any) -> List[Any]:
+    """Extract subspecialty list from API response."""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        return payload.get("DATA", payload.get("results", []))
+    return []
 
-@mcp.tool()
-def list_templates(modality: Optional[str] = None, body_part: Optional[str] = None) -> Dict[str, Any]:
-    """
-    List available radiology report templates.
 
-    :param modality: Filter by modality (CT, MRI, X-ray)
-    :param body_part: Filter by body part (abdomen, chest, kidney, etc.)
-    """
-    templates = []
-    for template_id, template in REPORT_TEMPLATES.items():
-        if modality and template["modality"].lower() != modality.lower():
-            continue
-        if body_part and template["body_part"].lower() != body_part.lower():
-            continue
-        templates.append({
-            "id": template_id,
-            "name": template["name"],
-            "modality": template["modality"],
-            "body_part": template["body_part"],
-            "sections": list(template["sections"].keys())
-        })
+def _coerce_subspecialty_item(item: Any) -> Optional[Dict[str, str]]:
+    """Parse a single subspecialty item."""
+    if isinstance(item, str):
+        return {"code": item, "name": item}
+    if isinstance(item, dict):
+        code = item.get("code", "")
+        name = item.get("name", "")
+        if code or name:
+            return {"code": code, "name": name}
+    return None
 
+
+def _template_fetch_error(
+    template_id: str,
+    message: str,
+    details: Dict[str, Any],
+) -> Dict[str, Any]:
     return {
-        "total": len(templates),
-        "filters": {"modality": modality, "body_part": body_part},
-        "templates": templates
+        "error": message,
+        "error_type": "template_fetch_error",
+        "details": {"template_id": template_id, **details},
     }
 
 
-@mcp.tool()
-def get_template(template_id: str) -> Dict[str, Any]:
-    """
-    Get a specific report template with all sections and default values.
+async def get_subspecialties() -> List[Dict[str, str]]:
+    """Fetch valid subspecialty codes (NR, CH, etc.)."""
+    async with httpx.AsyncClient(headers=HEADERS, timeout=10, follow_redirects=True) as client:
+        try:
+            response = await client.get(f"{API_BASE}/subspecialty/")
+            response.raise_for_status()
+            status = response.status_code
+            content_type = response.headers.get("content-type", "")
 
-    :param template_id: Template ID from list_templates (e.g., 'ct_abdomen_general')
-    """
-    if template_id not in REPORT_TEMPLATES:
-        return {
-            "error": f"Template '{template_id}' not found",
-            "available_templates": list(REPORT_TEMPLATES.keys())
-        }
-
-    template = REPORT_TEMPLATES[template_id]
-    return {
-        "id": template_id,
-        "name": template["name"],
-        "modality": template["modality"],
-        "body_part": template["body_part"],
-        "sections": template["sections"],
-        "default_values": template["default_values"],
-        "required_fields": list(template["default_values"].keys())
-    }
-
-
-@mcp.tool()
-def generate_report(template_id: str, findings: Dict[str, str], patient_info: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-    """
-    Generate a radiology report from a template using provided findings.
-
-    This is the main tool for creating reports based on AI analysis results.
-    Pass the findings from image analysis (e.g., from MONAI) to populate the report.
-
-    :param template_id: Template ID to use (e.g., 'ct_abdomen_general')
-    :param findings: Dictionary of findings to fill in the template. Keys should match template fields.
-    :param patient_info: Optional patient information (name, mrn, dob, exam_date)
-    """
-    if template_id not in REPORT_TEMPLATES:
-        return {
-            "error": f"Template '{template_id}' not found",
-            "available_templates": list(REPORT_TEMPLATES.keys())
-        }
-
-    template = REPORT_TEMPLATES[template_id]
-
-    # Merge default values with provided findings
-    values = template["default_values"].copy()
-    values.update(findings)
-
-    # Build the report
-    report_lines = []
-
-    # Header with patient info
-    report_lines.append("=" * 60)
-    report_lines.append(f"RADIOLOGY REPORT - {template['name'].upper()}")
-    report_lines.append("=" * 60)
-
-    if patient_info:
-        report_lines.append(f"Patient: {patient_info.get('name', 'Unknown')}")
-        report_lines.append(f"MRN: {patient_info.get('mrn', 'N/A')}")
-        report_lines.append(f"DOB: {patient_info.get('dob', 'N/A')}")
-        report_lines.append(f"Exam Date: {patient_info.get('exam_date', datetime.now().strftime('%Y-%m-%d'))}")
-    else:
-        report_lines.append(f"Exam Date: {datetime.now().strftime('%Y-%m-%d')}")
-
-    report_lines.append("-" * 60)
-    report_lines.append("")
-
-    # Fill in sections
-    for section_name, section_template in template["sections"].items():
-        if isinstance(section_template, dict):
-            # Nested sections (like findings)
-            report_lines.append(f"{section_name.upper().replace('_', ' ')}:")
-            for subsection_name, subsection_template in section_template.items():
-                try:
-                    filled = subsection_template.format(**values)
-                    report_lines.append(f"  {filled}")
-                except KeyError as e:
-                    report_lines.append(f"  {subsection_name}: [Missing: {e}]")
-            report_lines.append("")
-        else:
-            # Simple section
             try:
-                filled = section_template.format(**values)
-                report_lines.append(filled)
-                report_lines.append("")
-            except KeyError as e:
-                report_lines.append(f"{section_name}: [Missing: {e}]")
-                report_lines.append("")
+                payload = response.json()
+            except Exception as parse_err:
+                snippet = response.text[:400]
+                return [
+                    {
+                        "error": (
+                            "Failed to parse subspecialties: "
+                            f"status={status}, content_type={content_type}, "
+                            f"detail={parse_err}, body_snippet={snippet}"
+                        )
+                    }
+                ]
 
-    report_lines.append("-" * 60)
-    report_lines.append(f"Report generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    report_lines.append("Electronically signed")
+            items = _normalize_subspecialty_payload(payload)
+            if not items:
+                return [
+                    {
+                        "error": (
+                            "No subspecialties returned: "
+                            f"status={status}, content_type={content_type}, "
+                            f"payload_snippet={str(payload)[:200]}"
+                        )
+                    }
+                ]
 
-    report_text = "\n".join(report_lines)
-
-    return {
-        "template_used": template_id,
-        "report_text": report_text,
-        "findings_used": findings,
-        "missing_fields": [k for k in template["default_values"].keys() if k not in findings],
-        "timestamp": datetime.now().isoformat()
-    }
-
-
-@mcp.tool()
-def search_radlex(query: str) -> Dict[str, Any]:
-    """
-    Search RadLex terminology for radiology terms and their definitions.
-
-    :param query: Search term (e.g., 'liver', 'mass', 'nodule')
-    """
-    results = []
-    query_lower = query.lower()
-
-    for radlex_id, term_info in RADLEX_TERMS.items():
-        if (query_lower in term_info["term"].lower() or
-            query_lower in term_info["definition"].lower()):
-            results.append({
-                "radlex_id": radlex_id,
-                "term": term_info["term"],
-                "definition": term_info["definition"]
-            })
-
-    return {
-        "query": query,
-        "total_results": len(results),
-        "results": results
-    }
+            result: List[Dict[str, str]] = []
+            for item in items:
+                parsed = _coerce_subspecialty_item(item)
+                if parsed is not None:
+                    result.append(parsed)
+            return result if result else [{"error": "No valid subspecialties parsed"}]
+        except Exception as exc:
+            return [{"error": f"Failed to fetch subspecialties: {exc}"}]
 
 
-@mcp.tool()
-def get_impression_suggestions(findings: Dict[str, str], modality: str) -> Dict[str, Any]:
-    """
-    Get AI-suggested impression text based on findings.
+async def search_templates(
+    query: Optional[str] = None,
+    specialty: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Search templates by keyword or specialty code."""
+    async with httpx.AsyncClient(headers=HEADERS, timeout=10, follow_redirects=True) as client:
+        params: Dict[str, str] = {}
+        if query:
+            params["search"] = query
+        if specialty:
+            params["specialty"] = specialty
 
-    This helps generate the IMPRESSION section of a radiology report
-    based on the detailed findings.
+        try:
+            response = await client.get(f"{API_BASE}/templates", params=params)
+            response.raise_for_status()
+            status = response.status_code
+            content_type = response.headers.get("content-type", "")
 
-    :param findings: Dictionary of findings from the report
-    :param modality: Imaging modality (CT, MRI, X-ray)
-    """
-    impressions = []
-    priority = 1
+            try:
+                payload = response.json()
+            except Exception as parse_err:
+                snippet = response.text[:400]
+                return [
+                    {
+                        "error": (
+                            "Failed to parse templates: "
+                            f"status={status}, content_type={content_type}, "
+                            f"detail={parse_err}, body_snippet={snippet}"
+                        )
+                    }
+                ]
 
-    # Analyze findings for notable items
-    findings_text = " ".join(str(v).lower() for v in findings.values())
+            templates: List[Dict[str, Any]] = []
+            if isinstance(payload, dict):
+                templates = payload.get("DATA", payload.get("results", []))
+            elif isinstance(payload, list):
+                templates = payload
 
-    # Check for critical findings
-    critical_terms = ["mass", "tumor", "malignant", "suspicious", "urgent"]
-    for term in critical_terms:
-        if term in findings_text:
-            impressions.append({
-                "priority": priority,
-                "text": f"CRITICAL: Finding requiring immediate attention - {term} identified",
-                "category": "critical"
-            })
-            priority += 1
+            if not templates:
+                return [{"error": f"No templates found for query={query}, specialty={specialty}"}]
 
-    # Check for notable findings
-    notable_terms = ["nodule", "cyst", "enlarged", "effusion", "consolidation"]
-    for term in notable_terms:
-        if term in findings_text:
-            impressions.append({
-                "priority": priority,
-                "text": f"Notable finding: {term.capitalize()} identified - clinical correlation recommended",
-                "category": "notable"
-            })
-            priority += 1
-
-    # Default normal finding if nothing notable
-    if not impressions:
-        impressions.append({
-            "priority": 1,
-            "text": f"No acute abnormality on {modality} examination.",
-            "category": "normal"
-        })
-
-    return {
-        "modality": modality,
-        "suggested_impressions": impressions,
-        "recommendation": "Review and modify as clinically appropriate"
-    }
+            return templates
+        except Exception as exc:
+            return [{"error": f"Search failed: {exc}"}]
 
 
-@mcp.tool()
-def convert_findings_to_report_format(ai_analysis: Dict[str, Any], template_id: str) -> Dict[str, Any]:
-    """
-    Convert AI analysis results (e.g., from MONAI) to report template format.
+async def fetch_template_html(template_id: str) -> Dict[str, Any]:
+    """Fetch template HTML from the RadReport API (latest revision)."""
+    async with httpx.AsyncClient(headers=HEADERS, timeout=10, follow_redirects=True) as client:
+        try:
+            response = await client.get(f"{API_BASE}/templates/{template_id}/details")
+        except Exception as exc:
+            return _template_fetch_error(
+                template_id,
+                "Failed to fetch template from RadReport API.",
+                {"detail": str(exc)},
+            )
 
-    This is a helper tool to transform structured AI output into the format
-    expected by generate_report().
+        status = response.status_code
+        content_type = response.headers.get("content-type", "")
+        if status >= 400:
+            snippet = response.text[:400]
+            return _template_fetch_error(
+                template_id,
+                "RadReport API returned an error for template details.",
+                {
+                    "status": status,
+                    "content_type": content_type,
+                    "body_snippet": snippet,
+                },
+            )
 
-    :param ai_analysis: Analysis results from AI model (e.g., MONAI segmentation results)
-    :param template_id: Target template ID to format findings for
-    """
-    if template_id not in REPORT_TEMPLATES:
+        try:
+            payload = response.json()
+        except Exception as parse_err:
+            snippet = response.text[:400]
+            return _template_fetch_error(
+                template_id,
+                "Failed to parse RadReport template details response.",
+                {
+                    "status": status,
+                    "content_type": content_type,
+                    "detail": str(parse_err),
+                    "body_snippet": snippet,
+                },
+            )
+
+        data_block = payload.get("DATA", "")
+        template_html = (
+            data_block.get("templateData", "") if isinstance(data_block, dict) else data_block
+        )
+        template_title = (
+            data_block.get("title")
+            if isinstance(data_block, dict)
+            else None
+        ) or payload.get("title", "Untitled")
+
+        if not template_html:
+            return _template_fetch_error(
+                template_id,
+                "Template HTML is missing in RadReport API response.",
+                {
+                    "status": status,
+                    "payload_snippet": str(payload)[:300],
+                },
+            )
+
         return {
-            "error": f"Template '{template_id}' not found",
-            "available_templates": list(REPORT_TEMPLATES.keys())
+            "template_id": template_id,
+            "template_title": str(template_title),
+            "html_template": str(template_html),
         }
 
-    template = REPORT_TEMPLATES[template_id]
-    findings = {}
 
-    # Extract relevant information from AI analysis
-    if "labels" in ai_analysis:
-        # Handle MONAI segmentation results
-        labels = ai_analysis.get("labels", {})
+# --- MCP Tool Definitions ---
 
-        for label_id, label_name in labels.items():
-            label_lower = label_name.lower()
+@mcp.tool()
+async def list_subspecialties() -> List[Dict[str, str]]:
+    """Get valid radiology specialty codes (e.g., NR for Neuroradiology, CH for Chest)."""
+    return await get_subspecialties()
 
-            # Map AI labels to template fields
-            if "liver" in label_lower:
-                findings["liver_findings"] = f"Segmented by AI. Volume calculated."
-            elif "spleen" in label_lower:
-                findings["spleen_findings"] = f"Segmented by AI. Normal appearance."
-            elif "kidney" in label_lower:
-                if "right" in label_lower:
-                    findings["right_kidney_findings"] = f"Segmented by AI."
-                elif "left" in label_lower:
-                    findings["left_kidney_findings"] = f"Segmented by AI."
-                else:
-                    findings["kidney_findings"] = f"Bilateral kidneys segmented by AI."
-            elif "pancreas" in label_lower:
-                findings["pancreas_findings"] = f"Segmented by AI. Normal appearance."
-            elif "gallbladder" in label_lower:
-                findings["gallbladder_findings"] = f"Identified by AI segmentation."
 
-    # Add analysis metadata
-    if "detected_modalities" in ai_analysis.get("analysis", {}):
-        modality = ai_analysis["analysis"]["detected_modalities"][0]
-        findings["technique_note"] = f"AI-detected modality: {modality}"
+@mcp.tool()
+async def find_templates(
+    query: Optional[str] = None,
+    specialty_code: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Search for templates. Use specialty_code from list_subspecialties for better accuracy.
 
-    if "shape" in ai_analysis:
-        findings["image_dimensions"] = f"Image dimensions: {ai_analysis['shape']}"
+    Args:
+        query: Optional search keyword for template names.
+        specialty_code: Subspecialty code string (e.g., "AB", "NR", "CH").
+    """
+    # Handle case where LLM passes {"code": "AB"} instead of "AB"
+    if isinstance(specialty_code, dict) and "code" in specialty_code:
+        specialty_code = specialty_code["code"]
+
+    return await search_templates(query=query, specialty=specialty_code)
+
+
+@mcp.tool()
+async def get_template_schema(template_id: str) -> Dict[str, Any]:
+    """
+    Fetch a template schema from RadReport API HTML (latest revision).
+
+    Returns normalized field metadata including key, aliases, control_type,
+    options, and section grouping to guide exact field mapping.
+    """
+    template_payload = await fetch_template_html(template_id)
+    if "error" in template_payload:
+        return template_payload
+
+    return build_template_schema(
+        template_html=template_payload["html_template"],
+        template_id=template_payload["template_id"],
+        template_title=template_payload["template_title"],
+    )
+
+
+@mcp.tool()
+async def generate_report(
+    template_id: str,
+    findings: Dict[str, Any],
+    report_title: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Fill an exact RadReport template DOM in-place using findings.
+
+    Rules:
+    - Template source is always RadReport API HTML.
+    - Unknown findings keys return hard error (unknown_fields).
+    - Invalid select/radio values return hard error (invalid_choice).
+    - Unspecified fields keep original template defaults.
+    """
+    template_payload = await fetch_template_html(template_id)
+    if "error" in template_payload:
+        return template_payload
+
+    schema = build_template_schema(
+        template_html=template_payload["html_template"],
+        template_id=template_payload["template_id"],
+        template_title=template_payload["template_title"],
+    )
+    if "error" in schema:
+        return schema
+
+    validation_result = validate_findings(findings=findings, all_fields=schema["all_fields"])
+    if "error" in validation_result:
+        return validation_result
+
+    fill_result = fill_template_html(
+        template_html=template_payload["html_template"],
+        all_fields=schema["all_fields"],
+        normalized_findings=validation_result["normalized"],
+    )
+    if "error" in fill_result:
+        return fill_result
+
+    applied_fields = validation_result["applied_fields"]
+    total_fields = len(schema["all_fields"])
 
     return {
+        "status": "Finalized",
         "template_id": template_id,
-        "converted_findings": findings,
-        "original_analysis": ai_analysis,
-        "note": "Findings converted from AI analysis. Review and supplement with clinical observations."
+        "template_title": schema["title"],
+        "report_title": report_title or schema["title"],
+        "html_report": fill_result["html_report"],
+        "applied_fields": applied_fields,
+        "preserved_defaults_count": max(total_fields - len(applied_fields), 0),
+        "validation": validation_result["validation"],
     }
 
-
-# --- Entry Point ---
 
 if __name__ == "__main__":
-    # Run with stdio transport for MCP protocol
-    mcp.run(transport="stdio")
+    mcp.run()

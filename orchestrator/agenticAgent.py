@@ -1043,6 +1043,10 @@ Your decision:"""
 
         # RadLex tools
         elif tool_name.startswith("radlex."):
+            if tool_name == "radlex.generate_report":
+                with open(result.get("report_title", "unknown_template") + "_report.md", "w") as f:
+                    f.write(result.get("html_report", ""))
+                    
             if "template" in tool_name.lower():
                 return f"Template operation completed"
             elif "report" in tool_name.lower():

@@ -281,7 +281,48 @@ class SkillsManager:
             except Exception as e:
                 return {"error": str(e)}
         return None
+    
 
+    def read_asset_content(self, name: str, asset_path: str) -> Dict[str, Any]:
+        """Reads asset content, handling text vs binary safely."""
+        path = self.get_asset_path(name, asset_path)
+        if not path or not path.is_file():
+            return {"error": "Asset not found"}
+
+        # List of extensions the LLM can safely 'read' as text
+        text_extensions = {'.json', '.xml', '.csv', '.txt', '.html', '.md', '.yaml', '.yml', '.tex', '.toml', '.sql'}
+        
+        if path.suffix.lower() in text_extensions:
+            try:
+                return {
+                    "type": "text",
+                    "content": path.read_text(encoding='utf-8'),
+                    "path": str(path)
+                }
+            except Exception as e:
+                return {"error": f"Failed to read text asset: {str(e)}"}
+        else:
+            # For binary files (images, docx, etc.), just return metadata
+            return {
+                "type": "binary",
+                "message": "This is a binary file and cannot be read directly as text. Use a script to process it.",
+                "path": str(path),
+                "extension": path.suffix,
+                "size_bytes": path.stat().st_size
+            }
+
+    def get_asset_path(self, name: str, asset_path: str) -> Optional[Path]:
+            """Returns the absolute path to an asset for script execution."""
+            if name not in self.skills:
+                return None
+            
+            skill_dir = self.skills[name].path.parent
+            full_path = (skill_dir / asset_path).resolve()
+            
+            # Security: check it's inside the skill directory
+            if str(full_path).startswith(str(skill_dir.resolve())) and full_path.exists():
+                return full_path
+            return None
 
 
 if __name__ == "__main__":

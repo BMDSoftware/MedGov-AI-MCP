@@ -220,11 +220,22 @@ def save_uploaded_file(session_id: str, original_name: str, stored_path: str, fi
 
 
 def remove_session_dirs(session_id: str):
-    """Remove all dicom_dir entries for a session (called before registering a new directory)."""
+    """Remove ALL dicom_dir entries for a session."""
     conn = _get_conn()
     conn.execute(
         "DELETE FROM uploaded_files WHERE session_id = ? AND file_type = 'dicom_dir'",
         (session_id,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_session_dir(session_id: str, dir_path: str):
+    """Remove a specific dicom_dir entry by stored path."""
+    conn = _get_conn()
+    conn.execute(
+        "DELETE FROM uploaded_files WHERE session_id = ? AND file_type = 'dicom_dir' AND stored_path = ?",
+        (session_id, dir_path)
     )
     conn.commit()
     conn.close()

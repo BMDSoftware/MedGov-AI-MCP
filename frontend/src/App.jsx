@@ -21,7 +21,8 @@ function App() {
   ]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState(null);
+  const [uploadedFiles, setUploadedFiles] = useState([]); // [{name, file, fileType}]
+  const [uploadedDirs, setUploadedDirs] = useState([]);   // [{name, path}]
   const [dragActive, setDragActive] = useState(false);
   const [sessionContext, setSessionContext] = useState({
     fileUploaded: false,
@@ -38,7 +39,6 @@ function App() {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [taskRefreshSignal, setTaskRefreshSignal] = useState(null);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
-  const [uploadedDir, setUploadedDir] = useState(null); // {name, path} for directories
   const [uploadingDir, setUploadingDir] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -133,12 +133,12 @@ function App() {
   };
 
   const handleFileSelect = (e) => {
-    if (e.target.files && e.target.files[0]) handleFileUpload(e.target.files[0]);
+    if (e.target.files) {
+      Array.from(e.target.files).forEach(f => handleFileUpload(f));
+    }
   };
 
   const handleFileUpload = async (file) => {
-    setUploadedFile(file);
-    setIsProcessing(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -147,18 +147,18 @@ function App() {
         body: formData
       });
       if (!response.ok) throw new Error('Upload failed');
+      setUploadedFiles(prev => [...prev, { name: file.name, file, fileType: file.type }]);
       setSessionContext(prev => ({ ...prev, fileUploaded: true }));
-      addMessage({ type: 'bot', content: `File "${file.name}" uploaded. You can now ask me to analyze it.` });
     } catch (error) {
       addMessage({ type: 'bot', content: `Upload error: ${error.message}` });
-    } finally {
-      setIsProcessing(false);
     }
   };
 
   const handleChatDirectoryUpload = async (e) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    // Reset input so the same dir can be re-selected
+    e.target.value = '';
     setUploadingDir(true);
     try {
       const formData = new FormData();
@@ -168,14 +168,15 @@ function App() {
       const res = await fetch(getApiUrl('/api/upload-directory'), { method: 'POST', body: formData });
       const data = await res.json();
       if (data.dir_path) {
-        // Register with backend so process-query picks it up
         await fetch(getApiUrl('/api/set-directory'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dir_path: data.dir_path }),
         });
-        setUploadedDir({ name: `${data.dirname} (${data.file_count} files)`, path: data.dir_path });
-        addMessage({ type: 'bot', content: `Directory "${data.dirname}" uploaded (${data.file_count} files). You can now ask me to analyze it.` });
+        const shortName = data.dirname.length > 24
+          ? `${data.dirname.slice(0, 12)}…${data.dirname.slice(-8)}`
+          : data.dirname;
+        setUploadedDirs(prev => [...prev, { name: `${shortName} (${data.file_count})`, path: data.dir_path }]);
       } else {
         addMessage({ type: 'bot', content: `Directory upload failed: ${data.detail || 'unknown error'}` });
       }
@@ -185,13 +186,22 @@ function App() {
     setUploadingDir(false);
   };
 
-  const handleRemoveDir = async () => {
+  const handleRemoveDir = async (dirPath) => {
     await fetch(getApiUrl('/api/set-directory'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dir_path: null }),
+      body: JSON.stringify({ dir_path: dirPath, remove: true }),
     }).catch(() => {});
-    setUploadedDir(null);
+    setUploadedDirs(prev => prev.filter(d => d.path !== dirPath));
+  };
+
+  const handleRemoveFile = async (fileName) => {
+    try {
+      await fetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD) + `?filename=${encodeURIComponent(fileName)}`, {
+        method: 'DELETE'
+      });
+    } catch {}
+    setUploadedFiles(prev => prev.filter(f => f.name !== fileName));
   };
 
   const handleAction = async (actionId) => {
@@ -394,9 +404,9 @@ function App() {
         ) : page === 'test' ? (
           <InferenceTest />
         ) : page === 'results' ? (
-          <Results refreshSignal={taskRefreshSignal} />
+          <Results refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />
         ) : page === 'report' ? (
-          <Report refreshSignal={taskRefreshSignal} />
+          <Report refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />
         ) : page === 'history' ? (
           <Sessions onLoadSession={(data) => {
             if (!data) return;
@@ -409,8 +419,8 @@ function App() {
                 actions: []
               }]);
               setSelectedPatient(null);
-              setUploadedFile(null);
-              setUploadedDir(null);
+              setUploadedFiles([]);
+              setUploadedDirs([]);
               setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null, selectedPatient: null, patientContext: null });
             } else {
               // Existing session loaded - restore chat history
@@ -425,13 +435,10 @@ function App() {
               } else {
                 setMessages([{ type: 'bot', content: `Session "${data.name}" loaded. No previous chat history found.`, actions: [] }]);
               }
-              // Restore uploaded directory if the session had one
-              const dirEntry = (data.files || []).find(f => f.file_type === 'dicom_dir');
-              if (dirEntry) {
-                setUploadedDir({ name: dirEntry.original_name, path: dirEntry.stored_path });
-              } else {
-                setUploadedDir(null);
-              }
+              // Restore uploaded directories from session
+              const dirEntries = (data.files || []).filter(f => f.file_type === 'dicom_dir');
+              setUploadedDirs(dirEntries.map(f => ({ name: f.original_name, path: f.stored_path })));
+              setUploadedFiles([]);
             }
             setPage('analysis');
           }} />
@@ -549,77 +556,35 @@ function App() {
                   setIsProcessing(false);
                 }
               }}>
-                {/* Directory preview */}
-                {uploadedDir && (
-                  <div className="chatbot-preview">
-                    <div className="chatbot-file-chip">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                      </svg>
-                      <span className="file-name">{uploadedDir.name}</span>
-                      <button type="button" className="remove-btn" onClick={handleRemoveDir} title="Remove directory">✕</button>
-                    </div>
+                {/* Attachment strip — only shown when something is attached */}
+                {(uploadedFiles.length > 0 || uploadedDirs.length > 0) && (
+                  <div className="attachment-strip">
+                    {uploadedDirs.map(d => (
+                      <div key={d.path} className="attachment-chip dir-chip" title={d.name}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span className="attachment-chip-name">{d.name}</span>
+                        <button type="button" className="attachment-chip-remove" onClick={() => handleRemoveDir(d.path)}>×</button>
+                      </div>
+                    ))}
+                    {uploadedFiles.map(f => (
+                      <div key={f.name} className="attachment-chip file-chip" title={f.name}>
+                        {f.fileType && f.fileType.startsWith('image/') ? (
+                          <img src={URL.createObjectURL(f.file)} alt="" className="attachment-chip-thumb" />
+                        ) : (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                          </svg>
+                        )}
+                        <span className="attachment-chip-name">{f.name}</span>
+                        <button type="button" className="attachment-chip-remove" onClick={() => handleRemoveFile(f.name)}>×</button>
+                      </div>
+                    ))}
                   </div>
                 )}
 
-                {/* Always render preview above the input row */}
-                {uploadedFile && (
-                  <div className="chatbot-preview">
-                    {uploadedFile.type && uploadedFile.type.startsWith('image/') ? (
-                      <div style={{ position: 'relative', display: 'inline-block' }}>
-                        <img
-                          src={URL.createObjectURL(uploadedFile)}
-                          alt="preview"
-                          className="chatbot-preview-img"
-                        />
-                        <button
-                          type="button"
-                          className="chatbot-remove-btn"
-                          onClick={async () => {
-                            if (uploadedFile?.name) {
-                              try {
-                                await fetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD) + `?filename=${encodeURIComponent(uploadedFile.name)}`, {
-                                  method: 'DELETE'
-                                });
-                              } catch (e) {
-                                // Optionally handle error
-                              }
-                            }
-                            setUploadedFile(null);
-                          }}
-                          title="Remove image"
-                        >
-                          &times;
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="chatbot-file-chip">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                          <polyline points="14 2 14 8 20 8"></polyline>
-                        </svg>
-                        <span className="file-name">{uploadedFile.name}</span>
-                        <button
-                          type="button"
-                          className="remove-btn"
-                          onClick={async () => {
-                            if (uploadedFile?.name) {
-                              try {
-                                await fetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD) + `?filename=${encodeURIComponent(uploadedFile.name)}`, {
-                                  method: 'DELETE'
-                                });
-                              } catch (e) {}
-                            }
-                            setUploadedFile(null);
-                          }}
-                          title="Remove file"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
                 <div className="chatbot-input-controls">
                   <textarea
                     placeholder="Type your query..."
@@ -640,9 +605,10 @@ function App() {
                     accept=".jpg,.jpeg,.png,.dcm,.nii,.nii.gz"
                     id="fileInput"
                     className="chatbot-file-input"
+                    multiple
                     onChange={handleFileSelect}
                   />
-                  <label htmlFor="fileInput" className="chatbot-file-label" title="Attach file">
+                  <label htmlFor="fileInput" className="chatbot-file-label" title="Attach files">
                     <svg width="22" height="22" fill="none" stroke="#6366f1" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
                   </label>
                   <input

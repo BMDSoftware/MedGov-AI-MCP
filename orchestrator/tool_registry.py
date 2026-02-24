@@ -38,6 +38,11 @@ class ToolRegistry:
         for name, cfg in mcp_servers.items():
             print(f"--- Starting Server: {name} ---")
             transport = cfg.get("transport", "stdio")
+            # Use a per-server stack so that failed connections can be cleaned up
+            # immediately without leaving dangling anyio task groups in self.stack
+            # that would corrupt successful sessions (monai/utils).
+            server_stack = AsyncExitStack()
+            success = False
             try:
                 if transport == "stdio":
                     params = StdioServerParameters(
@@ -45,14 +50,14 @@ class ToolRegistry:
                         args=cfg.get("args", []),
                         env={**os.environ, **cfg.get("env", {})}
                     )
-                    read, write = await self.stack.enter_async_context(stdio_client(params))
-                    session = await self.stack.enter_async_context(ClientSession(read, write))
+                    read, write = await server_stack.enter_async_context(stdio_client(params))
+                    session = await server_stack.enter_async_context(ClientSession(read, write))
                     await session.initialize()
                     self.sessions[name] = (session, "stdio")
                 elif transport == "http":
                     url = cfg.get("url", "http://localhost:8000/mcp")
-                    read, write, _ = await self.stack.enter_async_context(streamable_http_client(url))
-                    session = await self.stack.enter_async_context(ClientSession(read, write))
+                    read, write, _ = await server_stack.enter_async_context(streamable_http_client(url))
+                    session = await server_stack.enter_async_context(ClientSession(read, write))
                     await session.initialize()
                     self.sessions[name] = (session, "http")
 
@@ -67,16 +72,35 @@ class ToolRegistry:
                         "transport": transport
                     }
                 print(f"[{name}] Tools: {[t.name for t in tools.tools]}")
-                
-                
+                success = True
 
+            except asyncio.CancelledError:
+                # anyio cancel scopes call task.cancel() when a child task fails
+                # (e.g. subprocess exits). This increments task.cancelling() even
+                # though it's fhir's OWN internal cancellation, not an external one.
+                # Uncancel so the cleanup awaits in `finally` don't immediately
+                # re-raise, then treat it as a normal connection failure.
+                task = asyncio.current_task()
+                if task is not None and task.cancelling() > 0:
+                    task.uncancel()
+                print(f"[{name}] Not available - skipping (CancelledError)")
             except Exception as e:
                 print(f"[{name}] Not available - skipping ({type(e).__name__})")
-                continue
-            except BaseException as e:
-                # CancelledError, KeyboardInterrupt, etc.
-                print(f"[{name}] Not available - skipping ({type(e).__name__})")
-                continue
+            finally:
+                if success:
+                    # Hand off cleanup to the main stack via callback
+                    self.stack.push_async_callback(server_stack.aclose)
+                else:
+                    # Close failed server's resources immediately.
+                    # At this point the failed server's anyio task group scope is
+                    # at the top of the scope stack, so exiting it is safe and
+                    # won't affect successful sessions below it.
+                    try:
+                        await server_stack.aclose()
+                    except BaseException as cleanup_err:
+                        print(f"[{name}] Cleanup warning: {type(cleanup_err).__name__}")
+                    if name in self.sessions:
+                        del self.sessions[name]
 
         '''
         #run radlex.get_template_schema test

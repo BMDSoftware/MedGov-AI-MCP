@@ -274,20 +274,19 @@ def _generate_report_narrative(findings: list, patient_context: Dict) -> Dict:
                 vol = f"{s['voxel_count']:,} voxels"
             findings_text += f"  - {s['name']}: {vol} ({s['volume_percentage']:.2f}% of scan)\n"
 
-    prompt = f"""You are a radiologist writing a structured radiology report based on AI segmentation results.
+    prompt = f"""You are a board-certified radiologist writing a structured clinical radiology report based on AI segmentation quantification. Use formal, precise medical language consistent with published radiology reporting guidelines (ACR/RSNA).
 
 Patient context: {json.dumps(patient_context) if patient_context else "Not provided"}
 
 Quantitative AI segmentation findings:
 {findings_text}
 
-Write the following sections in professional clinical language:
+Instructions:
+- FINDINGS: Describe each segmented structure by name, measured volume (in cm³ where available), and percentage of the total scan volume. Note any structure that appears enlarged, reduced, or absent compared to typical reference ranges. Use anatomical terminology (e.g., "The spleen measures X cm³, which is within/above/below the normal range of 100-350 cm³"). If background percentage is near 100%, explicitly state that no target structures were confidently detected and that manual review is warranted.
+- IMPRESSION: 2-3 concise sentences. State the primary finding, its likely clinical significance, and overall study adequacy. If the segmentation model detected nothing, flag this as a potentially unreliable result.
+- RECOMMENDATIONS: Specific, actionable next steps (e.g., correlation with clinical symptoms, follow-up imaging modality/timeline, biopsy consideration). If findings are normal/unremarkable, state "No further imaging follow-up required at this time."
 
-1. FINDINGS: A concise narrative describing identified structures, volumes, and observations.
-2. IMPRESSION: 2-3 sentences summarising the key findings and clinical significance.
-3. RECOMMENDATIONS: Any follow-up imaging or clinical actions warranted.
-
-Respond with valid JSON only, with keys: "findings_narrative", "impression", "recommendations"."""
+Respond with valid JSON only, with exactly these keys: "findings_narrative", "impression", "recommendations"."""
 
     llm_backend = os.getenv("LLM_BACKEND", "gemini")
     text = ""

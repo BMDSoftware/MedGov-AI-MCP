@@ -54,6 +54,34 @@
   margin-top: 10px;
 }
 
+/* Existing agent-generated reports */
+.existing-report-block {
+  border: 1px solid var(--border, #2d2d3d);
+  border-radius: 10px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+
+.existing-report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--bg-primary, #121218);
+  border-bottom: 1px solid var(--border, #2d2d3d);
+}
+
+.existing-report-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #fafafa);
+}
+
+.existing-report-time {
+  font-size: 11px;
+  color: var(--text-secondary, #a1a1aa);
+}
+
 /* Inference selection */
 .inference-select-list {
   display: flex;

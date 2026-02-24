@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './Toast.css';
 
 const API_URL = 'http://localhost:5001';
@@ -11,6 +11,10 @@ const API_URL = 'http://localhost:5001';
  */
 function Toast({ onTaskUpdate }) {
   const [toasts, setToasts] = useState([]);
+  // Keep a ref so the onmessage closure always calls the latest callback
+  // even though the effect only runs once (empty deps).
+  const onTaskUpdateRef = useRef(onTaskUpdate);
+  useEffect(() => { onTaskUpdateRef.current = onTaskUpdate; }, [onTaskUpdate]);
 
   useEffect(() => {
     const es = new EventSource(`${API_URL}/api/events`);
@@ -23,8 +27,8 @@ function Toast({ onTaskUpdate }) {
         let text = '';
         let variant = 'info';
 
-        if (event.type === 'task_started') {
-          text = `Started: ${event.description}`;
+        if (event.type === 'task_running') {
+          text = `Running: ${event.description}`;
           variant = 'info';
         } else if (event.type === 'task_done') {
           text = `Done: ${event.description}`;
@@ -37,21 +41,19 @@ function Toast({ onTaskUpdate }) {
         if (text) {
           const id = Date.now();
           setToasts(prev => [...prev, { id, text, variant }]);
-          // Auto-dismiss after 5 s
           setTimeout(() => {
             setToasts(prev => prev.filter(t => t.id !== id));
           }, 5000);
         }
 
-        // Notify parent so Results tab can refresh
-        if (onTaskUpdate) onTaskUpdate(event);
+        if (onTaskUpdateRef.current) onTaskUpdateRef.current(event);
       } catch {
         // ignore parse errors
       }
     };
 
     es.onerror = () => {
-      // SSE will auto-reconnect; nothing to do
+      // SSE auto-reconnects; nothing to do
     };
 
     return () => es.close();

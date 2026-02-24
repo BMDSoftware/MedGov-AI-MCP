@@ -187,7 +187,10 @@ TOOL USAGE RULES:
         # Prepare content with actual images for Gemini
         if imageList:
             for temp_filepath, content in imageList:
-                # Skip 3D medical formats - Gemini can't visualize these directly
+                # Skip directories (DICOM series) and 3D medical formats
+                if os.path.isdir(temp_filepath):
+                    print(f"Skipping DICOM series directory (not sendable to Gemini): {os.path.basename(temp_filepath)}")
+                    continue
                 ext = temp_filepath.lower()
                 if ext.endswith(('.nii', '.nii.gz', '.dcm', '.mha', '.mhd', '.nrrd')):
                     print(f"Skipping 3D medical file (not sendable to Gemini): {os.path.basename(temp_filepath)}")
@@ -211,17 +214,28 @@ TOOL USAGE RULES:
         )
     
     def send_function_response(self, function_name: str, response_data: Any) -> Any:
-        """Send a function/tool result back to Gemini using proper FunctionResponse format.
-        This sends the COMPLETE result without truncation."""
-        
-        # Wrap the complete result in a FunctionResponse Part
+        """Send a single function/tool result back to Gemini."""
         function_response = types.Part.from_function_response(
             name=function_name,
-            response={"result": response_data}  # Send the WHOLE result here
+            response={"result": response_data}
         )
-        
-        # Send it back to the chat session
         return self.chat_session.send_message(
             message=[function_response],
+            config=self.agent_config
+        )
+
+    def send_multiple_function_responses(self, results: list) -> Any:
+        """Send multiple function/tool results back to Gemini in a single message.
+        Required when Gemini issued multiple function calls in the same turn.
+        results: list of (function_name, response_data) tuples, one per call."""
+        parts = [
+            types.Part.from_function_response(
+                name=name,
+                response={"result": data}
+            )
+            for name, data in results
+        ]
+        return self.chat_session.send_message(
+            message=parts,
             config=self.agent_config
         )

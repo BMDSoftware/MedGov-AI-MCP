@@ -10,7 +10,7 @@ const STATUS_LABELS = {
   failed: 'Failed',
 };
 
-function Results({ refreshSignal }) {
+function Results({ refreshSignal, currentSessionId }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null); // task id currently expanded
@@ -18,7 +18,10 @@ function Results({ refreshSignal }) {
 
   const fetchTasks = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/tasks`);
+      const url = currentSessionId
+        ? `${API_URL}/api/tasks?session_id=${currentSessionId}`
+        : `${API_URL}/api/tasks`;
+      const res = await fetch(url);
       const data = await res.json();
       setTasks(data.tasks || []);
     } catch {
@@ -29,7 +32,7 @@ function Results({ refreshSignal }) {
 
   useEffect(() => {
     fetchTasks();
-  }, []);
+  }, [currentSessionId]);
 
   // Re-fetch whenever a task event arrives via SSE (parent passes refreshSignal)
   useEffect(() => {
@@ -90,10 +93,19 @@ function Results({ refreshSignal }) {
             <div className="task-card-header" onClick={() => toggle(task.id)}>
               <div className="task-card-left">
                 <span className={`status-badge status-${task.status}`}>
+                  {(task.status === 'running' || task.status === 'queued') && (
+                    <span className="status-spinner" />
+                  )}
                   {STATUS_LABELS[task.status] || task.status}
                 </span>
                 <span className="task-type-badge">{task.task_type}</span>
                 <span className="task-description">{task.description}</span>
+                {task.input_data?.modality && (
+                  <span className="task-meta-tag">{task.input_data.modality}</span>
+                )}
+                {task.input_data?.body_part && (
+                  <span className="task-meta-tag">{task.input_data.body_part}</span>
+                )}
               </div>
               <div className="task-card-right">
                 {formatDuration(task) && (

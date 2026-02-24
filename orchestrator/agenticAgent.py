@@ -192,7 +192,9 @@ TOOL USAGE RULES:
 3. For DICOM files (.dcm): parse the metadata first to extract modality and body part before selecting models or running inference.
 4. MONAI models require 3D volumes (.nii, .nii.gz). If the image is a single 2D slice, inform the user.
 5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
-6. After a tool returns results, summarize them clearly for the user."""
+6. After a tool returns results, summarize them clearly for the user.
+7. MULTI-FILE RULE: When multiple paths are listed in "IMAGES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
+8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices that forms a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate or process individual files inside the directory."""
         
         if self.llm_client:
             self.llm_client.update_system_prompt(patient_prompt)
@@ -398,6 +400,8 @@ TOOL USAGE RULES:
 
         execution_history = pending["execution_history"]
 
+        is_gemini = LLM_BACKEND.lower() != "ollama"
+
         if result and not is_error:
             result_summary = self._create_result_summary(tool_name, result)
             execution_history.append({
@@ -410,20 +414,25 @@ TOOL USAGE RULES:
             key_data = self._extract_key_data(tool_name, result)
             self._record_and_persist(tool_name, result_summary, key_data, session_id)
             print(f"Tool succeeded: {result_summary}")
-            
+
             self.logger.info(f"  Status: SUCCESS")
             self.logger.info(f"  Summary: {result_summary}")
-            
-            # Send tool result back to LLM (Gemini only)
-            # For Ollama: Skip this, execution history will be in the next prompt
-            is_gemini = LLM_BACKEND.lower() != "ollama"
-            
-            if is_gemini:
-                self.logger.info(f"\nSENDING FULL RESULT TO LLM via function_response")
-                llm_response = self.llm_client.send_function_response(tool_name, result)
-                self.logger.info(f"Captured LLM response from send_function_response (Gemini)")
-            else:
-                llm_response = None
+
+            # Save radlex reports to DB so they appear in the Report tab
+            if session_id and tool_name == "radlex.generate_report":
+                from datetime import datetime as _dt
+                _report_wrap = {
+                    "patient_context": {},
+                    "findings": [],
+                    "radlex_template": result,
+                    "narrative": {},
+                    "generated_at": _dt.now().isoformat(),
+                }
+                _rtid = db.create_task(session_id, "report", "Radlex Template Report", arguments)
+                db.update_task(_rtid, "done", result=_report_wrap)
+                print(f"[agent] Saved radlex report to DB as task {_rtid[:8]}")
+
+            confirmed_result = result
         else:
             error_msg = result.get("error") if result else "No result"
             execution_history.append({
@@ -432,20 +441,156 @@ TOOL USAGE RULES:
                 "error": error_msg
             })
             print(f"Tool failed: {error_msg}")
-            
+
             self.logger.error(f"  Status: FAILED")
-            self.logger.error(f"SENDING ERROR TO LLM via function_response")
             self.logger.error(f"  Error: {error_msg}")
-            
-            # Send error back to LLM (Gemini only)
-            # For Ollama: Skip this, execution history will be in the next prompt
-            is_gemini = LLM_BACKEND.lower() != "ollama"
-            
-            if is_gemini:
-                llm_response = self.llm_client.send_function_response(tool_name, error_msg)
-                self.logger.info(f"Captured LLM response from send_function_response (Gemini)")
+
+            confirmed_result = {"error": str(error_msg) if error_msg else "Tool execution failed", "is_error": True}
+
+        # Build the accumulated results list for this turn:
+        # results confirmed so far (from before this call) + this call's result
+        turn_accumulated_results = list(pending.get("turn_accumulated_results", [])) + [(tool_name, confirmed_result)]
+        turn_remaining_calls = list(pending.get("turn_remaining_calls", []))
+
+        # Process any built-in tools at the front of the remaining calls immediately
+        while turn_remaining_calls:
+            next_name, next_args = turn_remaining_calls[0]
+            if next_name == "list_tasks":
+                turn_remaining_calls.pop(0)
+                tasks = db.list_tasks(session_id=session_id)
+                _summary = [
+                    {
+                        "id": t["id"][:8],
+                        "type": t["task_type"],
+                        "description": t["description"],
+                        "status": t["status"],
+                        "error": t.get("error"),
+                    }
+                    for t in tasks
+                ]
+                _result = {
+                    "tasks": _summary,
+                    "running": sum(1 for t in tasks if t["status"] in ("queued", "running")),
+                    "done": sum(1 for t in tasks if t["status"] == "done"),
+                    "failed": sum(1 for t in tasks if t["status"] == "failed"),
+                }
+                _result_summary = f"Tasks: {_result['running']} running, {_result['done']} done, {_result['failed']} failed"
+                execution_history.append({
+                    "tool": next_name,
+                    "success": True,
+                    "result_summary": _result_summary,
+                    "result": _result,
+                })
+                turn_accumulated_results.append((next_name, _result))
+            elif next_name == "queue_task":
+                turn_remaining_calls.pop(0)
+                _task_type = next_args.get("task_type", "generic")
+                _description = next_args.get("description", "Background task")
+                _input_data = next_args.get("input_data", {})
+                _task_id = task_runner.submit_task(
+                    session_id=session_id or "unknown",
+                    task_type=_task_type,
+                    description=_description,
+                    input_data=_input_data,
+                )
+                _result = {
+                    "task_id": _task_id,
+                    "status": "queued",
+                    "message": f"Task queued: '{_description}'. You'll receive a notification when it finishes.",
+                }
+                execution_history.append({
+                    "tool": next_name,
+                    "success": True,
+                    "result_summary": f"Queued background task: {_description}",
+                    "result": _result,
+                })
+                turn_accumulated_results.append((next_name, _result))
+            elif next_name == "monai.run_inference":
+                turn_remaining_calls.pop(0)
+                _image_path = next_args.get("image_path", "")
+                _model_name = next_args.get("model_name", "")
+                _body_part = next(
+                    (e["data"].get("body_part", "") for e in reversed(self.session_context.entries)
+                     if e.get("data", {}).get("body_part")), ""
+                )
+                _modality = next(
+                    (e["data"].get("modality", "") for e in reversed(self.session_context.entries)
+                     if e.get("data", {}).get("modality")), ""
+                )
+                _queued_tasks = []
+                if _image_path:
+                    _inf_fname = Path(_image_path).name
+                    _inf_desc = f"Inference: {_inf_fname}" + (f" ({_model_name})" if _model_name else "")
+                    _inf_task_id = task_runner.submit_task(
+                        session_id=session_id or "unknown",
+                        task_type="inference",
+                        description=_inf_desc,
+                        input_data={
+                            "image_path": _image_path,
+                            "model_name": _model_name,
+                            "body_part": _body_part,
+                            "modality": _modality,
+                        },
+                    )
+                    _queued_tasks.append({"task_id": _inf_task_id, "file": _inf_fname})
+                _result = {
+                    "tasks_queued": len(_queued_tasks),
+                    "tasks": _queued_tasks,
+                    "message": f"Queued inference for {len(_queued_tasks)} file(s) using {_model_name}. Results will appear in the Results tab.",
+                }
+                execution_history.append({
+                    "tool": next_name,
+                    "success": True,
+                    "result_summary": f"Queued {len(_queued_tasks)} inference task(s)",
+                    "result": _result,
+                })
+                turn_accumulated_results.append((next_name, _result))
             else:
-                llm_response = None
+                # Not a built-in tool — stop draining; this needs confirmation
+                break
+
+        # If there are still remaining MCP calls that need confirmation, chain to next one
+        if turn_remaining_calls:
+            next_name, next_args = turn_remaining_calls.pop(0)
+            self.logger.info(f"\nCHAINED CONFIRMATION REQUIRED:")
+            self.logger.info(f"  Tool: {next_name}")
+            self.logger.info(f"  Arguments: {json.dumps(next_args, indent=4)}")
+            self.pending_tool_call = {
+                "tool_name": next_name,
+                "arguments": next_args,
+                "goal": pending["goal"],
+                "execution_history": execution_history,
+                "imageList": pending["imageList"],
+                "data": pending["data"],
+                "metadata": pending["metadata"],
+                "iterations_used": pending["iterations_used"],
+                "max_iterations": pending["max_iterations"],
+                "session_id": pending.get("session_id"),
+                "turn_accumulated_results": turn_accumulated_results,
+                "turn_remaining_calls": turn_remaining_calls,
+            }
+            return {
+                "type": "confirmation_required",
+                "tool_name": next_name,
+                "arguments": next_args,
+                "message": f"About to execute: {next_name}",
+                "execution_history": execution_history
+            }
+
+        # All calls in the turn are resolved — send accumulated results to Gemini
+        llm_response = None
+        if is_gemini and turn_accumulated_results:
+            self.logger.info(f"\nSENDING {len(turn_accumulated_results)} RESULT(S) TO LLM after confirmation")
+            try:
+                if len(turn_accumulated_results) > 1:
+                    llm_response = self.llm_client.send_multiple_function_responses(turn_accumulated_results)
+                else:
+                    _single_name, _single_data = turn_accumulated_results[0]
+                    llm_response = self.llm_client.send_function_response(_single_name, _single_data)
+                self.logger.info(f"Captured LLM response from function_response(s) (Gemini)")
+            except Exception as llm_err:
+                print(f"LLM API error after tool execution: {type(llm_err).__name__}: {llm_err}")
+                return {"error": f"Tool executed but LLM API unreachable: {llm_err}", "is_error": True}
 
         # Continue the task from where we left off
         # Only pass _resume_response if using Gemini
@@ -581,6 +726,7 @@ TOOL USAGE RULES:
         execution_history = _resume_history if _resume_history else []
         iterations = 0
         final_result = None
+        _inference_queued: set = set()  # Track image paths already queued for inference
 
         # Extract image path for workflow
         image_path = None
@@ -609,12 +755,28 @@ TOOL USAGE RULES:
                 if imageList:
                     # Handle imageList as (temp_filepath, content) tuples
                     if isinstance(imageList, list) and imageList:
-                        temp_files = [temp_filepath for temp_filepath, _ in imageList]
-                        image_context = f"\n\nIMAGES AVAILABLE: Yes\nUse these file paths: {', '.join(temp_files)}"
+                        # Separate files and directories so the LLM knows which is which
+                        file_paths = []
+                        dir_paths = []
+                        for temp_filepath, _ in imageList:
+                            if os.path.isdir(temp_filepath):
+                                dir_paths.append(temp_filepath)
+                            else:
+                                file_paths.append(temp_filepath)
 
-                        # Only pass small 2D images to LLM, skip large 3D medical files
+                        parts = []
+                        if file_paths:
+                            parts.append("Files: " + ", ".join(file_paths))
+                        if dir_paths:
+                            parts.append("DICOM series directories (treat each as a single 3D volume — use the directory path directly): " + ", ".join(f"[DICOM SERIES DIR] {p}" for p in dir_paths))
+                        image_context = "\n\nIMAGES AVAILABLE: Yes\n" + "\n".join(parts)
+
+                        # Only pass small 2D images to LLM, skip large 3D medical files and directories
                         images_for_llm = []
                         for temp_filepath, content in imageList:
+                            # Skip directories — cannot be sent to LLM as images
+                            if os.path.isdir(temp_filepath):
+                                continue
                             ext = temp_filepath.lower()
                             # Skip 3D formats - too large, LLM can't visualize
                             if not ext.endswith(('.nii', '.nii.gz', '.dcm', '.mha', '.mhd', '.nrrd')):
@@ -708,7 +870,10 @@ Your decision:"""
                 # Check if agent declares success (text response, no tool call)
                 has_text = False
                 has_function_call = False
-                
+
+                # --- Phase 1: scan all parts for text signals and collect function calls ---
+                _turn_calls: list = []  # list of (tool_name, arguments) for this turn
+
                 if response.candidates and response.candidates[0].content.parts:
                     for part in response.candidates[0].content.parts:
                         if hasattr(part, 'text') and part.text:
@@ -719,14 +884,14 @@ Your decision:"""
                                 # Return detailed response with execution history
                                 answer = self._extract_answer_from_results(part.text, execution_history, final_result)
                                 tools_used = [event['tool'] for event in execution_history if event['success']]
-                                
+
                                 self.logger.info(f"\n{'='*60}")
                                 self.logger.info(f"TASK COMPLETED SUCCESSFULLY")
                                 self.logger.info(f"  Iterations used: {iterations}")
                                 self.logger.info(f"  Tools used: {tools_used}")
                                 self.logger.info(f"  Answer: {answer}")
                                 self.logger.info(f"{'='*80}\n")
-                                
+
                                 return {
                                     "type": "agent_response",
                                     "answer": answer,
@@ -744,211 +909,309 @@ Your decision:"""
                                     "execution_history": execution_history,
                                     "success": False
                                 }
-                                
-                        
+
                         if hasattr(part, 'function_call') and part.function_call:
                             has_function_call = True
-                            tool_name = part.function_call.name
-                            arguments = dict(part.function_call.args)
-
-                            # Resolve tool name if missing prefix (e.g., "get_capabilities" -> "fhir.get_capabilities")
-                            if tool_name not in self.available_tools:
+                            _raw_name = part.function_call.name
+                            _raw_args = dict(part.function_call.args)
+                            # Resolve tool name if missing prefix
+                            if _raw_name not in self.available_tools:
                                 for full_name in self.available_tools.keys():
-                                    if full_name.endswith(f".{tool_name}"):
-                                        print(f"Resolved tool name: {tool_name} -> {full_name}")
-                                        tool_name = full_name
+                                    if full_name.endswith(f".{_raw_name}"):
+                                        print(f"Resolved tool name: {_raw_name} -> {full_name}")
+                                        _raw_name = full_name
                                         break
+                            _turn_calls.append((_raw_name, _raw_args))
 
-                            # Check if agent is repeating a failed tool (block only after 2 consecutive failures)
-                            if len(execution_history) >= 2:
-                                last_event = execution_history[-1]
-                                prev_event = execution_history[-2]
-                                if (
-                                    last_event.get('tool') == tool_name and not last_event.get('success')
-                                    and prev_event.get('tool') == tool_name and not prev_event.get('success')
-                                ):
-                                    print(f"Agent tried to repeat tool '{tool_name}' after 2 consecutive failures - skipping and prompting for alternative")
-                                    execution_history.append({
-                                        "tool": tool_name,
-                                        "success": False,
-                                        "error": f"Repetition prevented: Tool '{tool_name}' failed twice consecutively. Try a different tool."
-                                    })
-                                    continue
+                # --- Phase 2: process each function call in the turn ---
+                _turn_results: list = []  # list of (tool_name, result_data) to send to Gemini together
 
-                            # --- Built-in tool intercept ---
-                            # Handle built-in tools locally without going to MCP
-                            if tool_name == "list_tasks":
-                                tasks = db.list_tasks(session_id=session_id)
-                                summary = [
-                                    {
-                                        "id": t["id"][:8],
-                                        "type": t["task_type"],
-                                        "description": t["description"],
-                                        "status": t["status"],
-                                        "error": t.get("error"),
-                                    }
-                                    for t in tasks
-                                ]
-                                result = {
-                                    "tasks": summary,
-                                    "running": sum(1 for t in tasks if t["status"] in ("queued", "running")),
-                                    "done": sum(1 for t in tasks if t["status"] == "done"),
-                                    "failed": sum(1 for t in tasks if t["status"] == "failed"),
-                                }
-                                result_summary = f"Tasks: {result['running']} running, {result['done']} done, {result['failed']} failed"
-                                execution_history.append({
-                                    "tool": tool_name,
-                                    "success": True,
-                                    "result_summary": result_summary,
-                                    "result": result,
-                                })
-                                final_result = result
-                                if is_gemini:
-                                    _resume_response = self.llm_client.send_function_response(tool_name, result)
+                for tool_name, arguments in _turn_calls:
+
+                    # Check if agent is repeating a failed tool (block only after 2 consecutive failures)
+                    if len(execution_history) >= 2:
+                        last_event = execution_history[-1]
+                        prev_event = execution_history[-2]
+                        if (
+                            last_event.get('tool') == tool_name and not last_event.get('success')
+                            and prev_event.get('tool') == tool_name and not prev_event.get('success')
+                        ):
+                            print(f"Agent tried to repeat tool '{tool_name}' after 2 consecutive failures - skipping and prompting for alternative")
+                            execution_history.append({
+                                "tool": tool_name,
+                                "success": False,
+                                "error": f"Repetition prevented: Tool '{tool_name}' failed twice consecutively. Try a different tool."
+                            })
+                            _turn_results.append((tool_name, {"error": f"Repetition prevented: Tool '{tool_name}' failed twice consecutively. Try a different tool.", "is_error": True}))
+                            continue
+
+                    # --- Built-in tool intercept ---
+                    # Handle built-in tools locally without going to MCP
+                    if tool_name == "list_tasks":
+                        tasks = db.list_tasks(session_id=session_id)
+                        summary = [
+                            {
+                                "id": t["id"][:8],
+                                "type": t["task_type"],
+                                "description": t["description"],
+                                "status": t["status"],
+                                "error": t.get("error"),
+                            }
+                            for t in tasks
+                        ]
+                        result = {
+                            "tasks": summary,
+                            "running": sum(1 for t in tasks if t["status"] in ("queued", "running")),
+                            "done": sum(1 for t in tasks if t["status"] == "done"),
+                            "failed": sum(1 for t in tasks if t["status"] == "failed"),
+                        }
+                        result_summary = f"Tasks: {result['running']} running, {result['done']} done, {result['failed']} failed"
+                        execution_history.append({
+                            "tool": tool_name,
+                            "success": True,
+                            "result_summary": result_summary,
+                            "result": result,
+                        })
+                        final_result = result
+                        _turn_results.append((tool_name, result))
+                        continue
+
+                    if tool_name == "queue_task":
+                        task_type = arguments.get("task_type", "generic")
+                        description = arguments.get("description", "Background task")
+                        input_data = arguments.get("input_data", {})
+                        task_id = task_runner.submit_task(
+                            session_id=session_id or "unknown",
+                            task_type=task_type,
+                            description=description,
+                            input_data=input_data,
+                        )
+                        result = {
+                            "task_id": task_id,
+                            "status": "queued",
+                            "message": f"Task queued: '{description}'. You'll receive a notification when it finishes.",
+                        }
+                        result_summary = f"Queued background task: {description}"
+                        execution_history.append({
+                            "tool": tool_name,
+                            "success": True,
+                            "result_summary": result_summary,
+                            "result": result,
+                        })
+                        final_result = result
+                        _turn_results.append((tool_name, result))
+                        continue
+
+                    # run_inference always runs in the background so the user
+                    # can keep chatting and the result lands in the Results tab.
+                    if tool_name == "monai.run_inference":
+                        image_path = arguments.get("image_path", "")
+                        model_name = arguments.get("model_name", "")
+                        # Pull body_part/modality from session context (set by analyze_image)
+                        body_part = next(
+                            (e["data"].get("body_part", "") for e in reversed(self.session_context.entries)
+                             if e.get("data", {}).get("body_part")), ""
+                        )
+                        modality = next(
+                            (e["data"].get("modality", "") for e in reversed(self.session_context.entries)
+                             if e.get("data", {}).get("modality")), ""
+                        )
+
+                        # Collect all paths to process: the one the LLM specified
+                        # plus any remaining unqueued paths from imageList.
+                        # This ensures ALL files are queued in a single intercept
+                        # regardless of whether Gemini would loop back for the rest.
+                        all_unqueued = [image_path] + [
+                            p for p, _ in (imageList or [])
+                            if p != image_path and p not in _inference_queued
+                        ]
+
+                        queued_tasks = []
+                        for inf_path in all_unqueued:
+                            if inf_path in _inference_queued:
                                 continue
+                            inf_fname = Path(inf_path).name if inf_path else "unknown"
+                            inf_desc = f"Inference: {inf_fname}" + (f" ({model_name})" if model_name else "")
+                            inf_task_id = task_runner.submit_task(
+                                session_id=session_id or "unknown",
+                                task_type="inference",
+                                description=inf_desc,
+                                input_data={
+                                    "image_path": inf_path,
+                                    "model_name": model_name,
+                                    "body_part": body_part,
+                                    "modality": modality,
+                                },
+                            )
+                            _inference_queued.add(inf_path)
+                            queued_tasks.append({"task_id": inf_task_id, "file": inf_fname})
 
-                            if tool_name == "queue_task":
-                                task_type = arguments.get("task_type", "generic")
-                                description = arguments.get("description", "Background task")
-                                input_data = arguments.get("input_data", {})
-                                task_id = task_runner.submit_task(
-                                    session_id=session_id or "unknown",
-                                    task_type=task_type,
-                                    description=description,
-                                    input_data=input_data,
-                                )
-                                result = {
-                                    "task_id": task_id,
-                                    "status": "queued",
-                                    "message": f"Task queued: '{description}'. You'll receive a notification when it finishes.",
-                                }
-                                result_summary = f"Queued background task: {description}"
-                                execution_history.append({
-                                    "tool": tool_name,
-                                    "success": True,
-                                    "result_summary": result_summary,
-                                    "result": result,
-                                })
-                                final_result = result
-                                if is_gemini:
-                                    _resume_response = self.llm_client.send_function_response(tool_name, result)
-                                continue
+                        result = {
+                            "tasks_queued": len(queued_tasks),
+                            "tasks": queued_tasks,
+                            "message": f"Queued inference for {len(queued_tasks)} file(s) using {model_name}. Results will appear in the Results tab.",
+                        }
+                        result_summary = f"Queued {len(queued_tasks)} inference task(s)"
+                        execution_history.append({
+                            "tool": tool_name,
+                            "success": True,
+                            "result_summary": result_summary,
+                            "result": result,
+                        })
+                        final_result = result
+                        _turn_results.append((tool_name, result))
+                        continue
 
-                            # Check if confirmation is required
-                            if self.require_confirmation:
-                                print(f"Tool confirmation required: {tool_name}")
-                                
-                                self.logger.info(f"\nTOOL CONFIRMATION REQUIRED:")
-                                self.logger.info(f"  Tool: {tool_name}")
-                                self.logger.info(f"  Arguments: {json.dumps(arguments, indent=4)}")
-                                
-                                self.pending_tool_call = {
-                                    "tool_name": tool_name,
-                                    "arguments": arguments,
-                                    "goal": goal,
-                                    "execution_history": execution_history,
-                                    "imageList": imageList,
-                                    "data": data,
-                                    "metadata": metadata,
-                                    "iterations_used": iterations,
-                                    "max_iterations": max_iterations,
-                                    "session_id": session_id,
-                                }
-                                return {
-                                    "type": "confirmation_required",
-                                    "tool_name": tool_name,
-                                    "arguments": arguments,
-                                    "message": f"About to execute: {tool_name}",
-                                    "execution_history": execution_history
-                                }
+                    # Check if confirmation is required
+                    if self.require_confirmation:
+                        print(f"Tool confirmation required: {tool_name}")
 
-                            # Execute the tool
-                            print(f"Executing: {tool_name}")
-                            
-                            self.logger.info(f"\nTOOL CALL REQUESTED:")
-                            self.logger.info(f"  Tool: {tool_name}")
-                            self.logger.info(f"  Arguments: {json.dumps(arguments, indent=4)}")
+                        self.logger.info(f"\nTOOL CONFIRMATION REQUIRED:")
+                        self.logger.info(f"  Tool: {tool_name}")
+                        self.logger.info(f"  Arguments: {json.dumps(arguments, indent=4)}")
 
-                            result = await self.tool_registry.execute_tool(tool_name, arguments, logs=True)
-                            
-                            self.logger.info(f"\nTOOL RESULT:")
-                            self.logger.info(f"  Tool: {tool_name}")
-                            result_full = json.dumps(result, indent=4) if isinstance(result, dict) else str(result)
-                            self.logger.info(f"  Result: {result_full}")
+                        # Determine which calls in this turn come after this one.
+                        # _turn_results has one entry per call processed before this one,
+                        # so its length is the 0-based index of the current call.
+                        _current_idx = len(_turn_results)
+                        _remaining_calls = _turn_calls[_current_idx + 1:]
 
-                            # Check if result contains an error
-                            is_error = False
-                            if isinstance(result, dict):
-                                is_error = result.get("is_error") or result.get("error") or "error" in str(result.get("text", "")).lower()
+                        self.pending_tool_call = {
+                            "tool_name": tool_name,
+                            "arguments": arguments,
+                            "goal": goal,
+                            "execution_history": execution_history,
+                            "imageList": imageList,
+                            "data": data,
+                            "metadata": metadata,
+                            "iterations_used": iterations,
+                            "max_iterations": max_iterations,
+                            "session_id": session_id,
+                            "turn_accumulated_results": list(_turn_results),
+                            "turn_remaining_calls": _remaining_calls,
+                        }
+                        return {
+                            "type": "confirmation_required",
+                            "tool_name": tool_name,
+                            "arguments": arguments,
+                            "message": f"About to execute: {tool_name}",
+                            "execution_history": execution_history
+                        }
 
-                            # Record execution with result details
-                            print(f"TOOL EXECUTION RESULT: {result}")
-                            if result and not is_error:
-                                # Create human-readable summary based on tool type
-                                result_summary = self._create_result_summary(tool_name, result)
+                    # Execute the tool
+                    print(f"Executing: {tool_name}")
 
-                                execution_history.append({
-                                    "tool": tool_name,
-                                    "success": True,
-                                    "result_summary": result_summary,
-                                    "result": result  # Store actual result
-                                })
+                    self.logger.info(f"\nTOOL CALL REQUESTED:")
+                    self.logger.info(f"  Tool: {tool_name}")
+                    self.logger.info(f"  Arguments: {json.dumps(arguments, indent=4)}")
 
-                                # Record to session context for cross-query memory
-                                key_data = self._extract_key_data(tool_name, result)
-                                self._record_and_persist(tool_name, result_summary, key_data, session_id)
+                    result = await self.tool_registry.execute_tool(tool_name, arguments, logs=True)
 
-                                final_result = result
-                                print(f"Tool succeeded: {result_summary}")
-                                
-                                self.logger.info(f"  Status: SUCCESS")
-                                self.logger.info(f"  Summary: {result_summary}")
-                                
-                                # Send tool result back to LLM (Gemini only)
-                                # For Ollama: Skip this, execution history will be in the next prompt
-                                if is_gemini:
-                                    self.logger.info(f"\nSENDING FULL RESULT TO LLM via function_response")
-                                    _resume_response = self.llm_client.send_function_response(tool_name, result)
-                                    self.logger.info(f"Captured response from send_function_response - will use on next iteration")
-                            elif result and is_error:
-                                # Ensure error_msg is always a string, never None
-                                error_msg = result.get("error") or result.get("text") or "Unknown error"
-                                if error_msg is None or (isinstance(error_msg, str) and not error_msg.strip()):
-                                    error_msg = "Tool execution failed without error details"
-                                execution_history.append({
-                                    "tool": tool_name,
-                                    "success": False,
-                                    "error": str(error_msg),  # Ensure it's a string
-                                    "result": result
-                                })
-                                
-                                # Send error back to LLM (Gemini only)
-                                # For Ollama: Skip this, execution history will be in the next prompt
-                                if is_gemini:
-                                    error_response = {"error": str(error_msg), "is_error": True}
-                                    self.logger.info(f"\nSENDING ERROR TO LLM via function_response")
-                                    _resume_response = self.llm_client.send_function_response(tool_name, error_response)
-                                
-                                print(f"Tool failed: {error_msg}")
-                                
-                                self.logger.error(f"  Status: FAILED")
-                                self.logger.error(f"  Error: {error_msg}")
-                            else:
-                                # Send error back to LLM (Gemini only)
-                                # For Ollama: Skip this, execution history will be in the next prompt
-                                if is_gemini:
-                                    error_response = {"error": "Execution returned no result", "is_error": True}
-                                    self.logger.info(f"\nSENDING NO-RESULT ERROR TO LLM via function_response")
-                                    _resume_response = self.llm_client.send_function_response(tool_name, error_response)
-                                
-                                execution_history.append({
-                                    "tool": tool_name,
-                                    "success": False,
-                                    "error": "Execution returned no result"
-                                })
-                                print(f"Tool execution failed")
-                                
-                                self.logger.error(f"  Status: FAILED - No result returned")
+                    self.logger.info(f"\nTOOL RESULT:")
+                    self.logger.info(f"  Tool: {tool_name}")
+                    result_full = json.dumps(result, indent=4) if isinstance(result, dict) else str(result)
+                    self.logger.info(f"  Result: {result_full}")
+
+                    # Check if result contains an error
+                    is_error = False
+                    if isinstance(result, dict):
+                        is_error = result.get("is_error") or result.get("error") or "error" in str(result.get("text", "")).lower()
+
+                    # Record execution with result details
+                    print(f"TOOL EXECUTION RESULT: {result}")
+                    if result and not is_error:
+                        # Create human-readable summary based on tool type
+                        result_summary = self._create_result_summary(tool_name, result)
+
+                        execution_history.append({
+                            "tool": tool_name,
+                            "success": True,
+                            "result_summary": result_summary,
+                            "result": result  # Store actual result
+                        })
+
+                        # Record to session context for cross-query memory
+                        key_data = self._extract_key_data(tool_name, result)
+                        self._record_and_persist(tool_name, result_summary, key_data, session_id)
+
+                        final_result = result
+                        print(f"Tool succeeded: {result_summary}")
+
+                        self.logger.info(f"  Status: SUCCESS")
+                        self.logger.info(f"  Summary: {result_summary}")
+
+                        # Save radlex reports to DB so they appear in the Report tab
+                        if session_id and tool_name == "radlex.generate_report":
+                            from datetime import datetime as _dt
+                            _report_wrap = {
+                                "patient_context": {},
+                                "findings": [],
+                                "radlex_template": result,
+                                "narrative": {},
+                                "generated_at": _dt.now().isoformat(),
+                            }
+                            _rtid = db.create_task(session_id, "report", "Radlex Template Report", arguments)
+                            db.update_task(_rtid, "done", result=_report_wrap)
+                            print(f"[agent] Saved radlex report to DB as task {_rtid[:8]}")
+
+                        _turn_results.append((tool_name, result))
+
+                    elif result and is_error:
+                        # Ensure error_msg is always a string, never None
+                        error_msg = result.get("error") or result.get("text") or "Unknown error"
+                        if error_msg is None or (isinstance(error_msg, str) and not error_msg.strip()):
+                            error_msg = "Tool execution failed without error details"
+                        execution_history.append({
+                            "tool": tool_name,
+                            "success": False,
+                            "error": str(error_msg),  # Ensure it's a string
+                            "result": result
+                        })
+
+                        # Persist a failed task record so the Results tab shows it
+                        _RESULT_TOOLS = {"monai.analyze_image", "monai.run_inference", "monai.download_model"}
+                        if session_id and tool_name in _RESULT_TOOLS:
+                            _path = (arguments.get("path") or arguments.get("image_path") or "")
+                            _label = {"monai.analyze_image": "Image Analysis",
+                                      "monai.run_inference": "Inference",
+                                      "monai.download_model": "Model Download"}.get(tool_name, tool_name)
+                            _fname = Path(_path).name if _path else "unknown file"
+                            _tid = db.create_task(session_id, "inference",
+                                                  f"{_label}: {_fname}", {"path": _path, **arguments})
+                            db.update_task(_tid, "failed", None, str(error_msg))
+
+                        print(f"Tool failed: {error_msg}")
+
+                        self.logger.error(f"  Status: FAILED")
+                        self.logger.error(f"  Error: {error_msg}")
+
+                        error_response = {"error": str(error_msg), "is_error": True}
+                        _turn_results.append((tool_name, error_response))
+
+                    else:
+                        execution_history.append({
+                            "tool": tool_name,
+                            "success": False,
+                            "error": "Execution returned no result"
+                        })
+                        print(f"Tool execution failed")
+
+                        self.logger.error(f"  Status: FAILED - No result returned")
+
+                        error_response = {"error": "Execution returned no result", "is_error": True}
+                        _turn_results.append((tool_name, error_response))
+
+                # --- Phase 3: send ALL accumulated results to Gemini in one message ---
+                # For Ollama: skip this entirely — execution history goes into the next prompt
+                if is_gemini and _turn_results:
+                    if len(_turn_results) > 1:
+                        self.logger.info(f"\nSENDING {len(_turn_results)} RESULTS TO LLM via send_multiple_function_responses")
+                        _resume_response = self.llm_client.send_multiple_function_responses(_turn_results)
+                    else:
+                        _single_name, _single_data = _turn_results[0]
+                        self.logger.info(f"\nSENDING FULL RESULT TO LLM via send_function_response")
+                        _resume_response = self.llm_client.send_function_response(_single_name, _single_data)
+                    self.logger.info(f"Captured response from function_response(s) - will use on next iteration")
                 
                 # If agent responded with text but no tool call
                 if has_text and not has_function_call:

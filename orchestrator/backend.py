@@ -21,23 +21,37 @@ import database as db
 import task_runner
 
 current_session_id: Optional[str] = None
+_shutdown_event: Optional[asyncio.Event] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global current_session_id
+    global current_session_id, _shutdown_event
+    _shutdown_event = asyncio.Event()
     # Startup
     db.init_db()
     current_session_id = db.create_session()
     await agent_decision._initialize_components()
     task_runner.init()
-    yield
-    # Shutdown - close MCP sessions
-    agent_decision.reset_session_context()
     try:
-        await agent_decision.close()
-    except BaseException:
-        pass
+        yield
+    except asyncio.CancelledError:
+        # uvicorn cancels the lifespan task on shutdown. Uncancel so that
+        # cleanup awaits below can run without immediately re-raising, and
+        # so that @asynccontextmanager sees the generator exit normally
+        # (causing starlette to send shutdown.complete, not shutdown.failed).
+        task = asyncio.current_task()
+        if task is not None:
+            task.uncancel()
+    finally:
+        # Signal SSE connections to exit cleanly before MCP sessions close
+        _shutdown_event.set()
+        # Shutdown - close MCP sessions
+        agent_decision.reset_session_context()
+        try:
+            await agent_decision.close()
+        except BaseException:
+            pass
 
 app = FastAPI(title="Agentic Health Assistant API", lifespan=lifespan)
 
@@ -52,9 +66,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-uploaded_files = []  # In-memory buffer for current upload (before query)
+uploaded_files = []  # In-memory buffer for uploaded files (appended, not replaced)
 temp_file_paths = {}  # Temp file paths mapped by filename
-uploaded_dir: Optional[str] = None  # Directory path registered for the current query
+uploaded_dirs: List[str] = []  # Directory paths registered for the current session
 
 
 async def send_step(step_type: str, message: str, **kwargs) -> str:
@@ -84,23 +98,33 @@ async def set_metadata(data: dict = Body(...)):
     
 @app.post("/api/set-directory")
 async def set_directory(data: dict = Body(...)):
-    """Register an uploaded directory path for use in the next query and persist to the session."""
-    global uploaded_dir
+    """
+    Manage the list of registered directories for the current session.
+      { dir_path: "/path" }            → add directory
+      { dir_path: "/path", remove: true } → remove that specific directory
+      { dir_path: null }               → clear all directories
+    """
     dir_path = data.get("dir_path")
+    remove = data.get("remove", False)
 
-    # Always clear any previous dicom_dir DB entries for this session
-    db.remove_session_dirs(current_session_id)
-
-    if dir_path and os.path.isdir(dir_path):
-        uploaded_dir = dir_path
-        dirname = Path(dir_path).name
-        # Compute size by summing all files in the directory
-        total_size = sum(f.stat().st_size for f in Path(dir_path).iterdir() if f.is_file())
-        db.save_uploaded_file(current_session_id, dirname, dir_path, 'dicom_dir', total_size)
+    if dir_path is None:
+        # Clear all
+        uploaded_dirs.clear()
+        db.remove_session_dirs(current_session_id)
+    elif remove:
+        # Remove specific directory
+        if dir_path in uploaded_dirs:
+            uploaded_dirs.remove(dir_path)
+        db.remove_session_dir(current_session_id, dir_path)
     else:
-        uploaded_dir = None
+        # Add directory if valid and not already in list
+        if os.path.isdir(dir_path) and dir_path not in uploaded_dirs:
+            uploaded_dirs.append(dir_path)
+            dirname = Path(dir_path).name
+            total_size = sum(f.stat().st_size for f in Path(dir_path).iterdir() if f.is_file())
+            db.save_uploaded_file(current_session_id, dirname, dir_path, 'dicom_dir', total_size)
 
-    return {"status": "ok", "dir_path": uploaded_dir}
+    return {"status": "ok", "dirs": uploaded_dirs}
 
 
 @app.post("/api/process-query")
@@ -110,7 +134,7 @@ async def process_query(query: str = Body(..., media_type="text/plain")):
         # Get files for current session from DB (persistent paths)
         session_files = db.get_session_files(current_session_id)
 
-        if not uploaded_files and not session_files and not uploaded_dir:
+        if not uploaded_files and not session_files and not uploaded_dirs:
             result = await agent_decision.execute_task(query, session_id=current_session_id)
         else:
             image_data = []
@@ -122,7 +146,7 @@ async def process_query(query: str = Body(..., media_type="text/plain")):
                         image_data.append((stored_path, contents))
                         print(f"Using persistent file: {stored_path}")
             elif session_files:
-                # Load from persistent storage (skip dicom_dir entries - handled via uploaded_dir)
+                # Load from persistent storage (skip dicom_dir entries - handled separately)
                 for f in session_files:
                     if f.get("file_type") == "dicom_dir":
                         continue
@@ -133,10 +157,19 @@ async def process_query(query: str = Body(..., media_type="text/plain")):
                         image_data.append((path, contents))
                         print(f"Using DB file: {path}")
 
-            # Include uploaded directory (empty bytes - agent uses the path only)
-            if uploaded_dir and os.path.isdir(uploaded_dir):
-                image_data.append((uploaded_dir, b""))
-                print(f"Using uploaded directory: {uploaded_dir}")
+            # Include all registered directories
+            for dir_path in uploaded_dirs:
+                if os.path.isdir(dir_path):
+                    image_data.append((dir_path, b""))
+                    print(f"Using uploaded directory: {dir_path}")
+
+            # If no in-memory files, fall back to session dirs from DB
+            if not image_data or all(p == b"" for _, p in image_data):
+                session_dirs = [f for f in session_files if f.get("file_type") == "dicom_dir"]
+                for f in session_dirs:
+                    if os.path.isdir(f["stored_path"]) and f["stored_path"] not in uploaded_dirs:
+                        image_data.append((f["stored_path"], b""))
+                        print(f"Using DB directory: {f['stored_path']}")
 
             if image_data:
                 result = await agent_decision.execute_task(query, imageList=image_data, session_id=current_session_id)
@@ -155,10 +188,6 @@ async def upload_file(file: UploadFile = File(...)):
     global uploaded_files, temp_file_paths
     print(f"Received file: {file.filename}")
     try:
-        # Clear previous in-memory buffer
-        uploaded_files.clear()
-        temp_file_paths.clear()
-
         contents = await file.read()
 
         # Persist to data/uploads/ with unique name
@@ -327,8 +356,11 @@ async def get_pending_tool():
 @app.post("/api/confirm-tool")
 async def confirm_tool():
     """Confirm and execute the pending tool"""
-    result = await agent_decision.confirm_tool_execution(session_id=current_session_id)
-    return {"result": result}
+    try:
+        result = await agent_decision.confirm_tool_execution(session_id=current_session_id)
+        return {"result": result}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Tool execution failed: {e}")
 
 
 @app.post("/api/deny-tool")
@@ -342,20 +374,20 @@ async def deny_tool():
 @app.post("/api/clear-files")
 async def clear_files():
     """Clear in-memory file buffer"""
-    global uploaded_files, temp_file_paths, uploaded_dir
+    global uploaded_files, temp_file_paths
     temp_file_paths.clear()
     uploaded_files.clear()
-    uploaded_dir = None
+    uploaded_dirs.clear()
     return {"status": "cleared"}
 
 
 @app.post("/api/reset-session")
 async def reset_session():
     """Start a fresh session - clears context and LLM history, creates new session"""
-    global current_session_id, uploaded_files, temp_file_paths, uploaded_dir
+    global current_session_id, uploaded_files, temp_file_paths
     temp_file_paths.clear()
     uploaded_files.clear()
-    uploaded_dir = None
+    uploaded_dirs.clear()
     agent_decision.reset_session_context()
     if agent_decision.llm_client:
         agent_decision.llm_client.start_chat()
@@ -420,7 +452,7 @@ async def delete_all_sessions():
 @app.post("/api/load-session")
 async def load_session(data: dict = Body(...)):
     """Load a saved session - restores context and file references"""
-    global current_session_id, uploaded_files, temp_file_paths, uploaded_dir
+    global current_session_id, uploaded_files, temp_file_paths
     session_id = data.get("session_id")
     if not session_id:
         return {"error": "session_id is required"}
@@ -434,13 +466,12 @@ async def load_session(data: dict = Body(...)):
     uploaded_files.clear()
     temp_file_paths.clear()
 
-    # Restore uploaded directory from DB if the session had one
+    # Restore uploaded directories from DB
     session_files_all = db.get_session_files(session_id)
-    dir_entries = [f for f in session_files_all if f.get("file_type") == "dicom_dir"]
-    if dir_entries and os.path.isdir(dir_entries[-1]["stored_path"]):
-        uploaded_dir = dir_entries[-1]["stored_path"]
-    else:
-        uploaded_dir = None
+    uploaded_dirs.clear()
+    for f in session_files_all:
+        if f.get("file_type") == "dicom_dir" and os.path.isdir(f["stored_path"]):
+            uploaded_dirs.append(f["stored_path"])
 
     # Restore context into the agent
     agent_decision.load_context_from_db(session_id)
@@ -840,56 +871,98 @@ def get_mock_patients():
 @app.get("/api/events")
 async def sse_events(request: Request):
     """
-    Server-Sent Events endpoint.  Polls the database every second and emits
-    an event whenever a task's status changes.  DB-polling is simpler and more
-    reliable than pushing events from background threads.
+    Server-Sent Events endpoint.  Polls the DB every second and emits an event
+    the first time a task reaches 'done' or 'failed'.
+
+    We only add a task to `notified` AFTER the yield succeeds so that a failed
+    yield (connection drop mid-send) doesn't permanently suppress the event.
     """
     async def event_generator():
-        yield f"data: {json.dumps({'type': 'connected'})}\n\n"
-        # task_id -> last known status; used to detect transitions
-        task_states: dict = {}
-        keepalive_ticks = 0
+        # Top-level guard: any BaseException (CancelledError, GeneratorExit, etc.)
+        # thrown into a yield point causes a clean return so starlette's task group
+        # never sees an unhandled error from this generator.
+        try:
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
 
-        while True:
+            # Pre-populate so we don't fire stale notifications on reconnect.
+            notified: set = set()   # tasks already sent done/failed event
+            started: set = set()    # tasks already sent running event
             try:
-                await asyncio.sleep(1.0)
+                for t in db.list_tasks():
+                    if t["status"] in ("done", "failed"):
+                        notified.add(t["id"])
+                    if t["status"] in ("running", "done", "failed"):
+                        started.add(t["id"])
+            except Exception as e:
+                print(f"[SSE] init error: {e}")
+
+            keepalive_ticks = 0
+
+            while True:
+                # Sleep 1s, but wake up immediately if the server is shutting down
+                try:
+                    if _shutdown_event is not None:
+                        await asyncio.wait_for(_shutdown_event.wait(), timeout=1.0)
+                        return  # Server shutting down - exit generator cleanly
+                    else:
+                        await asyncio.sleep(1.0)
+                except asyncio.TimeoutError:
+                    pass  # Normal 1-second tick
+                except asyncio.CancelledError:
+                    return  # HTTP task was cancelled
 
                 if await request.is_disconnected():
                     break
 
-                tasks = db.list_tasks()
+                try:
+                    tasks = db.list_tasks()
+                except Exception as e:
+                    print(f"[SSE] db.list_tasks error: {e}")
+                    continue
+
                 for task in tasks:
                     tid = task["id"]
                     status = task["status"]
-                    prev = task_states.get(tid)
 
-                    if prev == status:
-                        continue  # no change
+                    # Emit task_running the first time a task enters running state
+                    if status == "running" and tid not in started:
+                        payload = {
+                            "type": "task_running",
+                            "task_id": tid,
+                            "task_type": task["task_type"],
+                            "description": task["description"],
+                            "session_id": task["session_id"],
+                        }
+                        print(f"[SSE] emitting task_running for {tid[:8]}")
+                        yield f"data: {json.dumps(payload)}\n\n"
+                        started.add(tid)
 
-                    task_states[tid] = status
-                    base = {
+                    if tid in notified or status not in ("done", "failed"):
+                        continue
+
+                    event_type = "task_done" if status == "done" else "task_failed"
+                    payload = {
+                        "type": event_type,
                         "task_id": tid,
                         "task_type": task["task_type"],
                         "description": task["description"],
                         "session_id": task["session_id"],
                     }
+                    if status == "failed":
+                        payload["error"] = task.get("error", "")
 
-                    if prev is None and status == "running":
-                        yield f"data: {json.dumps({**base, 'type': 'task_started'})}\n\n"
-                    elif status == "done":
-                        yield f"data: {json.dumps({**base, 'type': 'task_done'})}\n\n"
-                    elif status == "failed":
-                        yield f"data: {json.dumps({**base, 'type': 'task_failed', 'error': task.get('error', '')})}\n\n"
+                    print(f"[SSE] emitting {event_type} for {tid[:8]}")
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    # Only mark notified AFTER the yield succeeds
+                    notified.add(tid)
 
                 keepalive_ticks += 1
                 if keepalive_ticks >= 25:
                     yield ": keepalive\n\n"
                     keepalive_ticks = 0
 
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                pass
+        except BaseException:
+            return  # Swallow any thrown exception so the generator closes cleanly
 
     return StreamingResponse(
         event_generator(),

@@ -1017,14 +1017,12 @@ Your decision:"""
                              if e.get("data", {}).get("modality")), ""
                         )
 
-                        # Collect all paths to process: the one the LLM specified
-                        # plus any remaining unqueued paths from imageList.
-                        # This ensures ALL files are queued in a single intercept
-                        # regardless of whether Gemini would loop back for the rest.
-                        all_unqueued = [image_path] + [
-                            p for p, _ in (imageList or [])
-                            if p != image_path and p not in _inference_queued
-                        ]
+                        # Only queue the exact path the LLM specified with the model it chose.
+                        # Do NOT auto-queue other files here — the LLM will call run_inference
+                        # separately for each file with the appropriate model (per system prompt rule 7).
+                        # Auto-queuing all files with the same model caused wrong-model assignments
+                        # when the LLM intended different models for different files.
+                        all_unqueued = [image_path]
 
                         queued_tasks = []
                         for inf_path in all_unqueued:

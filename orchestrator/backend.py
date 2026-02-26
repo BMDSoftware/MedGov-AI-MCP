@@ -887,8 +887,10 @@ async def sse_events(request: Request):
             # Pre-populate so we don't fire stale notifications on reconnect.
             notified: set = set()   # tasks already sent done/failed event
             started: set = set()    # tasks already sent running event
+            seen_ids: set = set()   # all task IDs ever seen (to detect brand-new tasks)
             try:
                 for t in db.list_tasks():
+                    seen_ids.add(t["id"])
                     if t["status"] in ("done", "failed"):
                         notified.add(t["id"])
                     if t["status"] in ("running", "done", "failed"):
@@ -923,6 +925,19 @@ async def sse_events(request: Request):
                 for task in tasks:
                     tid = task["id"]
                     status = task["status"]
+
+                    # Emit task_queued the first time a brand-new task appears
+                    if tid not in seen_ids:
+                        seen_ids.add(tid)
+                        payload = {
+                            "type": "task_queued",
+                            "task_id": tid,
+                            "task_type": task["task_type"],
+                            "description": task["description"],
+                            "session_id": task["session_id"],
+                        }
+                        print(f"[SSE] emitting task_queued for {tid[:8]}")
+                        yield f"data: {json.dumps(payload)}\n\n"
 
                     # Emit task_running the first time a task enters running state
                     if status == "running" and tid not in started:

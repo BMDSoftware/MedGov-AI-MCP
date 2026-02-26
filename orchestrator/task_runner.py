@@ -45,6 +45,17 @@ def submit_task(session_id: str, task_type: str, description: str, input_data: D
 
 # ── Internal task execution ───────────────────────────────────────────────────
 
+def _unwrap_exception_message(e: Exception) -> str:
+    """Recursively unwrap ExceptionGroup (raised by anyio/asyncio task groups) to get
+    the innermost meaningful error message."""
+    if hasattr(e, 'exceptions') and e.exceptions:
+        for sub in e.exceptions:
+            msg = _unwrap_exception_message(sub)
+            if msg:
+                return msg
+    return str(e)
+
+
 def _run_task(task_id: str, task_type: str, description: str, input_data: Dict, session_id: str):
     """Entry point for each worker thread."""
     print(f"[task_runner] Starting {task_id[:8]} ({task_type})")
@@ -60,10 +71,18 @@ def _run_task(task_id: str, task_type: str, description: str, input_data: Dict, 
         print(f"[task_runner] Done {task_id[:8]}")
 
     except Exception as e:
-        err = f"{type(e).__name__}: {e}"
-        print(f"[task_runner] Failed {task_id[:8]}: {err}")
+        # anyio wraps exceptions raised inside async task groups into ExceptionGroup;
+        # unwrap recursively to get the actual root cause message for the LLM
+        technical_err = _unwrap_exception_message(e)
+        print(f"[task_runner] Failed {task_id[:8]}: {technical_err}")
         traceback.print_exc()
-        db.update_task(task_id, "failed", error=err)
+
+        if task_type == "inference":
+            friendly_err = _explain_inference_error(technical_err, input_data)
+        else:
+            friendly_err = technical_err
+
+        db.update_task(task_id, "failed", error=friendly_err)
 
 
 # ── Handler: inference ────────────────────────────────────────────────────────
@@ -115,9 +134,62 @@ async def _async_run_inference(image_path: str, model_name: str) -> Dict:
             block.text for block in mcp_result.content if hasattr(block, "text")
         )
         try:
-            return json.loads(combined)
+            result = json.loads(combined)
         except (json.JSONDecodeError, TypeError):
             return {"text": combined}
+
+        # If MONAI returned an error dict, raise so _run_task marks this task as failed
+        if isinstance(result, dict) and "error" in result:
+            raise RuntimeError(result["error"])
+
+        return result
+
+
+def _explain_inference_error(technical_error: str, input_data: Dict) -> str:
+    """Call the LLM to generate a plain-language explanation of an inference failure."""
+    model_name = input_data.get("model_name", "unknown model")
+    image_path = input_data.get("image_path", "")
+    image_filename = os.path.basename(image_path) if image_path else "unknown file"
+
+    prompt = (
+        "A medical imaging AI failed to analyse a scan. "
+        "Explain the error below to a radiologist in 2-3 plain English sentences. "
+        "Do not use Python, programming, or technical computing terms. "
+        "State clearly what went wrong and what the radiologist should do instead.\n\n"
+        f"Technical error: {technical_error}\n"
+        f"Model: {model_name}\n"
+        f"Image file: {image_filename}\n\n"
+        "Respond with plain text only, no bullet points, no markdown."
+    )
+
+    llm_backend = os.getenv("LLM_BACKEND", "gemini")
+    try:
+        if llm_backend.lower() == "ollama":
+            import requests
+            ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")
+            ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+            resp = requests.post(
+                f"{ollama_url}/api/generate",
+                json={"model": ollama_model, "prompt": prompt, "stream": False},
+                timeout=30,
+            )
+            explanation = resp.json().get("response", "").strip()
+        else:
+            from google import genai as google_genai
+            from dotenv import load_dotenv
+            load_dotenv()
+            client = google_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+            model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+            response = client.models.generate_content(model=model_id, contents=prompt)
+            explanation = (response.text or "").strip()
+
+        if explanation:
+            return explanation
+    except Exception as e:
+        print(f"[task_runner] LLM error explanation failed: {e}")
+
+    # Fallback to raw technical error if LLM call fails
+    return technical_error
 
 
 # ── Handler: report ───────────────────────────────────────────────────────────

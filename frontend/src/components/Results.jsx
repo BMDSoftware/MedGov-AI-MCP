@@ -118,6 +118,36 @@ function Results({ refreshSignal, currentSessionId }) {
 
             {expanded === task.id && (
               <div className="task-card-body">
+                {/* Inference summary — always shown for inference tasks */}
+                {task.task_type === 'inference' && (
+                  <div className="task-inference-summary">
+                    <div className="task-inference-summary-row">
+                      <span className="task-summary-label">File</span>
+                      <span className="task-summary-value">
+                        {task.input_data?.image_path
+                          ? task.input_data.image_path.split('/').pop()
+                          : '—'}
+                      </span>
+                    </div>
+                    <div className="task-inference-summary-row">
+                      <span className="task-summary-label">Model</span>
+                      <span className="task-summary-value">{task.input_data?.model_name || '—'}</span>
+                    </div>
+                    {task.input_data?.modality && (
+                      <div className="task-inference-summary-row">
+                        <span className="task-summary-label">Modality</span>
+                        <span className="task-summary-value">{task.input_data.modality}</span>
+                      </div>
+                    )}
+                    {task.input_data?.body_part && (
+                      <div className="task-inference-summary-row">
+                        <span className="task-summary-label">Body Part</span>
+                        <span className="task-summary-value">{task.input_data.body_part}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {task.status === 'failed' && task.error && (
                   <div className="task-error">{task.error}</div>
                 )}
@@ -152,6 +182,15 @@ function TaskResult({ task }) {
   const result = task.result;
 
   if (task.task_type === 'inference') {
+    // If the result itself contains an error (e.g. task was marked done but MCP returned error)
+    if (result?.error) {
+      return (
+        <div className="task-result-inference">
+          <div className="task-error">{result.error}</div>
+        </div>
+      );
+    }
+
     const structures = result?.results?.detected_structures || [];
     const hasVolume = structures.some(s => s.volume_cm3 != null);
     return (

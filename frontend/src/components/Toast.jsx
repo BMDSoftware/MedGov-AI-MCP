@@ -27,7 +27,10 @@ function Toast({ onTaskUpdate }) {
         let text = '';
         let variant = 'info';
 
-        if (event.type === 'task_running') {
+        if (event.type === 'task_queued') {
+          text = `Queued: ${event.description}`;
+          variant = 'info';
+        } else if (event.type === 'task_running') {
           text = `Running: ${event.description}`;
           variant = 'info';
         } else if (event.type === 'task_done') {
@@ -43,7 +46,7 @@ function Toast({ onTaskUpdate }) {
           setToasts(prev => [...prev, { id, text, variant }]);
           setTimeout(() => {
             setToasts(prev => prev.filter(t => t.id !== id));
-          }, 5000);
+          }, 8000);
         }
 
         if (onTaskUpdateRef.current) onTaskUpdateRef.current(event);

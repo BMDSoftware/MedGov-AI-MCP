@@ -2,16 +2,17 @@ import { useState, useRef, useEffect } from 'react';
 import { API_CONFIG, getApiUrl } from './config';
 import './App.css';
 import Settings from './components/Settings';
-import PatientSelection from './components/PatientSelection';
+// import PatientSelection from './components/PatientSelection';
 import Sessions from './components/Sessions';
 import InferenceTest from './components/InferenceTest';
 import Results from './components/Results';
 import Report from './components/Report';
 import Toast from './components/Toast';
+import HomePage from './components/HomePage';
 
 function App() {
   // --- State and refs ---
-  const [page, setPage] = useState('patient-selection');
+  const [page, setPage] = useState('home');
   const [messages, setMessages] = useState([
     {
       type: 'bot',
@@ -39,11 +40,18 @@ function App() {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [taskRefreshSignal, setTaskRefreshSignal] = useState(null);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
+  const [unreadTaskCount, setUnreadTaskCount] = useState(0);
+  const pageRef = useRef(page);
   const [uploadingDir, setUploadingDir] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
   // --- Effects ---
+  useEffect(() => {
+    pageRef.current = page;
+    if (page === 'results') setUnreadTaskCount(0);
+  }, [page]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -327,22 +335,28 @@ function App() {
       {/* Global SSE toast notifications - lives outside tab routing */}
       <Toast onTaskUpdate={(event) => {
         setTaskRefreshSignal(event);
-        if (event.type === 'task_started') setRunningTaskCount(n => n + 1);
-        if (event.type === 'task_done' || event.type === 'task_failed') setRunningTaskCount(n => Math.max(0, n - 1));
+        if (event.type === 'task_queued') setRunningTaskCount(n => n + 1);
+        if (event.type === 'task_done' || event.type === 'task_failed') {
+          setRunningTaskCount(n => Math.max(0, n - 1));
+          if (pageRef.current !== 'results') setUnreadTaskCount(n => n + 1);
+        }
       }} />
 
-      <aside className="sidebar">
-        <div className="logo">
+      {page !== 'home' && <aside className="sidebar">
+        <div className="logo" style={{ cursor: 'pointer' }} onClick={() => setPage('home')}>
           <span className="logo-icon">H</span>
           <span className="logo-text">HealthMCP</span>
         </div>
         <nav className="nav">
-          <a href="#" className={`nav-item${page === 'patient-selection' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('patient-selection'); }}>Patients</a>
+          <a href="#" className={`nav-item${page === 'home' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('home'); }}>Home</a>
+          {/* <a href="#" className={`nav-item${page === 'patient-selection' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('patient-selection'); }}>Patients</a> */}
           <a href="#" className={`nav-item${page === 'analysis' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('analysis'); }}>Analysis</a>
           <a href="#" className={`nav-item${page === 'history' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('history'); }}>History</a>
           <a href="#" className={`nav-item${page === 'test' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('test'); }}>Test</a>
           <a href="#" className={`nav-item${page === 'results' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('results'); }}>
-            Results{runningTaskCount > 0 && <span className="nav-task-badge">{runningTaskCount}</span>}
+            Results
+            {runningTaskCount > 0 && <span className="nav-task-badge">{runningTaskCount}</span>}
+            {unreadTaskCount > 0 && <span className="nav-unread-badge">!</span>}
           </a>
           <a href="#" className={`nav-item${page === 'report' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('report'); }}>Report</a>
           <a href="#" className={`nav-item${page === 'settings' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('settings'); }}>Settings</a>
@@ -350,7 +364,7 @@ function App() {
         <div className="sidebar-footer">
           <p className="version">v1.0.0</p>
         </div>
-      </aside>
+      </aside>}
 
       <main className="main">
         {/* Running Tool Indicator */}
@@ -382,6 +396,7 @@ function App() {
           </div>
         )}
 
+        {page !== 'home' && (
         <header className="header">
           <h1>Medical Image Analysis</h1>
           {selectedPatient ? (
@@ -396,12 +411,19 @@ function App() {
             </div>
           )}
         </header>
+        )}
 
-        {page === 'settings' ? (
+        {page === 'home' ? (
+          <HomePage
+            onNavigate={setPage}
+            currentSessionId={currentSessionId}
+            runningTaskCount={runningTaskCount}
+          />
+        ) : page === 'settings' ? (
           <Settings />
-        ) : page === 'patient-selection' ? (
+        ) : /* page === 'patient-selection' ? (
           <PatientSelection onPatientSelect={handlePatientSelection} />
-        ) : page === 'test' ? (
+        ) : */ page === 'test' ? (
           <InferenceTest />
         ) : page === 'results' ? (
           <Results refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />

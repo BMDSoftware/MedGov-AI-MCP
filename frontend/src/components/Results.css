@@ -214,6 +214,39 @@
   border-top: 1px solid var(--border, #2d2d3d);
 }
 
+/* Inference task summary (file, model, modality, body part) */
+.task-inference-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  padding: 10px 14px;
+  background: var(--bg-primary, #121218);
+  border-radius: 8px;
+  margin: 12px 0 10px 0;
+}
+
+.task-inference-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.task-summary-label {
+  color: var(--text-secondary, #a1a1aa);
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.task-summary-value {
+  color: var(--text-primary, #fafafa);
+  font-weight: 500;
+  word-break: break-all;
+}
+
 /* Inference result */
 .task-result-inference {
   margin-top: 12px;

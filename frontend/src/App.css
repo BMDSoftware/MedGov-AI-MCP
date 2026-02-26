@@ -713,6 +713,22 @@ body {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
+/* Unread completed task badge on nav item */
+.nav-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+
 /* Running tasks indicator in header */
 .header-task-indicator {
   display: flex;

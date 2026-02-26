@@ -788,6 +788,21 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
         overlap = model_info.get("overlap", 0.5)
         log(f"Running sliding window inference with ROI={roi_size}, sw_batch={sw_batch_size}, overlap={overlap}...")
 
+        # Verify that the image spatial dimensions match the model's ROI.
+        # image shape after unsqueeze: [batch, channel, *spatial_dims]
+        num_spatial_dims = image.ndim - 2
+        roi_ndim = len(roi_size)
+        if num_spatial_dims != roi_ndim:
+            return {
+                "error": (
+                    f"Image has {num_spatial_dims} spatial dimension(s) (shape {list(image.shape)}) "
+                    f"but {model_name} requires {roi_ndim}D input (ROI {roi_size}). "
+                    f"A single 2D slice cannot be processed by a 3D volumetric model."
+                ),
+                "image_shape": list(image.shape),
+                "required_roi": roi_size,
+            }
+
         def _run_sliding_window(img, mdl, dev):
             with torch.no_grad():
                 return sliding_window_inference(

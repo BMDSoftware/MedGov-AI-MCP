@@ -110,6 +110,7 @@ function HomePage({ onNavigate, currentSessionId, runningTaskCount }) {
           <span className="home-topnav-name">HealthMCP</span>
         </div>
         <div className="home-topnav-links">
+          <button onClick={() => onNavigate('autonomous')}>Autonomous</button>
           <button onClick={() => onNavigate('analysis')}>Analysis</button>
           <button onClick={() => onNavigate('results')}>
             Results

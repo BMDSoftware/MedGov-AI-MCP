@@ -9,6 +9,7 @@ import Results from './components/Results';
 import Report from './components/Report';
 import Toast from './components/Toast';
 import HomePage from './components/HomePage';
+import AutonomousAgent from './components/AutonomousAgent';
 
 function App() {
   // --- State and refs ---
@@ -175,7 +176,7 @@ function App() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     // Reset input so the same dir can be re-selected
-    e.target.value = '';
+    // e.target.value = '';
     setUploadingDir(true);
     try {
       const formData = new FormData();
@@ -358,6 +359,7 @@ function App() {
         </div>
         <nav className="nav">
           <a href="#" className={`nav-item${page === 'home' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('home'); }}>Home</a>
+          <a href="#" className={`nav-item${page === 'autonomous' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('autonomous'); }}>Autonomous</a>
           {/* <a href="#" className={`nav-item${page === 'patient-selection' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('patient-selection'); }}>Patients</a> */}
           <a href="#" className={`nav-item${page === 'analysis' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('analysis'); }}>Analysis</a>
           <a href="#" className={`nav-item${page === 'history' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('history'); }}>History</a>
@@ -431,6 +433,8 @@ function App() {
             currentSessionId={currentSessionId}
             runningTaskCount={runningTaskCount}
           />
+        ) : page === 'autonomous' ? (
+          <AutonomousAgent currentSessionId={currentSessionId} />
         ) : page === 'settings' ? (
           <Settings onModeChange={setAppMode} />
         ) : /* page === 'patient-selection' ? (

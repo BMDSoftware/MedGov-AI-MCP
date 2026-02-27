@@ -137,7 +137,7 @@ class DicomParser:
                             "series_description": tags.get("SeriesDescription"),
                             "files": []
                         }
-                    series[series_uid]["files"].append(file_path)
+                    #series[series_uid]["files"].append(file_path) # commented because creates token explosion, sending file paths is not useful for the agent
 
         # Count slices per series
         for uid in series:

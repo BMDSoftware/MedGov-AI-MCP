@@ -20,18 +20,24 @@ class GeminiClient:
         self.agent_config = None
         self.gemini_tools_list = []
         self.custom_system_prompt = None  # Store custom system prompt
+        self.mode_extension = ""  # Appended to system prompt in normal mode
         self.skills = skills  # Reference to skills manager for dynamic prompt generation
-        
+
         self._initialize_gemini()
         self.start_chat() # Initialize the chat session immediately
+
+    def set_mode_extension(self, ext: str):
+        """Set an extra block appended to the system prompt, then restart the chat."""
+        self.mode_extension = ext
+        self.update_tools(self.available_tools)
 
     def update_system_prompt(self, system_prompt: str):
         """Update the system prompt and restart chat session"""
         self.custom_system_prompt = system_prompt
-        # Update agent config with new system prompt
+        # Use _get_system_prompt() so any active mode_extension is preserved
         self.agent_config = types.GenerateContentConfig(
             tools=[types.Tool(function_declarations=self.gemini_tools_list)],
-            system_instruction=system_prompt,
+            system_instruction=self._get_system_prompt(),
             temperature=0.0
         )
         # Restart chat session with new config
@@ -123,10 +129,15 @@ class GeminiClient:
 
     def _get_system_prompt(self) -> str:
         """Get system prompt for the AI agent"""
-        # Return custom prompt if set
-        if self.custom_system_prompt:
-            return self.custom_system_prompt
-            
+        base = self.custom_system_prompt if self.custom_system_prompt else None
+        if base is None:
+            base = self._base_system_prompt()
+        if self.mode_extension:
+            return base + "\n\n" + self.mode_extension
+        return base
+
+    def _base_system_prompt(self) -> str:
+        """Default system prompt when no custom prompt is set"""
         # # Old skills-based prompt:
         # tool_descriptions = "\n".join([
         #     f"- {name}: {info['description']}"
@@ -163,9 +174,15 @@ class GeminiClient:
 
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
 
+BACKGROUND TASK RULES:
+- Any operation that takes more than a few seconds MUST be queued via run_inference (which auto-queues) rather than a direct blocking call.
+- This includes: MONAI inference, report generation, bulk analysis of multiple files.
+- After queuing a task, respond to the user immediately — do NOT wait for the task to finish.
+- The user will receive a notification in the UI when the task is done.
+
 CONVERSATION RULES:
 1. Be conversational. If the user greets you, greet them back. If they ask a question you can answer from context, answer it directly without calling any tool.
-2. You have memory of previous interactions in this session. If the user asks about something that was already retrieved (e.g. patient name, modality, body part), answer from what you already know - do not re-call the tool.
+2. You have memory of previous interactions in this session. If the user asks about something that was already retrieved (e.g. modality, body part), answer from what you already know - do not re-call the tool.
 3. Respond concisely and directly. Do not over-explain your reasoning.
 
 TOOL USAGE RULES:
@@ -174,7 +191,9 @@ TOOL USAGE RULES:
 3. For DICOM files (.dcm): parse the metadata first to extract modality and body part before selecting models or running inference.
 4. MONAI models require 3D volumes (.nii, .nii.gz). If the image is a single 2D slice, inform the user.
 5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
-6. After a tool returns results, summarize them clearly for the user."""
+6. After a tool returns results, summarize them clearly for the user.
+7. MULTI-FILE RULE: When multiple paths are listed in "IMAGES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
+8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices forming a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate individual files inside the directory."""
     
     def generate_content(self, prompt: str, imageList: Any = None) -> Any:
         """Send a message to the stateful chat session with optional image handling."""

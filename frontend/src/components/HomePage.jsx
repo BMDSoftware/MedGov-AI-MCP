@@ -163,16 +163,6 @@ function HomePage({ onNavigate, currentSessionId, runningTaskCount }) {
             </button>
           </div>
 
-          {(taskStats.done > 0 || taskStats.failed > 0) && (
-            <div className="home-stats-row">
-              {taskStats.done > 0 && (
-                <span className="home-stat-chip done">{taskStats.done} completed</span>
-              )}
-              {taskStats.failed > 0 && (
-                <span className="home-stat-chip failed">{taskStats.failed} failed</span>
-              )}
-            </div>
-          )}
         </div>
       </section>
 

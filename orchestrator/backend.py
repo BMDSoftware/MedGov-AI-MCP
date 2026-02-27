@@ -23,6 +23,25 @@ import task_runner
 current_session_id: Optional[str] = None
 _shutdown_event: Optional[asyncio.Event] = None
 
+# --- App settings (persisted to disk) ---
+_SETTINGS_FILE = Path(__file__).parent / "app_settings.json"
+
+def _load_settings() -> dict:
+    if _SETTINGS_FILE.exists():
+        try:
+            return json.loads(_SETTINGS_FILE.read_text())
+        except Exception:
+            pass
+    return {"mode": "debug"}
+
+def _save_settings(settings: dict):
+    try:
+        _SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
+    except Exception as e:
+        print(f"[settings] Failed to save: {e}")
+
+_app_settings = _load_settings()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,6 +51,7 @@ async def lifespan(app: FastAPI):
     db.init_db()
     current_session_id = db.create_session()
     await agent_decision._initialize_components()
+    agent_decision.set_mode(_app_settings.get("mode", "debug"))
     task_runner.init()
     try:
         yield
@@ -96,6 +116,21 @@ async def set_metadata(data: dict = Body(...)):
 
 
     
+@app.get("/api/mode")
+async def get_mode():
+    return {"mode": _app_settings.get("mode", "debug")}
+
+@app.post("/api/mode")
+async def set_mode(data: dict = Body(...)):
+    mode = data.get("mode", "debug")
+    if mode not in ("debug", "normal"):
+        raise HTTPException(status_code=400, detail="mode must be 'debug' or 'normal'")
+    _app_settings["mode"] = mode
+    _save_settings(_app_settings)
+    agent_decision.set_mode(mode)
+    return {"mode": mode}
+
+
 @app.post("/api/set-directory")
 async def set_directory(data: dict = Body(...)):
     """

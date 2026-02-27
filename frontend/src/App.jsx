@@ -41,6 +41,7 @@ function App() {
   const [taskRefreshSignal, setTaskRefreshSignal] = useState(null);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
   const [unreadTaskCount, setUnreadTaskCount] = useState(0);
+  const [appMode, setAppMode] = useState('debug'); // 'normal' | 'debug'
   const pageRef = useRef(page);
   const [uploadingDir, setUploadingDir] = useState(false);
   const messagesEndRef = useRef(null);
@@ -61,6 +62,14 @@ function App() {
     fetch(getApiUrl('/api/sessions'))
       .then(r => r.json())
       .then(d => setCurrentSessionId(d.current_session_id))
+      .catch(() => {});
+  }, []);
+
+  // Load app mode on mount
+  useEffect(() => {
+    fetch(getApiUrl('/api/mode'))
+      .then(r => r.json())
+      .then(d => setAppMode(d.mode))
       .catch(() => {});
   }, []);
 
@@ -362,6 +371,9 @@ function App() {
           <a href="#" className={`nav-item${page === 'settings' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('settings'); }}>Settings</a>
         </nav>
         <div className="sidebar-footer">
+          {appMode === 'debug' && (
+            <div className="sidebar-debug-badge">DEBUG</div>
+          )}
           <p className="version">v1.0.0</p>
         </div>
       </aside>}
@@ -420,7 +432,7 @@ function App() {
             runningTaskCount={runningTaskCount}
           />
         ) : page === 'settings' ? (
-          <Settings />
+          <Settings onModeChange={setAppMode} />
         ) : /* page === 'patient-selection' ? (
           <PatientSelection onPatientSelect={handlePatientSelection} />
         ) : */ page === 'test' ? (

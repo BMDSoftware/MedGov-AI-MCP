@@ -22,6 +22,19 @@ LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
 
 SKILL_DIR_PATH = Path(__file__).parent / "skills"
 
+NORMAL_MODE_COMMUNICATION_RULES = """COMMUNICATION STYLE — NORMAL MODE:
+
+You are communicating with medical professionals (physicians, radiologists, clinicians). Your workflow and decision-making are unchanged from normal operation. The only difference is how you communicate results.
+
+1. Use formal, professional language appropriate for a clinical environment.
+2. NEVER expose raw JSON, file paths, tool names, model identifiers, or internal technical parameters in your responses.
+3. When inference has been queued say: "I have submitted the [anatomy/modality] scan for analysis. Results will appear in the Results tab when complete."
+4. When scan metadata is extracted say: "I have reviewed the scan. This appears to be a [modality] examination of the [body part]."
+5. When listing models or results, describe them by their clinical application, not their technical identifiers.
+6. When something fails, explain it in plain clinical language and suggest what the user should do next.
+7. Keep responses to 2–4 sentences unless more clinical detail is genuinely needed.
+8. Do not narrate your internal process or the tools you called — only state the outcome to the user."""
+
 class AgenticAgent:
     """AI agent that decides which MCP tools to call based on context and data"""
 
@@ -32,6 +45,7 @@ class AgenticAgent:
         self.callback = callback  # Callback function for real-time event tracking
         self.llm_client = None
         self.session_context = SessionContext()  # Persists tool results across queries
+        self.mode = 'debug'  # 'debug' or 'normal'
         self.require_confirmation = True  # Require user confirmation before tool execution
         self.pending_tool_call = None  # Stores tool call waiting for confirmation
         self.pending_task_context = None  # Stores context for resuming after confirmation
@@ -624,6 +638,19 @@ TOOL USAGE RULES:
     def get_pending_tool(self) -> Optional[Dict]:
         """Get the pending tool call details"""
         return self.pending_tool_call
+
+    def set_mode(self, mode: str):
+        """Switch between 'debug' (confirmation required, raw output) and 'normal' (auto-execute, professional responses)."""
+        self.mode = mode
+        if mode == 'normal':
+            self.require_confirmation = False
+            if self.llm_client and hasattr(self.llm_client, 'set_mode_extension'):
+                self.llm_client.set_mode_extension(NORMAL_MODE_COMMUNICATION_RULES)
+        else:  # debug
+            self.require_confirmation = True
+            if self.llm_client and hasattr(self.llm_client, 'set_mode_extension'):
+                self.llm_client.set_mode_extension("")
+        print(f"[agent] Mode set to '{mode}' (require_confirmation={self.require_confirmation})")
 
     # NOTE: Guided workflow methods commented out - using true agentic approach now
     # Keeping for future reference if deterministic mode is needed

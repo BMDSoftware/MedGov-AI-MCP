@@ -4,7 +4,11 @@ import './Settings.css';
 const API_URL = 'http://localhost:5001';
 
 
-function Settings() {
+function Settings({ onModeChange }) {
+  // Mode
+  const [mode, setMode] = useState('debug');
+  const [modeLoading, setModeLoading] = useState(false);
+
   // Track MCP selection state independently
   const [mcpSelected, setMcpSelected] = useState({});
   const [expandedMCPs, setExpandedMCPs] = useState({});
@@ -13,6 +17,30 @@ function Settings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Load current mode on mount
+  useEffect(() => {
+    fetch(`${API_URL}/api/mode`)
+      .then(r => r.json())
+      .then(d => setMode(d.mode))
+      .catch(() => {});
+  }, []);
+
+  const handleSetMode = async (newMode) => {
+    setModeLoading(true);
+    try {
+      await fetch(`${API_URL}/api/mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: newMode }),
+      });
+      setMode(newMode);
+      if (onModeChange) onModeChange(newMode);
+    } catch (e) {
+      // silently fail
+    }
+    setModeLoading(false);
+  };
 
   // Fetch MCPs and tools
   const fetchData = async () => {
@@ -110,6 +138,36 @@ function Settings() {
 
   return (
     <div className="settings-container">
+      {/* Mode toggle */}
+      <div className="settings-mode-section">
+        <div className="settings-mode-header">
+          <div>
+            <h3 className="settings-mode-title">Application Mode</h3>
+            <p className="settings-mode-desc">
+              {mode === 'normal'
+                ? 'Normal mode — tools run automatically and responses use formal clinical language.'
+                : 'Debug mode — each tool requires confirmation and responses include raw technical output.'}
+            </p>
+          </div>
+        </div>
+        <div className="settings-mode-buttons">
+          <button
+            className={`settings-mode-btn${mode === 'normal' ? ' active' : ''}`}
+            onClick={() => handleSetMode('normal')}
+            disabled={modeLoading}
+          >
+            Normal
+          </button>
+          <button
+            className={`settings-mode-btn${mode === 'debug' ? ' active debug' : ''}`}
+            onClick={() => handleSetMode('debug')}
+            disabled={modeLoading}
+          >
+            Debug
+          </button>
+        </div>
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h2>Tool & MCP Settings</h2>
         <button className="refresh-btn" onClick={handleRefresh} disabled={refreshing}>

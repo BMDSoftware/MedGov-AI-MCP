@@ -86,21 +86,24 @@
   border-color: #6b7280;
 }
 
-.processing-overlay {
+.processing-indicator {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(42, 42, 53, 0.9);
+  top: 16px;
+  right: 16px;
+  background-color: #2a2a35;
+  border: 1px solid #4f46e5;
+  border-radius: 24px;
+  padding: 8px 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  font-size: 1.1rem;
+  gap: 10px;
+  font-size: 0.9rem;
   font-weight: 500;
   color: #818cf8;
   z-index: 10;
+  pointer-events: none;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .spinner {
@@ -252,4 +255,53 @@
 .btn-deny:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.autonomous-panels {
+  display: flex;
+  gap: 20px;
+  flex-grow: 1;
+  overflow: hidden;
+  min-height: 0; /* Important for flex child to be scrollable */
+}
+
+.autonomous-queue {
+  flex: 0 0 300px;
+  background-color: #242431;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.queue-entries {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.queue-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background-color: #2a2a35;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border-left: 3px solid #6366f1;
+}
+
+.queue-icon {
+  font-size: 1.2rem;
+}
+
+.queue-name {
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

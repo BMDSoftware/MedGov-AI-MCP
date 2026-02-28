@@ -162,6 +162,16 @@ async def set_directory(data: dict = Body(...)):
     return {"status": "ok", "dirs": uploaded_dirs}
 
 
+@app.post("/api/change-agent-type")
+async def change_agent_type(data: str = Body(...)):
+    if data == "autonomous":
+        autonomous = True
+    else:
+        autonomous = False
+    agent_decision.set_agent_type(autonomous=autonomous)
+    return {"status": "ok", "agent_type": "autonomous" if autonomous else "default"}
+
+
 @app.post("/api/process-query")
 async def process_query(query: str = Body(..., media_type="text/plain")):
     print(f"Processing ad-hoc query: {query}")

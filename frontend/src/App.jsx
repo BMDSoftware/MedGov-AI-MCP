@@ -52,6 +52,20 @@ function App() {
   useEffect(() => {
     pageRef.current = page;
     if (page === 'results') setUnreadTaskCount(0);
+
+    if (page === 'autonomous') {
+      fetch(getApiUrl('/api/change-agent-type'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify('autonomous')
+      }).catch(err => console.error('Failed to change agent type:', err));
+    } else if (page === 'analysis') {
+      fetch(getApiUrl('/api/change-agent-type'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify('analysis')
+      }).catch(err => console.error('Failed to change agent type:', err));
+    }
   }, [page]);
 
   useEffect(() => {
@@ -559,8 +573,8 @@ function App() {
                 try {
                   const response = await fetch(getApiUrl('/api/process-query'), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'text/plain' },
-                    body: currentQuery
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: currentQuery })
                   });
                   const data = await response.json();
 

@@ -7,11 +7,16 @@ const AutonomousAgent = ({ currentSessionId }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [activities, setActivities] = useState([]); 
   const [pendingTool, setPendingTool] = useState(null);
+  const [taskQueue, setTaskQueue] = useState([]);
   const activitiesEndRef = useRef(null);
 
   useEffect(() => {
     activitiesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activities]);
+
+  const enqueueTask = (task) => {
+    setTaskQueue(prev => [...prev, task]);
+  };
 
   const addActivity = (type, content, extra = null) => {
     setActivities(prev => [...prev, {
@@ -95,25 +100,22 @@ const AutonomousAgent = ({ currentSessionId }) => {
       }
 
       if (entries.length > 0) {
-        setIsProcessing(true);
         // If the first entry is a directory, handle as directory upload
         if (entries[0].isDirectory) {
           const allFiles = await getFilesFromEntry(entries[0]);
           const validFiles = allFiles.filter(f => isMedicalImage(f.name));
           if (validFiles.length > 0) {
-            handleDirectoryUpload(validFiles, entries[0].name);
+            enqueueTask({ id: Date.now() + Math.random(), type: 'directory', files: validFiles, name: entries[0].name });
           } else {
             addActivity('error', `Directory "${entries[0].name}" contains no valid medical images.`);
-            setIsProcessing(false);
           }
         } else {
           // It's a single file
           const file = await new Promise(res => entries[0].file(res));
           if (isMedicalImage(file.name)) {
-            handleFileUpload(file);
+            enqueueTask({ id: Date.now() + Math.random(), type: 'file', file, name: file.name });
           } else {
             addActivity('error', `File "${file.name}" is not a supported medical image.`);
-            setIsProcessing(false);
           }
         }
       }
@@ -124,7 +126,7 @@ const AutonomousAgent = ({ currentSessionId }) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       if (isMedicalImage(file.name)) {
-        handleFileUpload(file);
+        enqueueTask({ id: Date.now() + Math.random(), type: 'file', file, name: file.name });
       } else {
         addActivity('error', `File "${file.name}" is not a supported medical image.`);
       }
@@ -139,12 +141,40 @@ const AutonomousAgent = ({ currentSessionId }) => {
       const dirName = files[0].webkitRelativePath.split('/')[0];
       
       if (validFiles.length > 0) {
-        handleDirectoryUpload(validFiles, dirName);
+        enqueueTask({ id: Date.now() + Math.random(), type: 'directory', files: validFiles, name: dirName });
       } else {
         addActivity('error', `Directory "${dirName}" contains no supported medical images.`);
       }
     }
   };
+
+  // Process task queue
+  useEffect(() => {
+    const processQueue = async () => {
+      if (!isProcessing && !pendingTool && taskQueue.length > 0) {
+        const nextTask = taskQueue[0];
+        setTaskQueue(prev => prev.slice(1));
+        setIsProcessing(true); // Prevent picking another task immediately
+        
+        try {
+          // Reset session context exactly when picking from queue
+          await fetch(getApiUrl('/api/reset-session'), { method: 'POST' });
+
+          if (nextTask.type === 'file') {
+            handleFileUpload(nextTask.file);
+          } else if (nextTask.type === 'directory') {
+            handleDirectoryUpload(nextTask.files, nextTask.name);
+          }
+        } catch (error) {
+          addActivity('error', `Failed to initialize task: ${error.message}`);
+          setIsProcessing(false);
+        }
+      }
+    };
+    
+    processQueue();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isProcessing, pendingTool, taskQueue.length]);
 
   const handleFileUpload = async (file) => {
     addActivity('info', `Uploading file: ${file.name}...`);
@@ -335,40 +365,57 @@ const AutonomousAgent = ({ currentSessionId }) => {
         </div>
         
         {isProcessing && !pendingTool && (
-          <div className="processing-overlay">
+          <div className="processing-indicator">
             <div className="spinner"></div>
             <span>Agent is working...</span>
           </div>
         )}
       </div>
 
-      <div className="autonomous-log">
-        <h3 className="log-header">Agent Activity Log</h3>
-        <div className="log-entries">
-          {activities.length === 0 ? (
-            <div className="log-empty">Waiting for files or folders to begin...</div>
-          ) : (
-            activities.map(act => (
-              <div key={act.id} className={`log-entry ${act.type}`}>
-                <span className="log-time">[{act.timestamp}]</span>
-                <div className="log-content-wrapper">
-                  <span className="log-text">{act.content}</span>
-                  {act.type === 'action' && pendingTool?.tool_name === act.toolData?.tool_name && (
-                    <div className="tool-confirmation">
-                      <div className="tool-args">
-                        <pre>{JSON.stringify(act.toolData.arguments, null, 2)}</pre>
+      <div className="autonomous-panels">
+        <div className="autonomous-log">
+          <h3 className="log-header">Agent Activity Log</h3>
+          <div className="log-entries">
+            {activities.length === 0 ? (
+              <div className="log-empty">Waiting for files or folders to begin...</div>
+            ) : (
+              activities.map(act => (
+                <div key={act.id} className={`log-entry ${act.type}`}>
+                  <span className="log-time">[{act.timestamp}]</span>
+                  <div className="log-content-wrapper">
+                    <span className="log-text">{act.content}</span>
+                    {act.type === 'action' && pendingTool?.tool_name === act.toolData?.tool_name && (
+                      <div className="tool-confirmation">
+                        <div className="tool-args">
+                          <pre>{JSON.stringify(act.toolData.arguments, null, 2)}</pre>
+                        </div>
+                        <div className="tool-actions">
+                          <button onClick={handleConfirmTool} className="btn-confirm" disabled={isProcessing}>✓ Run Task</button>
+                          <button onClick={handleDenyTool} className="btn-deny" disabled={isProcessing}>✗ Skip</button>
+                        </div>
                       </div>
-                      <div className="tool-actions">
-                        <button onClick={handleConfirmTool} className="btn-confirm" disabled={isProcessing}>✓ Run Task</button>
-                        <button onClick={handleDenyTool} className="btn-deny" disabled={isProcessing}>✗ Skip</button>
-                      </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
-          <div ref={activitiesEndRef} />
+              ))
+            )}
+            <div ref={activitiesEndRef} />
+          </div>
+        </div>
+
+        <div className="autonomous-queue">
+          <h3 className="log-header">Task Queue {taskQueue.length > 0 && `(${taskQueue.length})`}</h3>
+          <div className="queue-entries">
+            {taskQueue.length === 0 ? (
+              <div className="log-empty">Queue is empty</div>
+            ) : (
+              taskQueue.map(task => (
+                <div key={task.id} className="queue-entry">
+                  <span className="queue-name">{task.name}</span>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </div>

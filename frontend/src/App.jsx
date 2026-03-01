@@ -573,8 +573,8 @@ function App() {
                 try {
                   const response = await fetch(getApiUrl('/api/process-query'), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: currentQuery })
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: currentQuery
                   });
                   const data = await response.json();
 

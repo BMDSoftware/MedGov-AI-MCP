@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from ast import Set
+from enum import auto
 import os
 import json
 from re import S
@@ -46,6 +47,7 @@ class AgenticAgent:
         self.llm_client = None
         self.session_context = SessionContext()  # Persists tool results across queries
         self.mode = 'debug'  # 'debug' or 'normal'
+        self.is_agent_autonomous = False  # Whether the agent is currently executing autonomously
         self.require_confirmation = True  # Require user confirmation before tool execution
         self.pending_tool_call = None  # Stores tool call waiting for confirmation
         self.pending_task_context = None  # Stores context for resuming after confirmation
@@ -333,7 +335,6 @@ TOOL USAGE RULES:
             }
 
         return {}
-
     async def refresh_available_tools(self):
         previous_tools = set(self.available_tools.keys())
         previous_enabled = set(self.agent_tools)
@@ -652,6 +653,11 @@ TOOL USAGE RULES:
                 self.llm_client.set_mode_extension("")
         print(f"[agent] Mode set to '{mode}' (require_confirmation={self.require_confirmation})")
 
+    def set_agent_type(self, autonomous: bool):
+        """Set whether the agent is currently executing autonomously or not (for logging and response formatting)"""
+        self.is_agent_autonomous = autonomous
+        print(f"[agent] Autonomous execution set to {autonomous}")
+
     # NOTE: Guided workflow methods commented out - using true agentic approach now
     # Keeping for future reference if deterministic mode is needed
     #
@@ -736,6 +742,8 @@ TOOL USAGE RULES:
         Returns:
             Final result if successful, None if goal not achieved
         """
+        print(f"\n{'='*80}")    
+        print("Autonomous agent: ", self.is_agent_autonomous)
         print(f"Starting autonomous task: {goal}")
         self.logger.info("=" * 80)
         self.logger.info(f"TASK START: {goal}")
@@ -1031,7 +1039,7 @@ Your decision:"""
 
                     # run_inference always runs in the background so the user
                     # can keep chatting and the result lands in the Results tab.
-                    if tool_name == "monai.run_inference":
+                    if tool_name == "monai.run_inference" and not self.is_agent_autonomous:
                         image_path = arguments.get("image_path", "")
                         model_name = arguments.get("model_name", "")
                         # Pull body_part/modality from session context (set by analyze_image)

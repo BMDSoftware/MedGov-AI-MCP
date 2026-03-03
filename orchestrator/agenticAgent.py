@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-from ast import Set
-from enum import auto
 import os
 import json
-from re import S
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 from datetime import datetime
@@ -160,20 +157,6 @@ class AgenticAgent:
 
     def set_patient_focus(self, patient_id: str, patient_name: str):
         """Set the agent to focus on a specific patient for healthcare conversations"""
-
-        # # Old skills-based patient prompt:
-        # patient_prompt = f"""
-        # # ROLE
-        # You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
-        # # PATIENT CONTEXT
-        # - **Name:** {patient_name}
-        # - **Patient ID:** {patient_id}
-        # # AVAILABLE SKILLS (DIRECTORY)
-        # {self.load_all_skills()}
-        # # SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
-        # ... (progressive disclosure workflow removed - agent now uses MCP tools directly)
-        # """
-
         patient_prompt = f"""You are a healthcare AI assistant. You help medical professionals by analyzing medical images, parsing DICOM files, generating radiology reports, and retrieving patient data.
 
 You are currently focused on a specific patient:
@@ -186,6 +169,7 @@ All tool calls and analysis should be in the context of this patient. If any too
 2. **READ SKILL:** When a task requires a specific skill, call `skills.read_skill_file(skill_name)` to get the detailed instructions and rules (SKILL.md) for that domain.
 3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
 4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
+
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
 
 BACKGROUND TASK RULES (read carefully):
@@ -658,74 +642,6 @@ TOOL USAGE RULES:
         self.is_agent_autonomous = autonomous
         print(f"[agent] Autonomous execution set to {autonomous}")
 
-    # NOTE: Guided workflow methods commented out - using true agentic approach now
-    # Keeping for future reference if deterministic mode is needed
-    #
-    # def _get_workflow_state(self, execution_history: List[Dict], metadata: Dict = None) -> Dict:
-    #     """Analyze execution history to determine workflow state"""
-    #     state = {
-    #         "analyze_done": False,
-    #         "list_done": False,
-    #         "download_done": False,
-    #         "inference_done": False,
-    #         "image_path": None,
-    #         "model_name": None,
-    #         "model_downloaded": False,
-    #         "inference_result": None,
-    #         "detected_modality": None,
-    #         "body_part": metadata.get("body_part") if metadata else None,
-    #     }
-    #     for event in execution_history:
-    #         if not event.get("success"):
-    #             continue
-    #         tool = event.get("tool", "")
-    #         result = event.get("result", {})
-    #         if tool == "monai.analyze_image":
-    #             state["analyze_done"] = True
-    #             if isinstance(result, dict):
-    #                 state["image_path"] = result.get("path") or result.get("file_path")
-    #                 analysis = result.get("analysis", {})
-    #                 modalities = analysis.get("detected_modalities", [])
-    #                 if modalities:
-    #                     state["detected_modality"] = modalities[0]
-    #         elif tool == "monai.list_models":
-    #             state["list_done"] = True
-    #             if isinstance(result, dict):
-    #                 models = result.get("models", [])
-    #                 for model in models:
-    #                     if model.get("downloaded"):
-    #                         state["model_downloaded"] = True
-    #                         state["model_name"] = model.get("name")
-    #                         break
-    #                 if not state["model_name"] and models:
-    #                     state["model_name"] = models[0].get("name")
-    #         elif tool == "monai.download_model":
-    #             state["download_done"] = True
-    #             state["model_downloaded"] = True
-    #             if isinstance(result, dict) and result.get("model_name"):
-    #                 state["model_name"] = result.get("model_name")
-    #         elif tool == "monai.run_inference":
-    #             state["inference_done"] = True
-    #             state["inference_result"] = result
-    #     return state
-    #
-    # def _get_next_workflow_step(self, state: Dict, image_path: str) -> Optional[Dict]:
-    #     """Determine the next tool to call based on workflow state"""
-    #     if not state["analyze_done"]:
-    #         return {"tool_name": "monai.analyze_image", "arguments": {"path": image_path}}
-    #     if not state["list_done"]:
-    #         args = {}
-    #         if state.get("detected_modality"):
-    #             args["modality"] = state["detected_modality"]
-    #         if state.get("body_part"):
-    #             args["body_part"] = state["body_part"]
-    #         return {"tool_name": "monai.list_models", "arguments": args}
-    #     if state["model_name"] and not state["model_downloaded"]:
-    #         return {"tool_name": "monai.download_model", "arguments": {"model_name": state["model_name"]}}
-    #     if not state["inference_done"] and state["model_name"] and state["model_downloaded"]:
-    #         return {"tool_name": "monai.run_inference", "arguments": {"image_path": state["image_path"] or image_path, "model_name": state["model_name"]}}
-    #     return None
-
     async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
@@ -886,7 +802,7 @@ Does this accomplish the goal?
 Your decision:"""
 
                     print(f"Prompt: {prompt}")
-                    
+
                     self.logger.info(f"\n{'='*60}")
                     self.logger.info(f"ITERATION {iterations}/{max_iterations}")
                     self.logger.info(f"{'='*60}")
@@ -898,8 +814,6 @@ Your decision:"""
                     content_parts = [prompt]
                     
                     response = self.llm_client.generate_content(content_parts, images_for_llm)
-                    print(f"Response: {response}")
-                    
                     self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
                 
                 # Check if agent declares success (text response, no tool call)
@@ -1150,7 +1064,6 @@ Your decision:"""
                     if isinstance(result, dict):
                         is_error = result.get("is_error") or result.get("error") or "error" in str(result.get("text", "")).lower()
 
-                    # Record execution with result details
                     print(f"TOOL EXECUTION RESULT: {result}")
                     if result and not is_error:
                         # Create human-readable summary based on tool type
@@ -1292,7 +1205,6 @@ Your decision:"""
                         "success": False
                     }
 
-                print(f"Error in agentic workflow: {type(e).__name__}: {e}")
                 execution_history.append({
                     "tool": "workflow",
                     "success": False,
@@ -1339,10 +1251,6 @@ Your decision:"""
 
         # RadLex tools
         elif tool_name.startswith("radlex."):
-            if tool_name == "radlex.generate_report":
-                with open(result.get("report_title", "unknown_template") + "_report.md", "w") as f:
-                    f.write(result.get("html_report", ""))
-                    
             if "template" in tool_name.lower():
                 return f"Template operation completed"
             elif "report" in tool_name.lower():

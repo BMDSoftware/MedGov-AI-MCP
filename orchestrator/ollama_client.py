@@ -56,46 +56,9 @@ class OllamaClient:
         return ollama_tools
 
     def _get_system_prompt(self) -> str:
-        """Get system prompt for the AI agent"""        # Return custom prompt if set
+        """Get system prompt for the AI agent"""
         if self.custom_system_prompt:
             return self.custom_system_prompt
-            
-        # # Old hardcoded tools prompt:
-        # tool_descriptions = "\n".join([
-        #     f"- {name}: {info['description']}"
-        #     for name, info in self.available_tools.items()
-        # ])
-        # return f"""You are a healthcare AI assistant with access to tools.
-        #
-        # YOUR AVAILABLE TOOLS:
-        # {tool_descriptions}
-        #
-        # CRITICAL RULES:
-        #
-        # 1. NEVER INVENT FILE PATHS. If a tool needs a file path and none is provided in the context:
-        #    - Check if "IMAGES AVAILABLE:" is in the context - if yes, use that path
-        #    - If no images in context, respond: "I need an image file to analyze. Please upload one or provide the file path."
-        #
-        # 2. FOR DICOM FILES (.dcm): ALWAYS call utils.parse_dicom FIRST to extract metadata (modality, body part).
-        #    Use this info to select the correct MONAI model. Do not skip this step.
-        #
-        # 3. WHEN TO RESPOND WITH TEXT (no tool call):
-        #    - Greetings -> respond with text
-        #    - "What tools do you have?" -> list the tools above
-        #    - Missing required parameters -> ask for them
-        #
-        # 4. WHEN TO CALL A TOOL:
-        #    - User requests an action AND all required parameters are available
-        #    - Call the tool with the ACTUAL path from context
-        #    - Summarize result, then say "GOAL_ACHIEVED"
-        #
-        # 5. DO NOT repeat failed tools. If a tool fails, explain the error and ask how to proceed.
-        #
-        # 6. RESPOND DIRECTLY. Do not explain your reasoning or thought process. Just give the answer or take the action.
-        #
-        # 7. MONAI models require 3D volumes. If an image is 2D (single slice), inform the user that inference requires a full 3D scan.
-        #
-        # TOOL NAMES: Always use full prefix (monai.list_models, fhir.search, radlex.generate_report, utils.parse_dicom)"""
 
         return """You are a healthcare AI assistant. You help medical professionals by analyzing medical images, parsing DICOM files, generating radiology reports, and retrieving patient data.
 

@@ -1,0 +1,42 @@
+{
+  "mcpServers": {
+    "monai": {
+      "command": "${APP_ROOT}/mcp-monai/venv/bin/python",
+      "args": ["${APP_ROOT}/mcp-monai/server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    "radlex": {
+      "command": "${APP_ROOT}/mcp-radlex/venv/bin/python",
+      "args": ["${APP_ROOT}/mcp-radlex/server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "RAD_TEMPLATES_DIR": "${APP_ROOT}/mcp-radlex/templates"
+      }
+    },
+    "utils": {
+      "command": "${APP_ROOT}/mcp-utils/venv/bin/python",
+      "args": ["${APP_ROOT}/mcp-utils/server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    "fhir": {
+      "transport": "http",
+      "url": "http://localhost:8000/mcp"
+    },
+    "skills": {
+      "command": "${APP_ROOT}/mcp-skills/venv/bin/python",
+      "args": ["${APP_ROOT}/mcp-skills/server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "SKILLS_DIR": "${APP_ROOT}/orchestrator/skills"
+      }
+    }
+  }
+}

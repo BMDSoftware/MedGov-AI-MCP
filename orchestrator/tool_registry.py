@@ -20,10 +20,22 @@ class ToolRegistry:
     def _load_mcp_config(self) -> Dict:
         try:
             with open(self.config_path, 'r') as f:
-                return json.load(f)
+                config = json.load(f)
+            return self._expand_vars(config)
         except Exception as e:
             print(f"Could not load MCP config: {e}")
             return {}
+
+    @staticmethod
+    def _expand_vars(obj):
+        """Recursively expand ${VAR} / $VAR env vars in all string values."""
+        if isinstance(obj, str):
+            return os.path.expandvars(obj)
+        if isinstance(obj, dict):
+            return {k: ToolRegistry._expand_vars(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [ToolRegistry._expand_vars(v) for v in obj]
+        return obj
 
 
     async def discover_tools(self) -> Dict[str, Dict]:
@@ -102,14 +114,6 @@ class ToolRegistry:
                     if name in self.sessions:
                         del self.sessions[name]
 
-        '''
-        #run radlex.get_template_schema test
-        if "radlex.get_template_schema" in self.available_tools:
-            print("Testing radlex.get_template_schema...")
-            result = await self.execute_tool("radlex.get_template_schema", {"template_id": "CT Angiography or CT Enterography - GI Bleed"}, logs=True)
-            print(f"Result: {result}")
-        '''
-
         return self.available_tools
 
 
@@ -143,7 +147,7 @@ class ToolRegistry:
                 # If it's not JSON, return it as a dictionary with a 'text' key
                 final_result = {"text": combined_text}
 
-            # 4. Attach error status if the MCP server reported a failure
+            # Attach error status if the MCP server reported a failure
             if mcp_result.isError:
                 final_result["is_error"] = True
 

@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import uuid
-import python_multipart
 from typing import Optional, List
 from pathlib import Path
 from dotenv import load_dotenv
@@ -73,9 +72,26 @@ async def lifespan(app: FastAPI):
         except BaseException:
             pass
 
-app = FastAPI(title="Agentic Health Assistant API", lifespan=lifespan)
+_OPENAPI_TAGS = [
+    {"name": "agent", "description": "AI agent query processing, tool management, and patient context"},
+    {"name": "files", "description": "Medical image file and directory upload/management"},
+    {"name": "sessions", "description": "Session lifecycle, persistence, and context restore"},
+    {"name": "monai", "description": "Direct MONAI tool calls — bypasses the AI agent (used by the Test tab)"},
+    {"name": "events", "description": "Server-Sent Events stream and background task status"},
+    {"name": "system", "description": "Health check, application mode, and settings"},
+]
 
-
+app = FastAPI(
+    title="Agentic Health Assistant API",
+    description=(
+        "REST API for the AgenticHealthMCP orchestrator. "
+        "Provides AI agent querying, medical image management, "
+        "MONAI inference pipeline, and session management."
+    ),
+    version="1.0.0",
+    lifespan=lifespan,
+    openapi_tags=_OPENAPI_TAGS,
+)
 
 
 app.add_middleware(
@@ -91,23 +107,9 @@ temp_file_paths = {}  # Temp file paths mapped by filename
 uploaded_dirs: List[str] = []  # Directory paths registered for the current session
 
 
-async def send_step(step_type: str, message: str, **kwargs) -> str:
-    data = {
-        "type": "step",
-        "stepType": step_type,
-        "message": message,
-        **kwargs
-    }
-    return f"data: {json.dumps(data)}\n\n"
-
-
-
-
-
-# Store metadata from frontend
 image_metadata = {"modality": None, "bodyPart": None}
 
-@app.post("/api/set-metadata")
+@app.post("/api/set-metadata", tags=["files"], summary="Set image modality and body part metadata")
 async def set_metadata(data: dict = Body(...)):
     global image_metadata
     image_metadata["modality"] = data.get("modality")
@@ -115,12 +117,11 @@ async def set_metadata(data: dict = Body(...)):
     return {"status": "ok"}
 
 
-    
-@app.get("/api/mode")
+@app.get("/api/mode", tags=["system"], summary="Get current UI mode (debug or normal)")
 async def get_mode():
     return {"mode": _app_settings.get("mode", "debug")}
 
-@app.post("/api/mode")
+@app.post("/api/mode", tags=["system"], summary="Set UI mode — 'debug' shows tool calls, 'normal' uses clinical language")
 async def set_mode(data: dict = Body(...)):
     mode = data.get("mode", "debug")
     if mode not in ("debug", "normal"):
@@ -131,7 +132,7 @@ async def set_mode(data: dict = Body(...)):
     return {"mode": mode}
 
 
-@app.post("/api/set-directory")
+@app.post("/api/set-directory", tags=["files"], summary="Add, remove, or clear registered DICOM series directories")
 async def set_directory(data: dict = Body(...)):
     """
     Manage the list of registered directories for the current session.
@@ -162,7 +163,7 @@ async def set_directory(data: dict = Body(...)):
     return {"status": "ok", "dirs": uploaded_dirs}
 
 
-@app.post("/api/change-agent-type")
+@app.post("/api/change-agent-type", tags=["agent"], summary="Switch between default and autonomous agent modes")
 async def change_agent_type(data: str = Body(...)):
     if data == "autonomous":
         autonomous = True
@@ -172,7 +173,7 @@ async def change_agent_type(data: str = Body(...)):
     return {"status": "ok", "agent_type": "autonomous" if autonomous else "default"}
 
 
-@app.post("/api/process-query")
+@app.post("/api/process-query", tags=["agent"], summary="Send a natural language query to the AI agent")
 async def process_query(query: str = Body(..., media_type="text/plain")):
     print(f"Processing ad-hoc query: {query}")
     try:
@@ -228,7 +229,7 @@ async def process_query(query: str = Body(..., media_type="text/plain")):
 
 
 
-@app.post("/api/upload")
+@app.post("/api/upload", tags=["files"], summary="Upload a single medical image file (.dcm, .nii.gz, etc.)")
 async def upload_file(file: UploadFile = File(...)):
     global uploaded_files, temp_file_paths
     print(f"Received file: {file.filename}")
@@ -255,9 +256,9 @@ async def upload_file(file: UploadFile = File(...)):
         return {"status": "success", "filename": file.filename, "size": len(contents), "file_id": file_id, "stored_path": stored_path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
 
-@app.delete("/api/upload")
+
+@app.delete("/api/upload", tags=["files"], summary="Remove an uploaded file from the session")
 async def remove_file(filename: str):
     global uploaded_files, temp_file_paths
     print(f"Removing file: {filename}")
@@ -275,7 +276,7 @@ async def remove_file(filename: str):
     raise HTTPException(status_code=404, detail="File not found")
 
 
-@app.post("/api/upload-directory")
+@app.post("/api/upload-directory", tags=["files"], summary="Upload a directory of DICOM slices (multipart, up to 10k files)")
 async def upload_directory(request: Request):
     """Upload a directory of medical image files. Supports up to 10k files."""
     from starlette.formparsers import MultiPartParser
@@ -328,17 +329,15 @@ async def upload_directory(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/available-tools")
+@app.get("/api/available-tools", tags=["agent"], summary="List all discovered MCP tools across all servers")
 async def get_available_tools():
-    # Returns all available tools, grouped by tool name
     return agent_decision.available_tools
 
-@app.get("/api/enabled-tools")
+@app.get("/api/enabled-tools", tags=["agent"], summary="List tools currently enabled for the agent")
 async def get_enabled_tools():
-    # Returns a list of enabled tool names
     return list(agent_decision.agent_tools)
 
-@app.post("/api/enable-tool")
+@app.post("/api/enable-tool", tags=["agent"], summary="Enable a specific MCP tool for the agent")
 async def enable_tool(data: dict = Body(...)):
     tool_name = data.get("tool_name")
     if not tool_name:
@@ -346,7 +345,7 @@ async def enable_tool(data: dict = Body(...)):
     agent_decision.enable_tool(tool_name)
     return {"status": "enabled", "tool": tool_name}
 
-@app.post("/api/disable-tool")
+@app.post("/api/disable-tool", tags=["agent"], summary="Disable a specific MCP tool from the agent")
 async def disable_tool(data: dict = Body(...)):
     tool_name = data.get("tool_name")
     if not tool_name:
@@ -355,13 +354,13 @@ async def disable_tool(data: dict = Body(...)):
     return {"status": "disabled", "tool": tool_name}
 
 
-@app.post("/api/refresh-config")
+@app.post("/api/refresh-config", tags=["agent"], summary="Reload mcp-config.json and rediscover available tools")
 async def refresh_config():
     await agent_decision.refresh_available_tools()
     return {"status": "refreshed", "available_tools": list(agent_decision.available_tools.keys())}
 
 
-@app.post("/api/start-healthcare-conversation")
+@app.post("/api/start-healthcare-conversation", tags=["agent"], summary="Set patient context for the AI agent")
 async def start_healthcare_conversation(request: Request):
     """Start a healthcare conversation focused on a specific patient"""
     try:
@@ -385,7 +384,7 @@ async def start_healthcare_conversation(request: Request):
         return {"error": str(e)}
 
 
-@app.get("/api/pending-tool")
+@app.get("/api/pending-tool", tags=["agent"], summary="Get the tool call awaiting user confirmation (debug mode)")
 async def get_pending_tool():
     """Get the current pending tool call awaiting confirmation"""
     pending = agent_decision.get_pending_tool()
@@ -398,7 +397,7 @@ async def get_pending_tool():
     return {"pending": False}
 
 
-@app.post("/api/confirm-tool")
+@app.post("/api/confirm-tool", tags=["agent"], summary="Confirm and execute the pending tool call")
 async def confirm_tool():
     """Confirm and execute the pending tool"""
     try:
@@ -408,7 +407,7 @@ async def confirm_tool():
         raise HTTPException(status_code=503, detail=f"Tool execution failed: {e}")
 
 
-@app.post("/api/deny-tool")
+@app.post("/api/deny-tool", tags=["agent"], summary="Cancel the pending tool call")
 async def deny_tool():
     """Deny/cancel the pending tool execution"""
     result = agent_decision.deny_tool_execution()
@@ -416,7 +415,7 @@ async def deny_tool():
 
 
 
-@app.post("/api/clear-files")
+@app.post("/api/clear-files", tags=["files"], summary="Clear the in-memory uploaded file buffer")
 async def clear_files():
     """Clear in-memory file buffer"""
     global uploaded_files, temp_file_paths
@@ -426,7 +425,7 @@ async def clear_files():
     return {"status": "cleared"}
 
 
-@app.post("/api/reset-session")
+@app.post("/api/reset-session", tags=["sessions"], summary="Start a fresh session — clears context, LLM history, and uploaded files")
 async def reset_session():
     """Start a fresh session - clears context and LLM history, creates new session"""
     global current_session_id, uploaded_files, temp_file_paths
@@ -443,7 +442,7 @@ async def reset_session():
 
 # --- Session Management ---
 
-@app.post("/api/save-session")
+@app.post("/api/save-session", tags=["sessions"], summary="Persist the current session with a display name")
 async def save_session(data: dict = Body(...)):
     """Save/persist the current session with a name"""
     name = data.get("name")
@@ -455,7 +454,7 @@ async def save_session(data: dict = Body(...)):
     return {"status": "saved", "session_id": current_session_id, "name": name}
 
 
-@app.get("/api/sessions")
+@app.get("/api/sessions", tags=["sessions"], summary="List all sessions (optionally filter to persisted only)")
 async def list_sessions(persisted_only: bool = False):
     """List all sessions"""
     sessions = db.list_sessions(persisted_only=persisted_only)
@@ -466,7 +465,7 @@ async def list_sessions(persisted_only: bool = False):
     return {"sessions": sessions, "current_session_id": current_session_id}
 
 
-@app.delete("/api/delete-session")
+@app.delete("/api/delete-session", tags=["sessions"], summary="Delete a saved session and its associated files")
 async def delete_session(data: dict = Body(...)):
     """Delete a session and all its files"""
     global current_session_id
@@ -482,7 +481,7 @@ async def delete_session(data: dict = Body(...)):
     return {"status": "deleted", "session_id": session_id}
 
 
-@app.delete("/api/delete-all-sessions")
+@app.delete("/api/delete-all-sessions", tags=["sessions"], summary="Delete all sessions except the currently active one")
 async def delete_all_sessions():
     """Delete all saved sessions except the currently active one."""
     sessions = db.list_sessions()
@@ -494,7 +493,7 @@ async def delete_all_sessions():
     return {"status": "deleted", "count": len(deleted)}
 
 
-@app.post("/api/load-session")
+@app.post("/api/load-session", tags=["sessions"], summary="Load a saved session — restores context and file references")
 async def load_session(data: dict = Body(...)):
     """Load a saved session - restores context and file references"""
     global current_session_id, uploaded_files, temp_file_paths
@@ -537,7 +536,7 @@ async def load_session(data: dict = Body(...)):
     }
 
 
-@app.get("/api/session-files")
+@app.get("/api/session-files", tags=["sessions"], summary="Get uploaded files for a session (defaults to current session)")
 async def get_session_files(session_id: Optional[str] = None):
     """Get files for a session (defaults to current)"""
     sid = session_id or current_session_id
@@ -546,14 +545,12 @@ async def get_session_files(session_id: Optional[str] = None):
 
 
 
-
-
 # --- Test Endpoints: Direct MONAI Tool Calls ---
 # These bypass the LLM agent entirely and call MCP tools directly via tool_registry.
 # Used by the frontend "Test" tab for manually stepping through the inference pipeline
 # (select file -> analyze -> pick model -> download -> run inference).
 
-@app.get("/api/monai/sample-data")
+@app.get("/api/monai/sample-data", tags=["monai"], summary="List available sample/test medical image files and DICOM series directories")
 async def list_sample_data():
     """List available sample data files for testing"""
     base = Path(__file__).parent.parent
@@ -661,7 +658,7 @@ async def list_sample_data():
     return {"files": files}
 
 
-@app.post("/api/monai/validate-series")
+@app.post("/api/monai/validate-series", tags=["monai"], summary="Validate a DICOM series directory — returns series metadata and warnings")
 async def validate_series(data: dict = Body(...)):
     """Validate a DICOM series directory using utils.parse_dicom_directory"""
     dir_path = data.get("path")
@@ -728,7 +725,7 @@ async def validate_series(data: dict = Body(...)):
     }
 
 
-@app.post("/api/monai/analyze")
+@app.post("/api/monai/analyze", tags=["monai"], summary="Analyze a medical image — returns modality, shape, body part, and compatible models")
 async def monai_analyze(data: dict = Body(...)):
     """Analyze a medical image - direct MONAI tool call"""
     path = data.get("path")
@@ -740,7 +737,7 @@ async def monai_analyze(data: dict = Body(...)):
     return result
 
 
-@app.post("/api/monai/list-models")
+@app.post("/api/monai/list-models", tags=["monai"], summary="List available MONAI model bundles (filterable by category, modality, body part)")
 async def monai_list_models(data: dict = Body(...)):
     """List available MONAI models"""
     args = {}
@@ -753,7 +750,7 @@ async def monai_list_models(data: dict = Body(...)):
     return result
 
 
-@app.post("/api/monai/download-model")
+@app.post("/api/monai/download-model", tags=["monai"], summary="Download a MONAI Model Zoo bundle by name")
 async def monai_download_model(data: dict = Body(...)):
     """Download a model bundle from MONAI Model Zoo"""
     model_name = data.get("model_name")
@@ -765,7 +762,7 @@ async def monai_download_model(data: dict = Body(...)):
     return result
 
 
-@app.post("/api/monai/run-inference")
+@app.post("/api/monai/run-inference", tags=["monai"], summary="Run MONAI inference on a medical image with a specified model")
 async def monai_run_inference(data: dict = Body(...)):
     """Run inference on a medical image"""
     image_path = data.get("image_path")
@@ -780,7 +777,7 @@ async def monai_run_inference(data: dict = Body(...)):
     return result
 
 
-@app.get("/api/patients")
+@app.get("/api/patients", tags=["system"], summary="Get patient list from FHIR server (falls back to mock data if unavailable)")
 async def get_patients():
     """Get list of patients from FHIR server"""
     try:
@@ -821,7 +818,6 @@ async def get_patients():
             if content and len(content) > 0:
                 text = content[0].get("text", "")
                 if text:
-                    import json
                     bundle_data = json.loads(text)
                     
                     # Extract patients from FHIR Bundle
@@ -913,7 +909,7 @@ def get_mock_patients():
 
 # --- Background Tasks & SSE ---
 
-@app.get("/api/events")
+@app.get("/api/events", tags=["events"], summary="SSE stream — emits task_queued, task_running, task_done, task_failed events")
 async def sse_events(request: Request):
     """
     Server-Sent Events endpoint.  Polls the DB every second and emits an event
@@ -1031,14 +1027,14 @@ async def sse_events(request: Request):
     )
 
 
-@app.get("/api/tasks")
+@app.get("/api/tasks", tags=["events"], summary="List background inference/report tasks, optionally filtered by session")
 async def list_tasks(session_id: Optional[str] = None):
     """Return all background tasks, optionally filtered by session_id."""
     tasks = db.list_tasks(session_id=session_id)
     return {"tasks": tasks}
 
 
-@app.post("/api/generate-report")
+@app.post("/api/generate-report", tags=["events"], summary="Queue a radiology report generation task from selected inference results")
 async def generate_report(data: dict = Body(...)):
     """
     Queue a report-generation background task from selected inference results.
@@ -1061,10 +1057,9 @@ async def generate_report(data: dict = Body(...)):
     return {"status": "queued", "task_id": task_id, "description": description}
 
 
-@app.get("/api/health")
+@app.get("/api/health", tags=["system"], summary="Health check")
 async def health_check():
     return {"status": "healthy"}
-
 
 
 if __name__ == "__main__":

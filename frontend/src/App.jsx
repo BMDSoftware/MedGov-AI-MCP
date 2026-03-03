@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from 'react';
 import { API_CONFIG, getApiUrl } from './config';
 import './App.css';
 import Settings from './components/Settings';
-// import PatientSelection from './components/PatientSelection';
 import Sessions from './components/Sessions';
 import InferenceTest from './components/InferenceTest';
 import Results from './components/Results';
@@ -109,46 +108,6 @@ function App() {
   // --- Logic functions ---
   const addMessage = (message) => setMessages(prev => [...prev, message]);
 
-  const handlePatientSelection = async (patient) => {
-    setSelectedPatient(patient);
-    setSessionContext(prev => ({
-      ...prev,
-      selectedPatient: patient,
-      patientContext: patient.resource
-    }));
-    
-    // Call backend to set patient focus in AgenticAgent
-    try {
-      const response = await fetch(getApiUrl('/api/start-healthcare-conversation'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          patient_id: patient.id,
-          patient_name: patient.name
-        })
-      });
-      
-      const result = await response.json();
-      console.log('Healthcare conversation started:', result);
-      
-      if (result.error) {
-        console.error('Error starting healthcare conversation:', result.error);
-      }
-    } catch (error) {
-      console.error('Failed to start healthcare conversation:', error);
-    }
-    
-    // Initialize conversation with patient context
-    const welcomeMessage = {
-      type: 'bot',
-      content: `Hello! I'm ready to help with ${patient.name}'s case. Upload a medical file or ask me anything about their healthcare.`,
-      actions: []
-    };
-    setMessages([welcomeMessage]);
-    setPage('analysis');
-  };
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -189,8 +148,6 @@ function App() {
   const handleChatDirectoryUpload = async (e) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    // Reset input so the same dir can be re-selected
-    // e.target.value = '';
     setUploadingDir(true);
     try {
       const formData = new FormData();
@@ -206,7 +163,7 @@ function App() {
           body: JSON.stringify({ dir_path: data.dir_path }),
         });
         const shortName = data.dirname.length > 24
-          ? `${data.dirname.slice(0, 12)}…${data.dirname.slice(-8)}`
+          ? `${data.dirname.slice(0, 12)}\u2026${data.dirname.slice(-8)}`
           : data.dirname;
         setUploadedDirs(prev => [...prev, { name: `${shortName} (${data.file_count})`, path: data.dir_path }]);
       } else {
@@ -374,7 +331,6 @@ function App() {
         <nav className="nav">
           <a href="#" className={`nav-item${page === 'home' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('home'); }}>Home</a>
           <a href="#" className={`nav-item${page === 'autonomous' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('autonomous'); }}>Autonomous</a>
-          {/* <a href="#" className={`nav-item${page === 'patient-selection' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('patient-selection'); }}>Patients</a> */}
           <a href="#" className={`nav-item${page === 'analysis' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('analysis'); }}>Analysis</a>
           <a href="#" className={`nav-item${page === 'history' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('history'); }}>History</a>
           <a href="#" className={`nav-item${page === 'test' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('test'); }}>Test</a>
@@ -451,9 +407,7 @@ function App() {
           <AutonomousAgent currentSessionId={currentSessionId} />
         ) : page === 'settings' ? (
           <Settings onModeChange={setAppMode} />
-        ) : /* page === 'patient-selection' ? (
-          <PatientSelection onPatientSelect={handlePatientSelection} />
-        ) : */ page === 'test' ? (
+        ) : page === 'test' ? (
           <InferenceTest />
         ) : page === 'results' ? (
           <Results refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />
@@ -560,13 +514,11 @@ function App() {
             </div>
 
             <div className="input-area">
-              {/* Replace drag-and-drop with text box and file upload */}
-              {/* Chatbot-style input area */}
               <form className="chatbot-input-row" onSubmit={async e => {
                 e.preventDefault();
                 if (!userQuery.trim()) return;
                 const currentQuery = userQuery;
-                setUserQuery(""); // Limpa imediatamente
+                setUserQuery("");
                 addMessage({ type: 'user', content: currentQuery });
                 addMessage({ type: 'bot', content: '', isLoading: true });
                 setIsProcessing(true);
@@ -578,10 +530,8 @@ function App() {
                   });
                   const data = await response.json();
 
-                  // Remove loading message
                   setMessages(prev => prev.filter(m => !m.isLoading));
 
-                  // Check if tool confirmation is required
                   if (data.result?.type === 'confirmation_required') {
                     setPendingTool({
                       tool_name: data.result.tool_name,

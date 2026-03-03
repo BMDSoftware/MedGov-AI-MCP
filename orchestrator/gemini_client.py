@@ -68,8 +68,6 @@ class GeminiClient:
             tools=[types.Tool(function_declarations=self.gemini_tools_list)],
             system_instruction=self._get_system_prompt(),
             temperature=0.0
-            # Note: If you pass actual python functions instead of just declarations, 
-            # you can add `automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=False)` here.
         )
         print(f"Tools updated. Current active tools: {list(self.available_tools.keys())}")
     
@@ -138,38 +136,6 @@ class GeminiClient:
 
     def _base_system_prompt(self) -> str:
         """Default system prompt when no custom prompt is set"""
-        # # Old skills-based prompt:
-        # tool_descriptions = "\n".join([
-        #     f"- {name}: {info['description']}"
-        #     for name, info in self.available_tools.items()
-        # ])
-        # # Skills-based prompt (from friend's branch - commented out, using conversational prompt instead):
-        #return f"""
-        #  # ROLE
-        #  You are a specialized Healthcare AI Assistant. Your operations are strictly bound to the medical context of the current patient.
-        #  
-        #  # AVAILABLE SKILLS (DIRECTORY)
-        #  {self.skills}
-        #  Only use the skills listed in the directory above. Each skill has specific instructions and rules that you must follow precisely. Do not attempt to use any skill that is not in the directory.
-        #  # SKILL USAGE PROTOCOL (PROGRESSIVE DISCLOSURE)
-        #  You do not have all instructions loaded into your memory at once. You must follow this tiered workflow:
-        #  1. **DISCOVERY (Current State):** You can see the "Available Skills" list above. If a user asks "What can you do?", explain these skills based on their descriptions. Do NOT call a tool just to list them.
-        #  2. **READ SKILL:** When a task requires a specific skill, call `skills.read_skill_file(skill_name)` to get the detailed instructions and rules (SKILL.md) for that domain.
-        #  3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
-        #  4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
-        #  # OPERATIONAL RULES
-        #  - **One at a Time:** Work with only one skill at a time.
-        #  - **No Hallucinations:** If you do not have a skill that matches the user's request, state: "I do not have the specific clinical skill required for this task." Do not attempt to guess or simulate skill outputs.
-        #  - **Independence:** Skills are external resources. Treat their outputs as clinical observations that require your professional interpretation.
-        #  # INTERACTION GUIDELINES
-        #  - **If the user asks for information/capabilities:** Read from the "Available Skills" list above and describe them.
-        #  - **If the user requests a clinical action (e.g., "Analyze the labs"):**
-        #      1. Identify the correct skill from the directory.
-        #      2. Call `skills.read_skill_file(skill_name)`.
-        #      3. Follow the instructions returned by that tool to complete the request.
-        #  # EMERGENCY & SAFETY
-        #  If the patient's data appears critical or the tools return error codes, prioritize clear communication of the status over performing complex analysis."""
-
         return """You are a healthcare AI assistant. You help medical professionals by analyzing medical images, parsing DICOM files, generating radiology reports, and retrieving patient data.
 
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.

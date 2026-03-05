@@ -42,7 +42,7 @@ class GeminiClient:
         )
         # Restart chat session with new config
         self.start_chat()
-        print(f"System prompt updated for patient conversation")
+        print("System prompt updated for patient conversation")
 
     def _initialize_gemini(self):
         """Initialize Gemini using new google.genai Client"""

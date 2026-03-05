@@ -42,10 +42,10 @@ class Logger:
         # Add handler to logger
         logger.addHandler(file_handler)
         
-        logger.info(f"=" * 80)
+        logger.info("=" * 80)
         logger.info(f"{self.name} Debug Session Started")
         logger.info(f"Log file: {log_file}")
-        logger.info(f"=" * 80)
+        logger.info("=" * 80)
         
         return logger
     

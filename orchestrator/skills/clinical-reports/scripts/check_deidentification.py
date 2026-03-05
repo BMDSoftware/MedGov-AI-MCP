@@ -13,7 +13,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 
 # 18 HIPAA Identifiers patterns
@@ -288,7 +288,7 @@ def print_report(report: Dict):
             severity_symbol = "⚠⚠⚠" if details["severity"] == "CRITICAL" else "⚠⚠" if details["severity"] == "HIGH" else "⚠"
             print(f"{severity_symbol} [{details['severity']:8}] {details['description']}")
             print(f"   Count: {details['count']}")
-            print(f"   Examples:")
+            print("   Examples:")
             for example in details["examples"]:
                 print(f"     - {example}")
             print()
@@ -298,7 +298,7 @@ def print_report(report: Dict):
         print("✓ Age reporting compliant (no ages >89 or properly aggregated)")
     else:
         print(f"⚠  Age compliance issue: {age_check['ages_over_89']} age(s) >89 detected")
-        print(f"   Ages must be aggregated to '90 or older' or '>89 years'")
+        print("   Ages must be aggregated to '90 or older' or '>89 years'")
         print(f"   Ages found: {age_check['examples']}")
     
     print()

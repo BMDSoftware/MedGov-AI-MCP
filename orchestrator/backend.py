@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 # Load env BEFORE importing agenticAgent so LLM_BACKEND is set
 load_dotenv()
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
@@ -269,7 +269,7 @@ async def remove_file(filename: str):
             if filename in temp_file_paths:
                 try:
                     os.unlink(temp_file_paths[filename])
-                except:
+                except Exception:
                     pass
                 del temp_file_paths[filename]
             return {"status": "success", "message": f"Removed {filename}"}
@@ -741,9 +741,12 @@ async def monai_analyze(data: dict = Body(...)):
 async def monai_list_models(data: dict = Body(...)):
     """List available MONAI models"""
     args = {}
-    if data.get("category"): args["category"] = data["category"]
-    if data.get("modality"): args["modality"] = data["modality"]
-    if data.get("body_part"): args["body_part"] = data["body_part"]
+    if data.get("category"):
+        args["category"] = data["category"]
+    if data.get("modality"):
+        args["modality"] = data["modality"]
+    if data.get("body_part"):
+        args["body_part"] = data["body_part"]
     result = await agent_decision.tool_registry.execute_tool(
         "monai.list_models", args, logs=True
     )

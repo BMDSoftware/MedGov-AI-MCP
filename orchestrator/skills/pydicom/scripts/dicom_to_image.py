@@ -159,7 +159,7 @@ Examples:
     if success:
         print(f"✓ Successfully converted to {image_format}")
         if args.verbose:
-            print(f"\nImage information:")
+            print("\nImage information:")
             print(f"  - Shape: {result['shape']}")
             print(f"  - Modality: {result['modality']}")
             print(f"  - Bits Allocated: {result['bits_allocated']}")

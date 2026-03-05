@@ -6,28 +6,25 @@ Provides medical image analysis using MONAI pre-trained models
 
 import os
 import sys
-import json
 import torch
 import numpy as np
 import monai
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
+from monai.transforms import (
+    LoadImage, EnsureChannelFirst, ScaleIntensity, ScaleIntensityRange, Compose,
+    Spacing, Orientation, Resize, EnsureType
+)
+from monai.data import PILReader
+from monai.bundle import download, ConfigParser
+from monai.networks.nets import UNet
+from monai.inferers import sliding_window_inference
 
 
 def log(msg: str):
     """Log to stderr to avoid interfering with stdio JSON-RPC protocol"""
     print(msg, file=sys.stderr, flush=True)
-
-from monai.transforms import (
-    LoadImage, EnsureChannelFirst, ScaleIntensity, ScaleIntensityRange, Compose,
-    Spacing, Orientation, CropForeground, Resize, EnsureType,
-    Activations, AsDiscrete, KeepLargestConnectedComponent
-)
-from monai.data import PILReader
-from monai.bundle import download, ConfigParser
-from monai.networks.nets import UNet, SwinUNETR
-from monai.inferers import sliding_window_inference
 
 mcp = FastMCP("MONAI")
 
@@ -552,7 +549,6 @@ def analyze_image(path: str) -> Dict[str, Any]:
         ext = Path(path).suffix.lower() if not is_dir else ""
 
         # For directories, check if it's an image slice directory or DICOM series
-        is_image_dir = False
         num_dir_files = 0
         if is_dir:
             dir_files = sorted([f for f in Path(path).iterdir() if f.is_file() and not f.name.startswith('.')])
@@ -562,7 +558,6 @@ def analyze_image(path: str) -> Dict[str, Any]:
             sample_ext = dir_files[0].suffix.lower()
             if sample_ext in IMAGE_EXTS:
                 # Sample a small subset of slices for analysis (not all files)
-                is_image_dir = True
                 image_array = load_image_dir_as_volume(path, max_slices=20).numpy()
                 detection = detect_modality_from_metadata(image_array, path, is_dir=False)
                 detection["file_format"] = f"Image slice directory ({num_dir_files} slices)"
@@ -699,7 +694,6 @@ def download_model(model_name: str) -> Dict[str, Any]:
         # must swap sys.stdout itself to prevent any output from reaching the
         # stdio JSON-RPC channel.
         import logging
-        import io
 
         # Flush anything pending before swapping
         sys.stdout.flush()
@@ -775,7 +769,7 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
         model = load_model_from_bundle(bundle_path, model_name, device)
 
         # Preprocess the image (no resize - use sliding window instead)
-        log(f"Preprocessing image...")
+        log("Preprocessing image...")
         image = preprocess_image(image_path, model_name)
 
         # Add batch dimension and move to device

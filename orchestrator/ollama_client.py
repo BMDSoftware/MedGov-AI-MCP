@@ -27,7 +27,7 @@ class OllamaClient:
         """Update the system prompt and clear chat history to apply new context"""
         self.custom_system_prompt = system_prompt
         self.chat_history = []  # Clear history to start fresh
-        print(f"System prompt updated for patient conversation")
+        print("System prompt updated for patient conversation")
 
     def update_tools(self, available_tools: Dict[str, Any]):
         """Update Ollama's available tools dynamically."""

@@ -4,7 +4,7 @@ MCP Utils Server - General utility tools including DICOM parsing
 """
 
 import sys
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from mcp.server.fastmcp import FastMCP
 
 from dicom_parser import DicomParser

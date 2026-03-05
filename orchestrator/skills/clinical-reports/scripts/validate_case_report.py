@@ -14,7 +14,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 
 class CareValidator:
@@ -219,7 +219,7 @@ class CareValidator:
         report = self.generate_report()
         
         print("=" * 70)
-        print(f"CARE Guideline Validation Report")
+        print("CARE Guideline Validation Report")
         print(f"File: {report['filename']}")
         print("=" * 70)
         print()

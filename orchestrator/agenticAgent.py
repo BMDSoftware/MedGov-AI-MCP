@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 import json
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 from pathlib import Path
 from datetime import datetime
 import logging
@@ -378,16 +378,16 @@ TOOL USAGE RULES:
         arguments = pending["arguments"]
         print(f"Confirmed - Executing: {tool_name}")
         
-        self.logger.info(f"\nTOOL CONFIRMATION APPROVED:")
+        self.logger.info("\nTOOL CONFIRMATION APPROVED:")
         self.logger.info(f"  Tool: {tool_name}")
-        self.logger.info(f"  User confirmed execution")
-        self.logger.info(f"\nTOOL CALL REQUESTED:")
+        self.logger.info("  User confirmed execution")
+        self.logger.info("\nTOOL CALL REQUESTED:")
         self.logger.info(f"  Tool: {tool_name}")
         self.logger.info(f"  Arguments: {json.dumps(arguments, indent=4)}")
 
         result = await self.tool_registry.execute_tool(tool_name, arguments, logs=True)
         
-        self.logger.info(f"\nTOOL RESULT:")
+        self.logger.info("\nTOOL RESULT:")
         self.logger.info(f"  Tool: {tool_name}")
         result_full = json.dumps(result, indent=4) if isinstance(result, dict) else str(result)
         self.logger.info(f"  Result: {result_full}")
@@ -414,7 +414,7 @@ TOOL USAGE RULES:
             self._record_and_persist(tool_name, result_summary, key_data, session_id)
             print(f"Tool succeeded: {result_summary}")
 
-            self.logger.info(f"  Status: SUCCESS")
+            self.logger.info("  Status: SUCCESS")
             self.logger.info(f"  Summary: {result_summary}")
 
             # Save radlex reports to DB so they appear in the Report tab
@@ -441,7 +441,7 @@ TOOL USAGE RULES:
             })
             print(f"Tool failed: {error_msg}")
 
-            self.logger.error(f"  Status: FAILED")
+            self.logger.error("  Status: FAILED")
             self.logger.error(f"  Error: {error_msg}")
 
             confirmed_result = {"error": str(error_msg) if error_msg else "Tool execution failed", "is_error": True}
@@ -551,7 +551,7 @@ TOOL USAGE RULES:
         # If there are still remaining MCP calls that need confirmation, chain to next one
         if turn_remaining_calls:
             next_name, next_args = turn_remaining_calls.pop(0)
-            self.logger.info(f"\nCHAINED CONFIRMATION REQUIRED:")
+            self.logger.info("\nCHAINED CONFIRMATION REQUIRED:")
             self.logger.info(f"  Tool: {next_name}")
             self.logger.info(f"  Arguments: {json.dumps(next_args, indent=4)}")
             self.pending_tool_call = {
@@ -586,7 +586,7 @@ TOOL USAGE RULES:
                 else:
                     _single_name, _single_data = turn_accumulated_results[0]
                     llm_response = self.llm_client.send_function_response(_single_name, _single_data)
-                self.logger.info(f"Captured LLM response from function_response(s) (Gemini)")
+                self.logger.info("Captured LLM response from function_response(s) (Gemini)")
             except Exception as llm_err:
                 print(f"LLM API error after tool execution: {type(llm_err).__name__}: {llm_err}")
                 return {"error": f"Tool executed but LLM API unreachable: {llm_err}", "is_error": True}
@@ -738,7 +738,7 @@ TOOL USAGE RULES:
                         if not images_for_llm:
                             images_for_llm = None
                     else:
-                        image_context = f"\n\nIMAGES AVAILABLE:\nImage data provided"
+                        image_context = "\n\nIMAGES AVAILABLE:\nImage data provided"
 
                 # Build session context from previous queries
                 session_ctx = self.session_context.build_context_string()
@@ -755,10 +755,10 @@ TOOL USAGE RULES:
                     self.logger.info(f"\n{'='*60}")
                     self.logger.info(f"ITERATION {iterations}/{max_iterations}")
                     self.logger.info(f"{'='*60}")
-                    self.logger.info(f"\nUSING RESPONSE FROM send_function_response (no redundant prompt)\n")
+                    self.logger.info("\nUSING RESPONSE FROM send_function_response (no redundant prompt)\n")
                     self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
                     
-                    print(f"Using response from send_function_response (Gemini optimization)")
+                    print("Using response from send_function_response (Gemini optimization)")
                 else:
                     # Standard flow: prompt the LLM (always for Ollama, or first iteration for Gemini)
                     if not execution_history:
@@ -829,13 +829,13 @@ Your decision:"""
                             has_text = True
                             text_content = part.text.strip().upper()
                             if "GOAL_ACHIEVED" in text_content or "GOAL ACHIEVED" in text_content:
-                                print(f"Agent declares: Goal achieved!")
+                                print("Agent declares: Goal achieved!")
                                 # Return detailed response with execution history
                                 answer = self._extract_answer_from_results(part.text, execution_history, final_result)
                                 tools_used = [event['tool'] for event in execution_history if event['success']]
 
                                 self.logger.info(f"\n{'='*60}")
-                                self.logger.info(f"TASK COMPLETED SUCCESSFULLY")
+                                self.logger.info("TASK COMPLETED SUCCESSFULLY")
                                 self.logger.info(f"  Iterations used: {iterations}")
                                 self.logger.info(f"  Tools used: {tools_used}")
                                 self.logger.info(f"  Answer: {answer}")
@@ -850,7 +850,7 @@ Your decision:"""
                                 }
 
                             if "NEED MORE INFO" in text_content:
-                                print(f"Agent requests more information to proceed.")
+                                print("Agent requests more information to proceed.")
                                 return {
                                     "type": "agent_response",
                                     "answer": part.text.strip(),
@@ -1013,7 +1013,7 @@ Your decision:"""
                     if self.require_confirmation:
                         print(f"Tool confirmation required: {tool_name}")
 
-                        self.logger.info(f"\nTOOL CONFIRMATION REQUIRED:")
+                        self.logger.info("\nTOOL CONFIRMATION REQUIRED:")
                         self.logger.info(f"  Tool: {tool_name}")
                         self.logger.info(f"  Arguments: {json.dumps(arguments, indent=4)}")
 
@@ -1048,13 +1048,13 @@ Your decision:"""
                     # Execute the tool
                     print(f"Executing: {tool_name}")
 
-                    self.logger.info(f"\nTOOL CALL REQUESTED:")
+                    self.logger.info("\nTOOL CALL REQUESTED:")
                     self.logger.info(f"  Tool: {tool_name}")
                     self.logger.info(f"  Arguments: {json.dumps(arguments, indent=4)}")
 
                     result = await self.tool_registry.execute_tool(tool_name, arguments, logs=True)
 
-                    self.logger.info(f"\nTOOL RESULT:")
+                    self.logger.info("\nTOOL RESULT:")
                     self.logger.info(f"  Tool: {tool_name}")
                     result_full = json.dumps(result, indent=4) if isinstance(result, dict) else str(result)
                     self.logger.info(f"  Result: {result_full}")
@@ -1083,7 +1083,7 @@ Your decision:"""
                         final_result = result
                         print(f"Tool succeeded: {result_summary}")
 
-                        self.logger.info(f"  Status: SUCCESS")
+                        self.logger.info("  Status: SUCCESS")
                         self.logger.info(f"  Summary: {result_summary}")
 
                         # Save radlex reports to DB so they appear in the Report tab
@@ -1128,7 +1128,7 @@ Your decision:"""
 
                         print(f"Tool failed: {error_msg}")
 
-                        self.logger.error(f"  Status: FAILED")
+                        self.logger.error("  Status: FAILED")
                         self.logger.error(f"  Error: {error_msg}")
 
                         error_response = {"error": str(error_msg), "is_error": True}
@@ -1140,9 +1140,9 @@ Your decision:"""
                             "success": False,
                             "error": "Execution returned no result"
                         })
-                        print(f"Tool execution failed")
+                        print("Tool execution failed")
 
-                        self.logger.error(f"  Status: FAILED - No result returned")
+                        self.logger.error("  Status: FAILED - No result returned")
 
                         error_response = {"error": "Execution returned no result", "is_error": True}
                         _turn_results.append((tool_name, error_response))
@@ -1155,9 +1155,9 @@ Your decision:"""
                         _resume_response = self.llm_client.send_multiple_function_responses(_turn_results)
                     else:
                         _single_name, _single_data = _turn_results[0]
-                        self.logger.info(f"\nSENDING FULL RESULT TO LLM via send_function_response")
+                        self.logger.info("\nSENDING FULL RESULT TO LLM via send_function_response")
                         _resume_response = self.llm_client.send_function_response(_single_name, _single_data)
-                    self.logger.info(f"Captured response from function_response(s) - will use on next iteration")
+                    self.logger.info("Captured response from function_response(s) - will use on next iteration")
                 
                 # If agent responded with text but no tool call
                 if has_text and not has_function_call:
@@ -1170,9 +1170,9 @@ Your decision:"""
                         # This covers: conversational replies, error explanations, asking user for info
                         last_failed = execution_history and not execution_history[-1].get('success')
                         if last_failed:
-                            print(f"Agent explaining tool error to user")
+                            print("Agent explaining tool error to user")
                         else:
-                            print(f"Agent responded with text (no tools needed for this query)")
+                            print("Agent responded with text (no tools needed for this query)")
                         tools_used = [event['tool'] for event in execution_history if event.get('success')]
                         return {
                             "type": "agent_response",
@@ -1182,7 +1182,7 @@ Your decision:"""
                             "success": not last_failed
                         }
                     else:
-                        print(f"Agent response too short, continuing...")
+                        print("Agent response too short, continuing...")
                         execution_history.append({
                             "tool": "none",
                             "success": False,
@@ -1252,9 +1252,9 @@ Your decision:"""
         # RadLex tools
         elif tool_name.startswith("radlex."):
             if "template" in tool_name.lower():
-                return f"Template operation completed"
+                return "Template operation completed"
             elif "report" in tool_name.lower():
-                return f"Report generated"
+                return "Report generated"
             return "RadLex operation completed"
 
         # FHIR tools

@@ -6,7 +6,7 @@ MCP Skills Server - Provides skill management capabilities for the agentic syste
 import sys
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any
 from mcp.server.fastmcp import FastMCP
 
 # Add current directory to path to import SkillsManager

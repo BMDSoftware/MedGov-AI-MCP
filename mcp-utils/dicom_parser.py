@@ -3,7 +3,7 @@ DICOM Parser - extracts metadata from DICOM files.
 """
 
 import os
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 
 try:
     import pydicom
@@ -155,7 +155,7 @@ class DicomParser:
         try:
             ds = pydicom.dcmread(file_path)
             return ds.pixel_array
-        except Exception as e:
+        except Exception:
             return None
 
     def _convert_value(self, val: Any) -> Any:
@@ -175,14 +175,14 @@ class DicomParser:
         if isinstance(val, bytes):
             try:
                 return val.decode('utf-8', errors='ignore')
-            except:
+            except Exception:
                 return f"[Binary {len(val)} bytes]"
 
         # MultiValue (list-like)
         if hasattr(val, '__iter__') and not isinstance(val, (str, bytes)):
             try:
                 return [self._convert_value(v) for v in val]
-            except:
+            except Exception:
                 return str(val)
 
         # Numbers

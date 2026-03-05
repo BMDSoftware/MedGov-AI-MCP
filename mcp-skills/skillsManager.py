@@ -5,13 +5,11 @@ Skills are listed in the system prompt (NOT as LLM function tools).
 Agent executes them via internal function routing.
 """
 
-import os
 import sys
 import re
 import json
 import subprocess
 from unittest import result
-import requests
 import importlib.util
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -74,7 +72,7 @@ class SkillsManager:
         
         lines = ["<available_skills>"]
         for s in self.skills.values():
-            lines += [f"  <skill>", f"    <name>{s.name}</name>", 
+            lines += ["  <skill>", f"    <name>{s.name}</name>", 
                      f"    <description>{s.description}</description>", "  </skill>"]
         lines.append("</available_skills>")
         return "\n".join(lines)
@@ -248,7 +246,7 @@ class SkillsManager:
                             return result
                         else:
                             return {"success": True, "result": result}
-            except Exception as e:
+            except Exception:
                 # Continue to next file if this one fails
                 continue
         

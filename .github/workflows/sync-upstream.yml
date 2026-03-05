@@ -1,0 +1,19 @@
+name: Sync to upstream
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    if: github.repository == 'GCapaross/AgenticHealthMCP'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to BMDSoftware/MedGov-AI-MCP
+        run: |
+          git remote add upstream https://x-access-token:${{ secrets.UPSTREAM_TOKEN }}@github.com/BMDSoftware/MedGov-AI-MCP.git
+          git push upstream main --force

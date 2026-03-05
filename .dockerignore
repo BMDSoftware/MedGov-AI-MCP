@@ -1,0 +1,26 @@
+# Python virtual environments
+**/venv/
+**/.venv/
+
+# Python cache
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Node
+frontend/node_modules/
+
+# Git
+.git/
+
+# Logs and data
+orchestrator/logs/
+orchestrator/data/
+mcp-monai/bundles/
+mcp-monai/data/
+
+# Test data
+test_data/
+
+# Weekly notes
+weekly/

@@ -1,0 +1,57 @@
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libgl1 \
+    libglib2.0-0 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ── mcp-monai ──────────────────────────────────────────────────────────────────
+COPY mcp-monai/requirements.txt mcp-monai/requirements.txt
+RUN python -m venv mcp-monai/venv \
+    && mcp-monai/venv/bin/pip install --upgrade pip \
+    && mcp-monai/venv/bin/pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+       -r mcp-monai/requirements.txt
+COPY mcp-monai/ mcp-monai/
+
+# ── mcp-radlex ─────────────────────────────────────────────────────────────────
+COPY mcp-radlex/requirements.txt mcp-radlex/requirements.txt
+RUN python -m venv mcp-radlex/venv \
+    && mcp-radlex/venv/bin/pip install --upgrade pip \
+    && mcp-radlex/venv/bin/pip install -r mcp-radlex/requirements.txt
+COPY mcp-radlex/ mcp-radlex/
+
+# ── mcp-utils ──────────────────────────────────────────────────────────────────
+COPY mcp-utils/requirements.txt mcp-utils/requirements.txt
+RUN python -m venv mcp-utils/venv \
+    && mcp-utils/venv/bin/pip install --upgrade pip \
+    && mcp-utils/venv/bin/pip install -r mcp-utils/requirements.txt
+COPY mcp-utils/ mcp-utils/
+
+# ── mcp-skills ─────────────────────────────────────────────────────────────────
+COPY mcp-skills/requirements.txt mcp-skills/requirements.txt
+RUN python -m venv mcp-skills/venv \
+    && mcp-skills/venv/bin/pip install --upgrade pip \
+    && mcp-skills/venv/bin/pip install -r mcp-skills/requirements.txt
+COPY mcp-skills/ mcp-skills/
+
+# ── orchestrator ───────────────────────────────────────────────────────────────
+COPY orchestrator/requirements.txt orchestrator/requirements.txt
+RUN python -m venv orchestrator/venv \
+    && orchestrator/venv/bin/pip install --upgrade pip \
+    && orchestrator/venv/bin/pip install -r orchestrator/requirements.txt
+COPY orchestrator/ orchestrator/
+
+# Use the example config — inside the container APP_ROOT=/app so ${APP_ROOT} resolves correctly
+COPY orchestrator/mcp-config.json.example orchestrator/mcp-config.json
+
+ENV APP_ROOT=/app
+
+EXPOSE 5001
+
+CMD ["orchestrator/venv/bin/python", "orchestrator/backend.py"]

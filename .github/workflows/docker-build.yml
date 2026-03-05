@@ -1,0 +1,40 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-orchestrator:
+    if: github.repository == 'BMDSoftware/MedGov-AI-MCP'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build orchestrator image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/orchestrator/Dockerfile
+          push: false
+          tags: agentichealthmcp-orchestrator:test
+
+  build-frontend:
+    if: github.repository == 'BMDSoftware/MedGov-AI-MCP'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/frontend/Dockerfile
+          push: false
+          tags: agentichealthmcp-frontend:test

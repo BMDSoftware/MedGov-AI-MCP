@@ -18,7 +18,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: docker/orchestrator/Dockerfile
+          file: docker/orchestrator/Dockerfile.cpu
           push: false
           tags: agentichealthmcp-orchestrator:test
 

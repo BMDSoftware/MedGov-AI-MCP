@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime
 import logging
 
+from mem0 import Memory
 import yaml
 
 from tool_registry import ToolRegistry
@@ -13,8 +14,35 @@ from sessionContext import SessionContext
 from logger import Logger
 import task_runner
 import database as db
+from dotenv import load_dotenv
 
+load_dotenv()  # Load environment variables from .env file
 
+config = {
+    "llm": {
+        "provider": "gemini",
+        "config": {
+            "model": "gemini-2.0-flash",
+            "temperature": 0.2,
+            "max_tokens": 2000,
+            "top_p": 1.0
+        }
+    },
+    "embedder": {
+        "provider": "huggingface",
+        "config": {
+            "model": "sentence-transformers/all-MiniLM-L6-v2" # Small, fast, and local
+        }
+    },
+    "vector_store": {
+        "provider": "chroma",
+        "config": {
+            "path": ".mem0_data" # Saves your memory to a local folder
+        }
+    }
+}
+
+memory = Memory.from_config(config)
 # LLM Backend selection: "ollama" (local) or "gemini" (API)
 LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
 
@@ -110,7 +138,7 @@ class AgenticAgent:
 
         self.available_tools = await self.tool_registry.discover_tools()
         # Register built-in tools alongside MCP tools
-        self.available_tools.update(self.BUILTIN_TOOLS)
+        #self.available_tools.update(self.BUILTIN_TOOLS)
         self.agent_tools = set(self.available_tools.keys())
         skills = self.load_all_skills()
         enabled_tools = self.get_enabled_agent_tools()
@@ -171,15 +199,6 @@ All tool calls and analysis should be in the context of this patient. If any too
 4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
 
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
-
-BACKGROUND TASK RULES (read carefully):
-- Any operation that takes more than a few seconds MUST be queued with `queue_task` instead of called directly.
-- This includes: MONAI inference (monai.run_inference), report generation, bulk analysis of multiple files.
-- After calling `queue_task`, respond to the user immediately - do NOT wait for the task to finish.
-- The user will receive a notification in the UI when the task is done.
-- For 'inference' tasks: input_data = {{"image_path": "...", "model_name": "..."}}
-- For 'report' tasks: input_data = {{"task_ids": [...], "patient_context": {{...}}}}
-- Short operations (analyze_image, list_models, download_model, FHIR queries) can still be called directly.
 
 CONVERSATION RULES:
 1. Be conversational. If the user greets you, greet them back. If they ask a question you can answer from context, answer it directly without calling any tool.
@@ -319,6 +338,51 @@ TOOL USAGE RULES:
             }
 
         return {}
+    def _mem0_search(self, query: str, session_id: str) -> str:
+        """Search mem0 for relevant memories scoped to this session."""
+        if not session_id:
+            return ""
+        try:
+            print(f"[mem0] Searching memories for session '{session_id}'...")
+            results = memory.search(query, user_id=session_id)
+            print(f"[mem0] Raw search result type={type(results).__name__}: {results}")
+            items = []
+            if isinstance(results, dict):
+                items = results.get("results", [])
+            elif isinstance(results, list):
+                items = results
+            if not items:
+                print("[mem0] No memories found.")
+                return ""
+            lines = []
+            for m in items:
+                if isinstance(m, dict):
+                    content = m.get("memory") or m.get("text") or m.get("content")
+                    if content:
+                        lines.append(f"- {content}")
+                else:
+                    lines.append(f"- {str(m)}")
+            if lines:
+                self.logger.info(f"[mem0] Retrieved {len(lines)} memories for session {session_id}")
+                return "\n\nSESSION MEMORY (from previous interactions):\n" + "\n".join(lines)
+        except Exception as e:
+            self.logger.error(f"[mem0] Search failed: {e}")
+        return ""
+
+    def _mem0_add(self, fact: str, session_id: str):
+        """Store a fact in mem0 scoped to this session."""
+        if not session_id or not fact:
+            return
+        try:
+            print(f"[mem0] Adding to memory for session '{session_id}':")
+            print(f"[mem0]   Fact: {fact[:300]}{'...' if len(fact) > 300 else ''}")
+            result = memory.add(fact, user_id=session_id, infer=False)
+            print(f"[mem0] Result: {result}")
+            self.logger.info(f"[mem0] Stored memory for session {session_id}")
+        except Exception as e:
+            print(f"[mem0] Add failed: {e}")
+            self.logger.error(f"[mem0] Add failed: {e}")
+
     async def refresh_available_tools(self):
         previous_tools = set(self.available_tools.keys())
         previous_enabled = set(self.agent_tools)
@@ -412,6 +476,7 @@ TOOL USAGE RULES:
             # Record to session context for cross-query memory
             key_data = self._extract_key_data(tool_name, result)
             self._record_and_persist(tool_name, result_summary, key_data, session_id)
+            self._mem0_add(f"{tool_name}: {result_summary}", session_id)
             print(f"Tool succeeded: {result_summary}")
 
             self.logger.info("  Status: SUCCESS")
@@ -685,12 +750,22 @@ TOOL USAGE RULES:
             image_path = imageList[0][0]  # First image's temp file path
             print(f"Image path for workflow: {image_path}")
 
+        # Search mem0 for relevant session memories (skip on resume to avoid repeat searches)
+        mem0_block = ""
+        if session_id and not _resume_history:
+            mem0_block = self._mem0_search(goal, session_id)
+            print(f"[mem0] Initial search: {mem0_block or '(empty)'}")
         # Both Ollama and Gemini now use true agentic approach
         # The LLM decides which tools to call based on context
 
         while iterations < max_iterations:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
+
+            # Refresh mem0 context each iteration
+            if session_id:
+                mem0_block = self._mem0_search(goal, session_id)
+                print(f"[mem0] Iteration {iterations} context: {mem0_block or '(empty)'}")
             try:
                 # Note: Execution history is now managed by Gemini's chat session
                 # We don't need to build history_text anymore - it's redundant!
@@ -743,6 +818,7 @@ TOOL USAGE RULES:
                 # Build session context from previous queries
                 session_ctx = self.session_context.build_context_string()
                 session_block = f"\n\n{session_ctx}" if session_ctx else ""
+                session_block += mem0_block
 
                 # Check if we're using Gemini and have a response from previous send_function_response
                 is_gemini = LLM_BACKEND.lower() != "ollama"
@@ -841,6 +917,7 @@ Your decision:"""
                                 self.logger.info(f"  Answer: {answer}")
                                 self.logger.info(f"{'='*80}\n")
 
+                                self._mem0_add(f"Goal: {goal} — Result: {answer[:500]}", session_id)
                                 return {
                                     "type": "agent_response",
                                     "answer": answer,
@@ -1079,6 +1156,7 @@ Your decision:"""
                         # Record to session context for cross-query memory
                         key_data = self._extract_key_data(tool_name, result)
                         self._record_and_persist(tool_name, result_summary, key_data, session_id)
+                        self._mem0_add(f"{tool_name}: {result_summary}", session_id)
 
                         final_result = result
                         print(f"Tool succeeded: {result_summary}")
@@ -1174,6 +1252,7 @@ Your decision:"""
                         else:
                             print("Agent responded with text (no tools needed for this query)")
                         tools_used = [event['tool'] for event in execution_history if event.get('success')]
+                        self._mem0_add(f"Goal: {goal} — Response: {text_response[:500]}", session_id)
                         return {
                             "type": "agent_response",
                             "answer": text_response,

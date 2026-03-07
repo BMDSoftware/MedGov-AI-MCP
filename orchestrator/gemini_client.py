@@ -7,6 +7,7 @@ from google import genai
 from google.genai import types
 from PIL import Image
 from dotenv import load_dotenv
+from logger import Logger
 
 load_dotenv()
 

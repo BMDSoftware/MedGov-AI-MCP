@@ -502,6 +502,86 @@ TOOL USAGE RULES:
             self.available_tools.pop(k, None)
             self.agent_tools.discard(k)
         self._refresh_agent_components()
+    def _mem0_search(self, query: str, session_id: str) -> str:
+        """Search mem0 for relevant memories scoped to this session."""
+        print(f"[mem0] Searching for session_id='{session_id}' with query: {query}")
+        if not session_id:
+            return ""
+        try:
+            print(f"[mem0] Searching memories for session '{session_id}'...")
+            results = memory.search(query, user_id=session_id)
+            print(f"[mem0] Raw search result type={type(results).__name__}: {results}")
+            items = []
+            if isinstance(results, dict):
+                items = results.get("results", [])
+            elif isinstance(results, list):
+                items = results
+            if not items:
+                print("[mem0] No memories found.")
+                return ""
+            lines = []
+            for m in items:
+                if isinstance(m, dict):
+                    content = m.get("memory") or m.get("text") or m.get("content")
+                    if content:
+                        lines.append(f"- {content}")
+                else:
+                    lines.append(f"- {str(m)}")
+            if lines:
+                self.logger.info(f"[mem0] Retrieved {len(lines)} memories for session {session_id}")
+                return "\n\nSESSION MEMORY (from previous interactions):\n" + "\n".join(lines)
+        except Exception as e:
+            self.logger.error(f"[mem0] Search failed: {e}")
+        return ""
+
+    def _mem0_add(self, fact: str, session_id: str):
+        """Store a fact in mem0 scoped to this session."""
+        if not session_id or not fact:
+            return
+        try:
+            print(f"[mem0] Adding to memory for session '{session_id}':")
+            print(f"[mem0]   Fact: {fact[:300]}{'...' if len(fact) > 300 else ''}")
+            result = memory.add(fact, user_id=session_id, infer=True)
+            print(f"[mem0] Result: {result}")
+            self.logger.info(f"[mem0] Stored memory for session {session_id}")
+        except Exception as e:
+            print(f"[mem0] Add failed: {e}")
+            self.logger.error(f"[mem0] Add failed: {e}")
+
+    def _mem0_store_skill_usage(self, tool_name: str, arguments: dict, result: dict, session_id: str):
+        """Store skill name, description, and referenced file in mem0 after a skills tool call."""
+        if tool_name == "skills.read_skill_file":
+            skill_name = arguments.get("skill_name", "")
+            description = ""
+            content = result.get("content", "") if isinstance(result, dict) else ""
+            if content:
+                try:
+                    parts = content.split("---", 2)
+                    if len(parts) >= 3:
+                        metadata = yaml.safe_load(parts[1])
+                        description = metadata.get("description", "")
+                except Exception:
+                    pass
+            fact = f"Skill '{skill_name}' was invoked."
+            if description:
+                fact += f" Description: {description}"
+
+        elif tool_name == "skills.read_references":
+            skill_name = arguments.get("skill_name", "")
+            file_path = arguments.get("file_path", "")
+            fact = f"Reference file '{file_path}' from skill '{skill_name}' was accessed."
+
+        memory.add(fact, user_id=session_id, infer=False)
+
+    def _extract_llm_observation(self, response) -> str:
+        """Extract the text observation from an LLM response (skips function call parts)."""
+        if not response or not response.candidates:
+            return ""
+        texts = []
+        for part in (response.candidates[0].content.parts or []):
+            if hasattr(part, 'text') and part.text and part.text.strip():
+                texts.append(part.text.strip())
+        return " ".join(texts)
 
     async def refresh_available_tools(self):
         previous_tools = set(self.available_tools.keys())

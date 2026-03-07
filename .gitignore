@@ -39,6 +39,9 @@ orchestrator/logs/
 # Persistent data (uploads, cache)
 orchestrator/data/
 
+# mem0 vector store data
+orchestrator/.mem0_data/
+
 node_modules/
 
 # MCP config (machine-specific paths)

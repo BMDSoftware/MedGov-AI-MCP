@@ -1,20 +1,28 @@
 #!/usr/bin/env python3
+import json
 import os
 from typing import Dict, List, Any
 from google import genai
 from google.genai import types
 from PIL import Image
 from dotenv import load_dotenv
+from logger import Logger
 
 load_dotenv()
 
 
 class GeminiClient:
-    """Handles Gemini AI client setup, tool schema conversion, and stateful chat generation"""
+    """Handles Gemini AI client setup, tool schema conversion, and stateless generation.
+    
+    Each task gets a fresh conversation_history (an ephemeral list of
+    types.Content objects needed by the stateless generate_content API for
+    multi-turn tool use).  Cross-task memory is provided by mem0, not by
+    Gemini chat sessions.
+    """
 
     def __init__(self, available_tools: Dict[str, Any], skills):
         self.genai_client = None
-        self.chat_session = None  # Tracks the stateful conversation history
+        self.conversation_history: List = []  # Ephemeral per-task turn history
         self.available_tools = available_tools
         self.model_id = "gemini-2.0-flash"
         self.agent_config = None
@@ -22,17 +30,18 @@ class GeminiClient:
         self.custom_system_prompt = None  # Store custom system prompt
         self.mode_extension = ""  # Appended to system prompt in normal mode
         self.skills = skills  # Reference to skills manager for dynamic prompt generation
+        self.logger = Logger(name="GeminiClient")
+        self._call_count = 0  # Track iteration number
 
         self._initialize_gemini()
-        self.start_chat() # Initialize the chat session immediately
 
     def set_mode_extension(self, ext: str):
-        """Set an extra block appended to the system prompt, then restart the chat."""
+        """Set an extra block appended to the system prompt, then rebuild config."""
         self.mode_extension = ext
         self.update_tools(self.available_tools)
 
     def update_system_prompt(self, system_prompt: str):
-        """Update the system prompt and restart chat session"""
+        """Update the system prompt and reset conversation history."""
         self.custom_system_prompt = system_prompt
         # Use _get_system_prompt() so any active mode_extension is preserved
         self.agent_config = types.GenerateContentConfig(
@@ -40,8 +49,7 @@ class GeminiClient:
             system_instruction=self._get_system_prompt(),
             temperature=0.0
         )
-        # Restart chat session with new config
-        self.start_chat()
+        self.reset_conversation()
         print("System prompt updated for patient conversation")
 
     def _initialize_gemini(self):
@@ -49,14 +57,10 @@ class GeminiClient:
         self.genai_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         self.update_tools(self.available_tools)
 
-    def start_chat(self, history: List = None):
-        """Initializes a new stateful chat session."""
-        self.chat_session = self.genai_client.chats.create(
-            model=self.model_id,
-            config=self.agent_config,
-            history=history or []
-        )
-        print("New chat session started.")
+    def reset_conversation(self):
+        """Clear the ephemeral per-task conversation history."""
+        self.conversation_history = []
+        print("Conversation history reset.")
 
     def update_tools(self, available_tools: Dict[str, Any]):
         """Update Gemini's available tools dynamically.
@@ -136,7 +140,62 @@ class GeminiClient:
 
     def _base_system_prompt(self) -> str:
         """Default system prompt when no custom prompt is set"""
-        return """You are a healthcare AI assistant. You help medical professionals by analyzing medical images, parsing DICOM files, generating radiology reports, and retrieving patient data.
+        skills_section = ""
+        if self.skills and self.skills != "No skills available":
+            skills_section = f"""
+
+---
+
+# AVAILABLE SKILLS (DIRECTORY)
+{self.skills}
+
+Only use skills listed above and tools available in the system. Do not attempt to use, guess, or simulate any skill not present in this directory, same for tools.
+
+---
+
+# SKILL USAGE PROTOCOL
+
+You do not have full skill instructions pre-loaded. You must follow this exact workflow for every clinical task, silently and without narrating your steps to the user:
+
+**Step 1 — IDENTIFY**
+Determine which skill from the directory is required. If no skill matches the request, respond:
+> "I do not have the specific clinical skill required for this task."
+Do not proceed further.
+
+**Step 2 — READ**
+Call `read_skill_file(skill_name)` to load the detailed instructions for that skill. Do not execute any domain tools before completing this step.
+
+**Step 3 — EXPLORE (if needed)**
+If the SKILL.md references additional schemas or technical files, call `read_references(skill_name, file_path)` to retrieve them before proceeding.
+
+**Step 4 — EXECUTE**
+Follow the instructions returned by the skill file precisely. Use the domain tools specified (e.g., `monai.*`, `fhir.*`). If the skill includes executable scripts, call `execute_script(skill_name, script_name, parameters)`.
+
+**Step 5 — INTERPRET & RESPOND**
+Treat all tool outputs as raw clinical observations. Apply professional interpretation before presenting findings to the user. For reports, be thorough and specific: include all findings, relevant values, flags, and clinical context. Never present raw tool output without interpretation.
+
+---
+
+# SKILL OPERATIONAL RULES
+
+- **One skill at a time.** If a request spans multiple skills, handle each sequentially and silently, completing one before starting the next.
+- **No hallucinations.** Never guess, simulate, or infer skill outputs. If a tool returns unexpected or empty data, state this to the user rather than filling gaps with assumptions.
+- **Re-read on new tasks.** Do not assume skill instructions are cached between turns. Re-read the SKILL.md for each new task unless the same skill was used in the immediately preceding step of the same task.
+- **Skill independence.** Skill outputs do not override your clinical reasoning — you are responsible for interpreting results in the context of the patient's data.
+- **Missing patient context.** If required patient data is absent or incomplete, ask the user to provide it before calling any tools.
+- **Capability questions** ("What can you do?"): Describe the available skills from the directory above. Do not call any tools to answer this.
+- **Clinical action requests**: Execute the full 5-step protocol silently. Only speak when you have a final result, a clarifying question, or an error to surface.
+- **Ambiguous requests**: Ask one clarifying question before selecting a skill.
+
+---
+
+# SKILL ERROR HANDLING
+
+- If `read_skill_file()` fails or returns empty: retry once silently, then surface a brief error message to the user if it fails again.
+- If a domain tool returns an error code: surface the status to the user concisely without technical jargon.
+- If results appear clinically inconsistent or out of expected range: flag this explicitly in your response before providing interpretation."""
+
+        return f"""You are a healthcare AI assistant. You help medical professionals by analyzing medical images, parsing DICOM files, generating radiology reports, and retrieving patient data.
 
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
 
@@ -161,14 +220,120 @@ TOOL USAGE RULES:
 7. MULTI-FILE RULE: When multiple paths are listed in "IMAGES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
 8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices forming a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate individual files inside the directory."""
     
+    # ------------------------------------------------------------------
+    # Stateless generation helpers
+    # ------------------------------------------------------------------
+
+    def _serialize_part(self, part) -> str:
+        """Convert a single Content Part to a readable string for logging."""
+        if hasattr(part, 'text') and part.text:
+            return f"[TEXT] {part.text[:2000]}{'…' if len(part.text) > 2000 else ''}"
+        if hasattr(part, 'function_call') and part.function_call:
+            fc = part.function_call
+            args = dict(fc.args) if fc.args else {}
+            return f"[FUNCTION_CALL] {fc.name}({json.dumps(args, default=str)})"
+        if hasattr(part, 'function_response') and part.function_response:
+            fr = part.function_response
+            resp_str = json.dumps(dict(fr.response) if fr.response else {}, default=str)
+            if len(resp_str) > 2000:
+                resp_str = resp_str[:2000] + '…'
+            return f"[FUNCTION_RESPONSE] {fr.name} -> {resp_str}"
+        if hasattr(part, 'inline_data') and part.inline_data:
+            return f"[IMAGE] mime={getattr(part.inline_data, 'mime_type', 'unknown')}"
+        return f"[OTHER] {type(part).__name__}"
+
+    def _log_contents(self, contents: List, label: str):
+        """Log the full list of Content objects being sent to the model."""
+        self.logger.info(f"\n{'='*80}")
+        self.logger.info(f"{label}  (iteration #{self._call_count})")
+        self.logger.info(f"History length: {len(contents)} message(s)")
+        self.logger.info(f"Model: {self.model_id}")
+        self.logger.info(f"{'='*80}")
+        for i, content in enumerate(contents):
+            role = getattr(content, 'role', 'unknown')
+            parts = getattr(content, 'parts', []) or []
+            self.logger.info(f"\n--- Message {i} | role={role} | parts={len(parts)} ---")
+            for j, part in enumerate(parts):
+                self.logger.info(f"  Part {j}: {self._serialize_part(part)}")
+        self.logger.info(f"{'='*80}\n")
+
+    def _first_with_mem0(self, content: types.Content, mem0_context: str) -> types.Content:
+        """Return a copy of content with mem0_context appended as a text part."""
+        mem0_part = types.Part.from_text(
+            text=f"\n\n---\nMemory from previous sessions:\n{mem0_context}\n---"
+        )
+        return types.Content(role=content.role, parts=list(content.parts or []) + [mem0_part])
+
+    def _build_send_contents(self, new_content: types.Content, mem0_context: str = "") -> List:
+        """Build the minimal list of Content objects to send to Gemini.
+
+        Every call sends:
+          • First user message  : goal + mem0 context injected dynamically
+          • Last model turn     : the function_call the model just issued (required by API)
+          • new_content         : the function_response or next user prompt
+
+        Old completed call/response pairs are dropped. mem0 carries cross-turn
+        memory so the model doesn't need to re-read prior tool payloads.
+        """
+        # new_content was just appended to conversation_history by _call_model
+        history = self.conversation_history
+
+        if len(history) <= 3:
+            # Not enough turns to trim anything; send everything
+            if mem0_context and history:
+                return [self._first_with_mem0(history[0], mem0_context)] + list(history[1:])
+            return list(history)
+
+        # [0] first user message (goal) — with mem0 context injected on every call
+        first = self._first_with_mem0(history[0], mem0_context) if mem0_context else history[0]
+        # [-2] last model turn (function_call) + [-1] new_content (function_response)
+        recent = history[-2:]
+        return [first] + recent
+
+    def _call_model(self, new_content: types.Content, mem0_context: str= "") -> Any:
+        """Append *new_content* to history, then call generate_content with
+        goal + mem0 context + last tool result (if any).
+        Full history is kept locally for logging; mem0 provides cross-turn memory."""
+        self._call_count += 1
+
+        self.conversation_history.append(new_content)
+        send_contents = self._build_send_contents(new_content, mem0_context)
+
+        self._log_contents(send_contents, "SENDING TO LLM")
+        self.logger.info(
+            f"(history={len(self.conversation_history)} msgs, sending={len(send_contents)} msgs)"
+        )
+
+        print(f"\n{'='*80}")
+        print("Whats sending to Gemini:")
+        print(mem0_context)
+        print(f"{'='*80}\n")
+        response = self.genai_client.models.generate_content(
+            model=self.model_id,
+            contents=send_contents,
+            config=self.agent_config,
+        )
+
+        # Record the model's reply in full local history for the next iteration's trim
+        if response.candidates and response.candidates[0].content:
+            self.conversation_history.append(response.candidates[0].content)
+            self.logger.info(f"\n--- LLM RESPONSE (iteration #{self._call_count}) ---")
+            for j, part in enumerate(response.candidates[0].content.parts or []):
+                self.logger.info(f"  Part {j}: {self._serialize_part(part)}")
+            self.logger.info("--- END LLM RESPONSE ---\n")
+        else:
+            self.logger.warning(f"LLM returned no content (iteration #{self._call_count})")
+
+        return response
+
     def generate_content(self, prompt: str, imageList: Any = None) -> Any:
-        """Send a message to the stateful chat session with optional image handling."""
+        """Build a user Content from text + optional images, then call the model."""
         if isinstance(prompt, list):
             prompt = " ".join(map(str, prompt))
 
         # Start with the text part
-        content_parts = [prompt]
-        
+        parts: list = [types.Part.from_text(text=prompt)]
+
         # Prepare content with actual images for Gemini
         if imageList:
             for temp_filepath, content in imageList:
@@ -186,41 +351,33 @@ TOOL USAGE RULES:
                     img = Image.open(BytesIO(content))
                     if img.mode != 'RGB':
                         img = img.convert('RGB')
-                    content_parts.append(img)
-                    print(f"Added image to chat from: {os.path.basename(temp_filepath)}")
+                    parts.append(img)
+                    print(f"Added image to prompt from: {os.path.basename(temp_filepath)}")
                 except Exception as e:
                     print(f"Error loading image from {temp_filepath}: {e}")
 
-        # Send the message using the CHAT SESSION, passing the most recent config
-        # This automatically appends user input and model output to history.
-        return self.chat_session.send_message(
-            message=content_parts,
-            config=self.agent_config
-        )
-    
-    def send_function_response(self, function_name: str, response_data: Any) -> Any:
-        """Send a single function/tool result back to Gemini."""
-        function_response = types.Part.from_function_response(
-            name=function_name,
-            response={"result": response_data}
-        )
-        return self.chat_session.send_message(
-            message=[function_response],
-            config=self.agent_config
-        )
+        user_content = types.Content(role="user", parts=parts)
+        return self._call_model(user_content)
 
-    def send_multiple_function_responses(self, results: list) -> Any:
+    def send_function_response(self, function_name: str, response_data: Any, mem0_context: str= "") -> Any:
+        """Send a single function/tool result back to Gemini."""
+        part = types.Part.from_function_response(
+            name=function_name,
+            response={"result": response_data},
+        )
+        user_content = types.Content(role="user", parts=[part])
+        return self._call_model(user_content, mem0_context=mem0_context)
+
+    def send_multiple_function_responses(self, results: list, mem0_context: str = "") -> Any:
         """Send multiple function/tool results back to Gemini in a single message.
         Required when Gemini issued multiple function calls in the same turn.
         results: list of (function_name, response_data) tuples, one per call."""
         parts = [
             types.Part.from_function_response(
                 name=name,
-                response={"result": data}
+                response={"result": data},
             )
             for name, data in results
         ]
-        return self.chat_session.send_message(
-            message=parts,
-            config=self.agent_config
-        )
+        user_content = types.Content(role="user", parts=parts)
+        return self._call_model(user_content, mem0_context=mem0_context)

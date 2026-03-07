@@ -66,7 +66,6 @@ async def lifespan(app: FastAPI):
         # Signal SSE connections to exit cleanly before MCP sessions close
         _shutdown_event.set()
         # Shutdown - close MCP sessions
-        agent_decision.reset_session_context()
         try:
             await agent_decision.close()
         except BaseException:
@@ -432,9 +431,8 @@ async def reset_session():
     temp_file_paths.clear()
     uploaded_files.clear()
     uploaded_dirs.clear()
-    agent_decision.reset_session_context()
     if agent_decision.llm_client:
-        agent_decision.llm_client.start_chat()
+        agent_decision.llm_client.reset_conversation()
     # Create a new session
     current_session_id = db.create_session()
     return {"status": "session_reset", "session_id": current_session_id}
@@ -449,8 +447,6 @@ async def save_session(data: dict = Body(...)):
     if not name:
         return {"error": "name is required"}
     db.update_session(current_session_id, name=name, persisted=True)
-    # Save current in-memory context to DB
-    agent_decision.save_context_to_db(current_session_id)
     return {"status": "saved", "session_id": current_session_id, "name": name}
 
 
@@ -517,12 +513,9 @@ async def load_session(data: dict = Body(...)):
         if f.get("file_type") == "dicom_dir" and os.path.isdir(f["stored_path"]):
             uploaded_dirs.append(f["stored_path"])
 
-    # Restore context into the agent
-    agent_decision.load_context_from_db(session_id)
-
-    # Reset LLM chat (context comes from SessionContext injection, not chat history)
+    # Reset LLM conversation for loaded session
     if agent_decision.llm_client:
-        agent_decision.llm_client.start_chat()
+        agent_decision.llm_client.reset_conversation()
 
     # Restore patient focus if session had one
     if session.get("patient_id") and session.get("patient_name"):

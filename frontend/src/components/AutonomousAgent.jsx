@@ -242,9 +242,8 @@ const AutonomousAgent = ({ currentSessionId }) => {
     
     try {
       const query = type === 'directory' 
-        ? `A new directory named "${name}" containing medical data has been uploaded and set as the current working directory (Path: ${path}). Please analyze its contents and autonomously perform any necessary medical workflows, such as DICOM analysis or report extraction. Explain your findings.`
-        : `A new file named "${name}" has been uploaded. Please analyze it and autonomously perform any necessary medical workflows or extraction you think is best. Explain your findings.`;
-      
+      ? `A new directory named "${name}" has been uploaded (Path: ${path}). Autonomously run the spleen model on each file to extract clinical findings. Once every file has been processed and all findings are gathered, synthesize the results into a final medical report. Start by calling radiology-workflow-sequencer skill`
+      : `A new file named "${name}" has been uploaded. Analyze it using the spleen model to extract clinical findings and generate a final medical report summary.`;
       const response = await fetch(getApiUrl('/api/process-query'), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },

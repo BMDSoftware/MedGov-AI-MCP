@@ -7,10 +7,10 @@ from datetime import datetime
 import logging
 
 from mem0 import Memory
+import mem0
 import yaml
 
 from tool_registry import ToolRegistry
-from sessionContext import SessionContext
 from logger import Logger
 import task_runner
 import database as db
@@ -70,7 +70,6 @@ class AgenticAgent:
         self.agent_tools: Set[str] = set()
         self.callback = callback  # Callback function for real-time event tracking
         self.llm_client = None
-        self.session_context = SessionContext()  # Persists tool results across queries
         self.mode = 'debug'  # 'debug' or 'normal'
         self.is_agent_autonomous = False  # Whether the agent is currently executing autonomously
         self.require_confirmation = True  # Require user confirmation before tool execution
@@ -217,129 +216,11 @@ TOOL USAGE RULES:
         
         if self.llm_client:
             self.llm_client.update_system_prompt(patient_prompt)
-        self.session_context.set_patient(patient_id, patient_name)
 
-    def reset_session_context(self):
-        """Clear all accumulated session context."""
-        self.session_context.clear()
-        print("Session context cleared.")
 
-    def save_context_to_db(self, session_id: str):
-        """Persist current session context entries to the database."""
-        import database as db
-        # Clear existing DB entries for this session, then save current state
-        db.clear_session_context(session_id)
-        for entry in self.session_context.entries:
-            db.save_context_entry(
-                session_id,
-                entry["tool"],
-                entry["summary"],
-                entry.get("data", {}),
-                entry.get("timestamp", datetime.now().isoformat())
-            )
-        print(f"Saved {len(self.session_context.entries)} context entries to DB.")
-
-    def load_context_from_db(self, session_id: str):
-        """Restore session context from the database."""
-        import database as db
-        entries = db.load_session_context(session_id)
-        self.session_context.clear()
-        self.session_context.entries = entries
-        print(f"Loaded {len(entries)} context entries from DB.")
-
-    def _record_and_persist(self, tool_name: str, result_summary: str, key_data: Dict, session_id: str = None):
-        """Record to in-memory context AND persist to DB."""
-        self.session_context.record(tool_name, result_summary, key_data)
-        if session_id:
-            import database as db
-            timestamp = self.session_context.entries[-1].get("timestamp", datetime.now().isoformat())
-            db.save_context_entry(session_id, tool_name, result_summary, key_data, timestamp)
-
-    def _extract_key_data(self, tool_name: str, result: Any) -> Dict[str, Any]:
-        """Extract the key facts from a tool result for session context."""
-        if not isinstance(result, dict):
-            return {}
-
-        # DICOM parsing - most critical for cross-query context
-        if tool_name == "utils.parse_dicom":
-            tags = result.get("tags", {})
-            return {
-                "modality": tags.get("Modality"),
-                "body_part": tags.get("BodyPartExamined"),
-                "patient_name": tags.get("PatientName"),
-                "patient_id": tags.get("PatientID"),
-                "study_description": tags.get("StudyDescription"),
-                "dimensions": result.get("dimensions"),
-                "is_valid": result.get("is_valid"),
-            }
-
-        if tool_name == "utils.parse_dicom_directory":
-            return {
-                "total_files": result.get("total_files"),
-                "num_series": result.get("num_series"),
-                "modalities_found": result.get("modalities", []),
-            }
-
-        # MONAI tools
-        if tool_name == "monai.analyze_image":
-            analysis = result.get("analysis", {})
-            return {
-                "detected_modalities": analysis.get("detected_modalities", []),
-                "shape": result.get("shape"),
-                "path": result.get("path") or result.get("file_path"),
-            }
-
-        if tool_name == "monai.list_models":
-            models = result.get("models", [])
-            return {
-                "total_models": result.get("total", 0),
-                "models": [
-                    {"name": m.get("name"), "modality": m.get("modality"),
-                     "body_part": m.get("body_part"), "downloaded": m.get("downloaded")}
-                    for m in models
-                ],
-            }
-
-        if tool_name == "monai.download_model":
-            return {
-                "model_name": result.get("model_name"),
-                "status": result.get("status"),
-            }
-
-        if tool_name == "monai.run_inference":
-            results_data = result.get("results", {})
-            return {
-                "status": result.get("status"),
-                "model_used": result.get("model_name"),
-                "detected_structures": results_data.get("detected_structures", []),
-                "output_path": results_data.get("output_path"),
-            }
-
-        # FHIR tools
-        if tool_name.startswith("fhir."):
-            resource_type = result.get("resourceType")
-            if resource_type == "Bundle":
-                entries = result.get("entry", [])
-                return {
-                    "resource_type": "Bundle",
-                    "entry_count": len(entries),
-                    "entry_types": list(set(
-                        e.get("resource", {}).get("resourceType", "?") for e in entries
-                    )),
-                }
-            elif resource_type:
-                return {"resource_type": resource_type, "id": result.get("id")}
-
-        # RadLex tools
-        if tool_name.startswith("radlex."):
-            return {
-                "operation": tool_name.split(".")[-1],
-                "status": result.get("status", "completed"),
-            }
-
-        return {}
     def _mem0_search(self, query: str, session_id: str) -> str:
         """Search mem0 for relevant memories scoped to this session."""
+        print(f"[mem0] Searching for session_id='{session_id}' with query: {query}")
         if not session_id:
             return ""
         try:
@@ -376,12 +257,47 @@ TOOL USAGE RULES:
         try:
             print(f"[mem0] Adding to memory for session '{session_id}':")
             print(f"[mem0]   Fact: {fact[:300]}{'...' if len(fact) > 300 else ''}")
-            result = memory.add(fact, user_id=session_id, infer=False)
+            result = memory.add(fact, user_id=session_id, infer=True)
             print(f"[mem0] Result: {result}")
             self.logger.info(f"[mem0] Stored memory for session {session_id}")
         except Exception as e:
             print(f"[mem0] Add failed: {e}")
             self.logger.error(f"[mem0] Add failed: {e}")
+
+    def _mem0_store_skill_usage(self, tool_name: str, arguments: dict, result: dict, session_id: str):
+        """Store skill name, description, and referenced file in mem0 after a skills tool call."""
+        if tool_name == "skills.read_skill_file":
+            skill_name = arguments.get("skill_name", "")
+            description = ""
+            content = result.get("content", "") if isinstance(result, dict) else ""
+            if content:
+                try:
+                    parts = content.split("---", 2)
+                    if len(parts) >= 3:
+                        metadata = yaml.safe_load(parts[1])
+                        description = metadata.get("description", "")
+                except Exception:
+                    pass
+            fact = f"Skill '{skill_name}' was invoked."
+            if description:
+                fact += f" Description: {description}"
+
+        elif tool_name == "skills.read_references":
+            skill_name = arguments.get("skill_name", "")
+            file_path = arguments.get("file_path", "")
+            fact = f"Reference file '{file_path}' from skill '{skill_name}' was accessed."
+
+        memory.add(fact, user_id=session_id, infer=False)
+
+    def _extract_llm_observation(self, response) -> str:
+        """Extract the text observation from an LLM response (skips function call parts)."""
+        if not response or not response.candidates:
+            return ""
+        texts = []
+        for part in (response.candidates[0].content.parts or []):
+            if hasattr(part, 'text') and part.text and part.text.strip():
+                texts.append(part.text.strip())
+        return " ".join(texts)
 
     async def refresh_available_tools(self):
         previous_tools = set(self.available_tools.keys())
@@ -473,10 +389,6 @@ TOOL USAGE RULES:
                 "result_summary": result_summary,
                 "result": result
             })
-            # Record to session context for cross-query memory
-            key_data = self._extract_key_data(tool_name, result)
-            self._record_and_persist(tool_name, result_summary, key_data, session_id)
-            self._mem0_add(f"{tool_name}: {result_summary}", session_id)
             print(f"Tool succeeded: {result_summary}")
 
             self.logger.info("  Status: SUCCESS")
@@ -497,6 +409,10 @@ TOOL USAGE RULES:
                 print(f"[agent] Saved radlex report to DB as task {_rtid[:8]}")
 
             confirmed_result = result
+
+            # Store skill metadata in mem0 after a successful skills tool call
+            if tool_name.startswith("skills.") and session_id:
+                self._mem0_store_skill_usage(tool_name, arguments, result, session_id)
         else:
             error_msg = result.get("error") if result else "No result"
             execution_history.append({
@@ -573,14 +489,8 @@ TOOL USAGE RULES:
                 turn_remaining_calls.pop(0)
                 _image_path = next_args.get("image_path", "")
                 _model_name = next_args.get("model_name", "")
-                _body_part = next(
-                    (e["data"].get("body_part", "") for e in reversed(self.session_context.entries)
-                     if e.get("data", {}).get("body_part")), ""
-                )
-                _modality = next(
-                    (e["data"].get("modality", "") for e in reversed(self.session_context.entries)
-                     if e.get("data", {}).get("modality")), ""
-                )
+                _body_part = ""
+                _modality = ""
                 _queued_tasks = []
                 if _image_path:
                     _inf_fname = Path(_image_path).name
@@ -642,16 +552,32 @@ TOOL USAGE RULES:
             }
 
         # All calls in the turn are resolved — send accumulated results to Gemini
+
         llm_response = None
         if is_gemini and turn_accumulated_results:
             self.logger.info(f"\nSENDING {len(turn_accumulated_results)} RESULT(S) TO LLM after confirmation")
             try:
+                goal_check = (
+                    f"\n\nORIGINAL GOAL: {pending['goal']}\n"
+                    "Does this result accomplish the goal?\n"
+                    "- YES → respond GOAL_ACHIEVED + final summary\n"
+                    "- NO → call the next required tool"
+                )
                 if len(turn_accumulated_results) > 1:
-                    llm_response = self.llm_client.send_multiple_function_responses(turn_accumulated_results)
+                    llm_response = self.llm_client.send_multiple_function_responses(turn_accumulated_results, mem0_context=mem0_block + goal_check)
                 else:
                     _single_name, _single_data = turn_accumulated_results[0]
-                    llm_response = self.llm_client.send_function_response(_single_name, _single_data)
+                    llm_response = self.llm_client.send_function_response(_single_name, _single_data, mem0_context=mem0_block + goal_check)
                 self.logger.info("Captured LLM response from function_response(s) (Gemini)")
+                # Store LLM's observation of the tool result(s) rather than the raw result
+                observation = self._extract_llm_observation(llm_response)
+                if observation:
+                    _ephemeral_skills = {"skills.read_skill_file", "skills.read_references"}
+                    non_ephemeral = [name for name, _ in turn_accumulated_results if name not in _ephemeral_skills]
+                    if non_ephemeral:
+                        self._mem0_add(observation, session_id)
+
+                
             except Exception as llm_err:
                 print(f"LLM API error after tool execution: {type(llm_err).__name__}: {llm_err}")
                 return {"error": f"Tool executed but LLM API unreachable: {llm_err}", "is_error": True}
@@ -744,6 +670,11 @@ TOOL USAGE RULES:
         final_result = None
         _inference_queued: set = set()  # Track image paths already queued for inference
 
+        # Reset conversation history for a fresh task (skip on resume to keep tool-use turns)
+        is_gemini = LLM_BACKEND.lower() != "ollama"
+        if is_gemini and not _resume_history and hasattr(self.llm_client, 'reset_conversation'):
+            self.llm_client.reset_conversation()
+
         # Extract image path for workflow
         image_path = None
         if imageList and isinstance(imageList, list) and imageList:
@@ -751,6 +682,7 @@ TOOL USAGE RULES:
             print(f"Image path for workflow: {image_path}")
 
         # Search mem0 for relevant session memories (skip on resume to avoid repeat searches)
+        global mem0_block  # For debugging visibility across iterations
         mem0_block = ""
         if session_id and not _resume_history:
             mem0_block = self._mem0_search(goal, session_id)
@@ -762,7 +694,8 @@ TOOL USAGE RULES:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
 
-            # Refresh mem0 context each iteration
+            # Refresh mem0 context each iteration using the stable goal as the query.
+            # This surfaces all previously stored facts relevant to this task reliably.
             if session_id:
                 mem0_block = self._mem0_search(goal, session_id)
                 print(f"[mem0] Iteration {iterations} context: {mem0_block or '(empty)'}")
@@ -815,18 +748,18 @@ TOOL USAGE RULES:
                     else:
                         image_context = "\n\nIMAGES AVAILABLE:\nImage data provided"
 
-                # Build session context from previous queries
-                session_ctx = self.session_context.build_context_string()
-                session_block = f"\n\n{session_ctx}" if session_ctx else ""
-                session_block += mem0_block
+                # Build mem0 context block
+                session_block = mem0_block
 
                 # Check if we're using Gemini and have a response from previous send_function_response
                 is_gemini = LLM_BACKEND.lower() != "ollama"
                 
+                _from_resume = False
                 if is_gemini and _resume_response is not None:
                     # Gemini optimization: Use the response we already got from send_function_response
                     response = _resume_response
                     _resume_response = None  # Clear for next iteration
+                    _from_resume = True
                     
                     self.logger.info(f"\n{'='*60}")
                     self.logger.info(f"ITERATION {iterations}/{max_iterations}")
@@ -870,6 +803,8 @@ Analyze the goal and decide your next action."""
                                     history_text += f"Failed: {error_msg}\n"
                         
                         prompt = f"""{history_text}
+GOAL: {goal}
+
 Does this accomplish the goal?
 - If YES: Respond with explicitly "GOAL_ACHIEVED" and provide the final result
 - If NO: Call the next tool you need
@@ -888,7 +823,7 @@ Your decision:"""
                     
                     # Prepare content with actual images for Gemini
                     content_parts = [prompt]
-                    
+
                     response = self.llm_client.generate_content(content_parts, images_for_llm)
                     self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
                 
@@ -1033,15 +968,9 @@ Your decision:"""
                     if tool_name == "monai.run_inference" and not self.is_agent_autonomous:
                         image_path = arguments.get("image_path", "")
                         model_name = arguments.get("model_name", "")
-                        # Pull body_part/modality from session context (set by analyze_image)
-                        body_part = next(
-                            (e["data"].get("body_part", "") for e in reversed(self.session_context.entries)
-                             if e.get("data", {}).get("body_part")), ""
-                        )
-                        modality = next(
-                            (e["data"].get("modality", "") for e in reversed(self.session_context.entries)
-                             if e.get("data", {}).get("modality")), ""
-                        )
+                        # Pull body_part/modality from LLM arguments (optional display metadata)
+                        body_part = arguments.get("body_part", "")
+                        modality = arguments.get("modality", "")
 
                         # Only queue the exact path the LLM specified with the model it chose.
                         # Do NOT auto-queue other files here — the LLM will call run_inference
@@ -1153,11 +1082,6 @@ Your decision:"""
                             "result": result  # Store actual result
                         })
 
-                        # Record to session context for cross-query memory
-                        key_data = self._extract_key_data(tool_name, result)
-                        self._record_and_persist(tool_name, result_summary, key_data, session_id)
-                        self._mem0_add(f"{tool_name}: {result_summary}", session_id)
-
                         final_result = result
                         print(f"Tool succeeded: {result_summary}")
 
@@ -1228,14 +1152,36 @@ Your decision:"""
                 # --- Phase 3: send ALL accumulated results to Gemini in one message ---
                 # For Ollama: skip this entirely — execution history goes into the next prompt
                 if is_gemini and _turn_results:
+                    goal_check = (
+                        f"\n\nORIGINAL GOAL: {goal}\n"
+                        "Does this result accomplish the goal?\n"
+                        "- YES → respond GOAL_ACHIEVED + final summary\n"
+                        "- NO → call the next required tool"
+                    )
                     if len(_turn_results) > 1:
                         self.logger.info(f"\nSENDING {len(_turn_results)} RESULTS TO LLM via send_multiple_function_responses")
-                        _resume_response = self.llm_client.send_multiple_function_responses(_turn_results)
+                        _resume_response = self.llm_client.send_multiple_function_responses(_turn_results, mem0_context=mem0_block + goal_check)
                     else:
                         _single_name, _single_data = _turn_results[0]
                         self.logger.info("\nSENDING FULL RESULT TO LLM via send_function_response")
-                        _resume_response = self.llm_client.send_function_response(_single_name, _single_data)
+                        _resume_response = self.llm_client.send_function_response(_single_name, _single_data, mem0_context=mem0_block + goal_check)
                     self.logger.info("Captured response from function_response(s) - will use on next iteration")
+                    # Store LLM's observation of the tool result(s) rather than the raw results
+                    observation = self._extract_llm_observation(_resume_response)
+                    if observation:
+                        _ephemeral_skills = {"skills.read_skill_file", "skills.read_references"}
+                        non_ephemeral = [name for name, _ in _turn_results if name not in _ephemeral_skills]
+                        if non_ephemeral:
+                            self._mem0_add(observation, session_id)
+
+
+                    function_result = ""
+                    for tool_name, result in _turn_results:
+                        function_result += f"{tool_name}: {result}\n"
+                    print("+"*20)
+                    print(function_result)
+                    print("+"*20)
+                    memory.add(function_result, user_id=session_id, infer=False)
                 
                 # If agent responded with text but no tool call
                 if has_text and not has_function_call:
@@ -1361,6 +1307,22 @@ Your decision:"""
             total = result.get("total_files", 0)
             num_series = result.get("num_series", 0)
             return f"Directory parsed: {total} files, {num_series} series"
+
+        # Skills tools
+        elif tool_name == "skills.read_skill_file":
+            skill_name = result.get("skill_name") or result.get("name", "unknown")
+            return f"Loaded skill instructions: {skill_name}"
+
+        elif tool_name == "skills.read_references":
+            skill_name = result.get("skill_name", "unknown")
+            file_path = result.get("file_path", "unknown")
+            return f"Loaded reference: {skill_name}/{file_path}"
+
+        elif tool_name == "skills.execute_script":
+            exit_code = result.get("exit_code", result.get("returncode", "?"))
+            stdout = result.get("stdout", result.get("output", ""))
+            summary = stdout.strip()[:200] if stdout else "no output"
+            return f"Script exit={exit_code}: {summary}"
 
         # Generic fallback
         if result.get("status"):

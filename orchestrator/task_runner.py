@@ -379,7 +379,7 @@ Respond with valid JSON only, with exactly these keys: "findings_narrative", "im
             from dotenv import load_dotenv
             load_dotenv()
             client = google_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-            model_id = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
             response = client.models.generate_content(model=model_id, contents=prompt)
             text = response.text or ""
 

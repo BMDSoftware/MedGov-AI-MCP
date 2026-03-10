@@ -2,7 +2,7 @@ services:
   orchestrator:
     build:
       context: .
-      dockerfile: docker/orchestrator/Dockerfile.gpu
+      dockerfile: docker/orchestrator/Dockerfile.cpu
     ports:
       - "5001:5001"
     volumes:
@@ -11,13 +11,6 @@ services:
     env_file: ./orchestrator/.env
     environment:
       - APP_ROOT=/app
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   frontend:
     build:

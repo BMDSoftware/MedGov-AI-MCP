@@ -16,7 +16,7 @@ class GeminiClient:
         self.genai_client = None
         self.chat_session = None  # Tracks the stateful conversation history
         self.available_tools = available_tools
-        self.model_id = "gemini-2.0-flash"
+        self.model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
         self.agent_config = None
         self.gemini_tools_list = []
         self.custom_system_prompt = None  # Store custom system prompt

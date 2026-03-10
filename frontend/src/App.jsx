@@ -431,15 +431,25 @@ function App() {
             } else {
               // Existing session loaded - restore chat history
               setCurrentSessionId(data.session_id);
-              const saved = localStorage.getItem(`messages_${data.session_id}`);
-              if (saved) {
-                try {
-                  setMessages(JSON.parse(saved));
-                } catch {
-                  setMessages([{ type: 'bot', content: `Session "${data.name}" loaded.`, actions: [] }]);
-                }
+              // Prefer messages from DB (returned by load-session), fall back to localStorage
+              if (data.messages && data.messages.length > 0) {
+                const restored = data.messages.map(m => ({
+                  type: m.role === 'user' ? 'user' : 'bot',
+                  content: m.content,
+                  actions: []
+                }));
+                setMessages(restored);
               } else {
-                setMessages([{ type: 'bot', content: `Session "${data.name}" loaded. No previous chat history found.`, actions: [] }]);
+                const saved = localStorage.getItem(`messages_${data.session_id}`);
+                if (saved) {
+                  try {
+                    setMessages(JSON.parse(saved));
+                  } catch {
+                    setMessages([{ type: 'bot', content: `Session "${data.name}" loaded.`, actions: [] }]);
+                  }
+                } else {
+                  setMessages([{ type: 'bot', content: `Session "${data.name}" loaded. No previous chat history found.`, actions: [] }]);
+                }
               }
               // Restore uploaded directories from session
               const dirEntries = (data.files || []).filter(f => f.file_type === 'dicom_dir');

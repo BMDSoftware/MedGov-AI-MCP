@@ -137,11 +137,26 @@ function Sessions({ onLoadSession }) {
 
   const handleSavePromptDiscard = async () => {
     const target = savePrompt.targetSessionId;
+    const sessionToDelete = currentSessionId;
     setSavePrompt(null);
+    // Switch away first (this changes the active session on the backend)
     if (target === 'new') {
       await doNewSession();
     } else {
       await doLoad(target);
+    }
+    // Now delete the old unsaved session (it's no longer active)
+    if (sessionToDelete) {
+      try {
+        await fetch(`${API_URL}/api/delete-session`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionToDelete })
+        });
+        await fetchSessions();
+      } catch (e) {
+        // ignore
+      }
     }
   };
 

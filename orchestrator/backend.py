@@ -221,6 +221,13 @@ async def process_query(query: str = Body(..., media_type="text/plain")):
             else:
                 result = await agent_decision.execute_task(query, session_id=current_session_id)
 
+        db.save_message(current_session_id, "user", query)
+        if isinstance(result, dict):
+            agent_text = result.get("answer") or result.get("response") or result.get("error") or ""
+        else:
+            agent_text = str(result)
+        if agent_text:
+            db.save_message(current_session_id, "assistant", agent_text)
         return {"result": result}
     except Exception as e:
         print(f"Error processing query: {e}")
@@ -513,9 +520,20 @@ async def load_session(data: dict = Body(...)):
         if f.get("file_type") == "dicom_dir" and os.path.isdir(f["stored_path"]):
             uploaded_dirs.append(f["stored_path"])
 
-    # Reset LLM conversation for loaded session
-    if agent_decision.llm_client:
-        agent_decision.llm_client.reset_conversation()
+    # Restore context into the agent
+    agent_decision.load_context_from_db(session_id)
+
+    # Restore conversation messages and rebuild LLM chat history
+    saved_messages = db.get_messages(session_id)
+    if agent_decision.llm_client and saved_messages:
+        from google.genai import types as genai_types
+        history = []
+        for msg in saved_messages:
+            role = "user" if msg["role"] == "user" else "model"
+            history.append(genai_types.Content(role=role, parts=[genai_types.Part(text=msg["content"])]))
+        agent_decision.llm_client.start_chat(history=history)
+    elif agent_decision.llm_client:
+        agent_decision.llm_client.start_chat()
 
     # Restore patient focus if session had one
     if session.get("patient_id") and session.get("patient_name"):
@@ -525,7 +543,8 @@ async def load_session(data: dict = Body(...)):
         "status": "loaded",
         "session_id": session_id,
         "name": session["name"],
-        "files": db.get_session_files(session_id)
+        "files": db.get_session_files(session_id),
+        "messages": saved_messages
     }
 
 
@@ -535,6 +554,14 @@ async def get_session_files(session_id: Optional[str] = None):
     sid = session_id or current_session_id
     files = db.get_session_files(sid)
     return {"session_id": sid, "files": files}
+
+
+@app.get("/api/messages", tags=["sessions"], summary="Get conversation messages for a session")
+async def get_messages(session_id: Optional[str] = None):
+    """Get saved conversation messages for a session (defaults to current)"""
+    sid = session_id or current_session_id
+    messages = db.get_messages(sid)
+    return {"session_id": sid, "messages": messages}
 
 
 

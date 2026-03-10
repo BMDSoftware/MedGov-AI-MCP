@@ -61,6 +61,14 @@ def init_db():
             uploaded_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS conversation_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS background_tasks (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -199,6 +207,39 @@ def clear_session_context(session_id: str):
     """Clear all context entries for a session."""
     conn = _get_conn()
     conn.execute("DELETE FROM session_context WHERE session_id = ?", (session_id,))
+    conn.commit()
+    conn.close()
+
+
+# --- Conversation Messages ---
+
+def save_message(session_id: str, role: str, content: str):
+    """Save a conversation message (role: 'user' or 'assistant')."""
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO conversation_messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+        (session_id, role, content, datetime.now().isoformat())
+    )
+    conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (datetime.now().isoformat(), session_id))
+    conn.commit()
+    conn.close()
+
+
+def get_messages(session_id: str) -> List[Dict]:
+    """Load all conversation messages for a session in order."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT role, content, timestamp FROM conversation_messages WHERE session_id = ? ORDER BY id",
+        (session_id,)
+    ).fetchall()
+    conn.close()
+    return [{"role": row["role"], "content": row["content"], "timestamp": row["timestamp"]} for row in rows]
+
+
+def clear_messages(session_id: str):
+    """Delete all conversation messages for a session."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM conversation_messages WHERE session_id = ?", (session_id,))
     conn.commit()
     conn.close()
 

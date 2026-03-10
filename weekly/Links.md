@@ -64,3 +64,8 @@
 ### PacsCenter
 
 - https://www.bmd-software.com/solutions/pacscenter/
+
+### Extras (Martinho)
+
+- https://cra.mr/mcp-skills-and-agents/#agents
+- https://www.ibm.com/think/topics/multiagent-system

@@ -174,6 +174,126 @@ class ToolRegistry:
         await self.stack.aclose()
 
 
+    async def refresh_server_tools(self, name: str) -> Dict[str, Dict]:
+        """Re-query tools from an already-connected server."""
+        if name not in self.sessions:
+            raise Exception(f"Server '{name}' is not connected.")
+        session, transport = self.sessions[name]
+        # Remove old tools for this server
+        old_keys = [k for k in self.available_tools if k.startswith(f"{name}.")]
+        for k in old_keys:
+            del self.available_tools[k]
+        # Re-list tools
+        tools = await session.list_tools()
+        new_tools = {}
+        for tool in tools.tools:
+            prefixed_name = f"{name}.{tool.name}"
+            tool_info = {
+                "description": getattr(tool, "description", ""),
+                "schema": getattr(tool, "inputSchema", {}),
+                "server": name,
+                "original_name": tool.name,
+                "transport": transport
+            }
+            self.available_tools[prefixed_name] = tool_info
+            new_tools[prefixed_name] = tool_info
+        print(f"[{name}] Refreshed tools: {list(new_tools.keys())}")
+        return new_tools
+
+    async def add_server(self, name: str, cfg: dict) -> Dict[str, Dict]:
+        """Connect a new MCP server live and register its tools. Returns new tools dict."""
+        if name in self.sessions:
+            raise Exception(f"Server '{name}' already connected.")
+        cfg = self._expand_vars(cfg)
+        transport = cfg.get("transport", "stdio")
+        server_stack = AsyncExitStack()
+        success = False
+        new_tools = {}
+        try:
+            if transport == "stdio":
+                params = StdioServerParameters(
+                    command=cfg["command"],
+                    args=cfg.get("args", []),
+                    env={**os.environ, **cfg.get("env", {})}
+                )
+                read, write = await server_stack.enter_async_context(stdio_client(params))
+                session = await server_stack.enter_async_context(ClientSession(read, write))
+                await session.initialize()
+                self.sessions[name] = (session, "stdio")
+            elif transport == "http":
+                url = cfg.get("url", "")
+                read, write, _ = await server_stack.enter_async_context(streamable_http_client(url))
+                session = await server_stack.enter_async_context(ClientSession(read, write))
+                await session.initialize()
+                self.sessions[name] = (session, "http")
+            else:
+                raise Exception(f"Unknown transport: {transport}")
+
+            tools = await session.list_tools()
+            for tool in tools.tools:
+                prefixed_name = f"{name}.{tool.name}"
+                tool_info = {
+                    "description": getattr(tool, "description", ""),
+                    "schema": getattr(tool, "inputSchema", {}),
+                    "server": name,
+                    "original_name": tool.name,
+                    "transport": transport
+                }
+                self.available_tools[prefixed_name] = tool_info
+                new_tools[prefixed_name] = tool_info
+            print(f"[{name}] Connected. Tools: {list(new_tools.keys())}")
+            success = True
+
+            # Persist to mcp-config.json
+            try:
+                with open(self.config_path, 'r') as f:
+                    config = json.load(f)
+                config.setdefault("mcpServers", {})[name] = cfg
+                with open(self.config_path, 'w') as f:
+                    json.dump(config, f, indent=2)
+            except Exception as e:
+                print(f"Warning: could not persist new server to config: {e}")
+
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling() > 0:
+                task.uncancel()
+            raise Exception(f"Connection cancelled for server '{name}'")
+        except Exception:
+            raise
+        finally:
+            if success:
+                self.stack.push_async_callback(server_stack.aclose)
+            else:
+                try:
+                    await server_stack.aclose()
+                except BaseException:
+                    pass
+                if name in self.sessions:
+                    del self.sessions[name]
+
+        return new_tools
+
+    async def remove_server(self, name: str):
+        """Disconnect an MCP server and remove its tools."""
+        # Remove tools
+        to_remove = [k for k in self.available_tools if k.startswith(f"{name}.")]
+        for k in to_remove:
+            del self.available_tools[k]
+        if name in self.sessions:
+            del self.sessions[name]
+
+        # Remove from mcp-config.json
+        try:
+            with open(self.config_path, 'r') as f:
+                config = json.load(f)
+            config.get("mcpServers", {}).pop(name, None)
+            with open(self.config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            print(f"Warning: could not remove server from config: {e}")
+        print(f"[{name}] Removed.")
+
     async def reload_config_and_refresh(self) -> Dict[str, Dict]:
         """
         Reload MCP config and rediscover tools without closing sessions.

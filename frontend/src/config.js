@@ -1,13 +1,10 @@
-// API Configuration
-export const API_CONFIG = {
-  BASE_URL: import.meta.env.VITE_API_URL || 'http://localhost:5001',
-  ENDPOINTS: {
-    UPLOAD: '/api/upload',
-    PROCESS_WORKFLOW: '/api/process-workflow',
-    HEALTH: '/api/health'
-  }
-}
+// Empty string = relative paths, works with nginx proxy in production
+// and Vite dev proxy in development
+export const API_URL = '';
 
-export const getApiUrl = (endpoint) => {
-  return `${API_CONFIG.BASE_URL}${endpoint}`
-}
+// Legacy exports for backwards compatibility
+export const API_CONFIG = {
+  BASE_URL: API_URL,
+};
+
+export const getApiUrl = (endpoint) => `${API_URL}${endpoint}`;

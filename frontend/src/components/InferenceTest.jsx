@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { getApiUrl } from '../config';
 import './InferenceTest.css';
 
-const API_URL = 'http://localhost:5001';
+import { API_URL } from '../config.js';
 
 function InferenceTest() {
   const [currentStep, setCurrentStep] = useState(1);

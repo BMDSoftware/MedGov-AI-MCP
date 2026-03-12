@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import './Report.css';
 
-const API_URL = 'http://localhost:5001';
+import { API_URL } from '../config.js';
 
 function Report({ refreshSignal, currentSessionId }) {
   const [inferenceTasks, setInferenceTasks] = useState([]);

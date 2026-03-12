@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import './Toast.css';
 
-const API_URL = 'http://localhost:5001';
+import { API_URL } from '../config.js';
 
 /**
  * Global toast notification component.

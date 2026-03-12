@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import './Sessions.css';
 
-const API_URL = 'http://localhost:5001';
+import { API_URL } from '../config.js';
 
 function Sessions({ onLoadSession }) {
   const [sessions, setSessions] = useState([]);

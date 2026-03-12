@@ -12,5 +12,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy with Docker Compose
-        run: docker compose up --build -d
+      - name: Build Docker images
+        run: docker compose build
+
+      - name: Prepare deploy directory
+        run: |
+          mkdir -p /opt/medgov-ai-mcp
+          cp docker-compose.yml /opt/medgov-ai-mcp/docker-compose.yml
+          cp -r docker /opt/medgov-ai-mcp/docker
+          if [ ! -f /opt/medgov-ai-mcp/orchestrator/.env ]; then
+            mkdir -p /opt/medgov-ai-mcp/orchestrator
+            cp orchestrator/.env.example /opt/medgov-ai-mcp/orchestrator/.env
+            echo "WARNING: .env was created from example - update it with real values"
+          fi
+
+      - name: Start services
+        working-directory: /opt/medgov-ai-mcp
+        run: docker compose up -d

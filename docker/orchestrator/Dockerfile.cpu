@@ -54,4 +54,4 @@ ENV APP_ROOT=/app
 
 EXPOSE 5001
 
-CMD ["orchestrator/venv/bin/python", "orchestrator/backend.py"]
+CMD ["sh", "-c", "cp orchestrator/mcp-config.json.example orchestrator/mcp-config.json && orchestrator/venv/bin/python orchestrator/backend.py"]

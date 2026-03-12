@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import './HomePage.css';
 
-const API_URL = 'http://localhost:5001';
+import { API_URL } from '../config.js';
 
 const FEATURES = [
   {

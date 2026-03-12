@@ -388,6 +388,7 @@ function App() {
           ) : (
             <p>Multi-Agent Orchestrator for Healthcare</p>
           )}
+
           {runningTaskCount > 0 && (
             <div className="header-task-indicator">
               <span className="header-task-dot" />

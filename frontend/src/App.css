@@ -743,6 +743,7 @@ body {
 }
 
 /* Running tasks indicator in header */
+
 .header-task-indicator {
   display: flex;
   align-items: center;

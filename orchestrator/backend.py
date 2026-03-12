@@ -21,6 +21,18 @@ import task_runner
 
 current_session_id: Optional[str] = None
 _shutdown_event: Optional[asyncio.Event] = None
+_mcp_notifications: list = []  # in-memory MCP event log
+
+
+def _push_notification(event_type: str, message: str):
+    from datetime import datetime
+    _mcp_notifications.append({
+        "type": event_type,
+        "message": message,
+        "timestamp": datetime.now().isoformat()
+    })
+    if len(_mcp_notifications) > 100:
+        _mcp_notifications.pop(0)
 
 # --- App settings (persisted to disk) ---
 _SETTINGS_FILE = Path(__file__).parent / "app_settings.json"
@@ -42,6 +54,39 @@ def _save_settings(settings: dict):
 _app_settings = _load_settings()
 
 
+async def _poll_mcp_tools(interval: int = 30):
+    """Periodically re-query all connected MCP servers for tool changes."""
+    while True:
+        try:
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=interval)
+            return  # shutdown signalled
+        except asyncio.TimeoutError:
+            pass
+        try:
+            servers = list(agent_decision.tool_registry.sessions.keys())
+            for name in servers:
+                try:
+                    old_keys = set(k for k in agent_decision.available_tools if k.startswith(f"{name}."))
+                    new_tools = await agent_decision.tool_registry.refresh_server_tools(name)
+                    new_keys = set(new_tools.keys())
+                    added = new_keys - old_keys
+                    removed = old_keys - new_keys
+                    for k in old_keys:
+                        agent_decision.available_tools.pop(k, None)
+                        agent_decision.agent_tools.discard(k)
+                    agent_decision.available_tools.update(new_tools)
+                    agent_decision.agent_tools.update(new_keys)
+                    for k in added:
+                        _push_notification("tool_added", f"New tool available: {k}")
+                    for k in removed:
+                        _push_notification("tool_removed", f"Tool removed: {k}")
+                except Exception:
+                    pass
+            agent_decision._refresh_agent_components()
+        except Exception:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global current_session_id, _shutdown_event
@@ -52,6 +97,7 @@ async def lifespan(app: FastAPI):
     await agent_decision._initialize_components()
     agent_decision.set_mode(_app_settings.get("mode", "debug"))
     task_runner.init()
+    asyncio.create_task(_poll_mcp_tools(30))
     try:
         yield
     except asyncio.CancelledError:
@@ -160,6 +206,33 @@ async def set_directory(data: dict = Body(...)):
             db.save_uploaded_file(current_session_id, dirname, dir_path, 'dicom_dir', total_size)
 
     return {"status": "ok", "dirs": uploaded_dirs}
+
+
+@app.get("/api/available-models", tags=["agent"], summary="List available Gemini models for the configured API key")
+async def available_models():
+    try:
+        from google import genai as google_genai
+        client = google_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        models = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in (m.supported_actions or [])]
+        return {"models": sorted(models)}
+    except Exception as e:
+        return {"models": [], "error": str(e)}
+
+
+@app.post("/api/set-model", tags=["agent"], summary="Switch the LLM model for the current session")
+async def set_model(data: dict = Body(...)):
+    model_id = data.get("model_id")
+    if not model_id:
+        return {"error": "model_id is required"}
+    if agent_decision.llm_client:
+        agent_decision.llm_client.set_model(model_id)
+    return {"status": "ok", "model_id": model_id}
+
+
+@app.get("/api/current-model", tags=["agent"], summary="Get the currently active LLM model")
+async def get_current_model():
+    model_id = agent_decision.llm_client.model_id if agent_decision.llm_client else os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    return {"model_id": model_id}
 
 
 @app.post("/api/change-agent-type", tags=["agent"], summary="Switch between default and autonomous agent modes")
@@ -349,6 +422,8 @@ async def enable_tool(data: dict = Body(...)):
     if not tool_name:
         return {"error": "tool_name required"}
     agent_decision.enable_tool(tool_name)
+    if data.get("notify", True):
+        _push_notification("tool_enabled", f"Tool enabled: {tool_name}")
     return {"status": "enabled", "tool": tool_name}
 
 @app.post("/api/disable-tool", tags=["agent"], summary="Disable a specific MCP tool from the agent")
@@ -357,13 +432,73 @@ async def disable_tool(data: dict = Body(...)):
     if not tool_name:
         return {"error": "tool_name required"}
     agent_decision.disable_tool(tool_name)
+    if data.get("notify", True):
+        _push_notification("tool_disabled", f"Tool disabled: {tool_name}")
     return {"status": "disabled", "tool": tool_name}
+
+@app.post("/api/push-notification", tags=["events"], summary="Push a manual notification to the SSE stream")
+async def push_notification(data: dict = Body(...)):
+    event_type = data.get("type")
+    message = data.get("message")
+    if not event_type or not message:
+        return {"error": "type and message required"}
+    _push_notification(event_type, message)
+    return {"status": "ok"}
 
 
 @app.post("/api/refresh-config", tags=["agent"], summary="Reload mcp-config.json and rediscover available tools")
 async def refresh_config():
     await agent_decision.refresh_available_tools()
     return {"status": "refreshed", "available_tools": list(agent_decision.available_tools.keys())}
+
+
+@app.get("/api/notifications", tags=["agent"], summary="Get MCP event notifications")
+async def get_notifications():
+    return {"notifications": list(_mcp_notifications)}
+
+
+@app.post("/api/refresh-server-tools", tags=["agent"], summary="Re-query tools from an already-connected MCP server")
+async def refresh_server_tools(data: dict = Body(...)):
+    name = data.get("name")
+    if not name:
+        return {"error": "name is required"}
+    try:
+        new_tools = await agent_decision.refresh_server_tools(name)
+        return {"status": "refreshed", "server": name, "tools": list(new_tools.keys())}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/add-mcp-server", tags=["agent"], summary="Connect a new MCP server live without restarting")
+async def add_mcp_server(data: dict = Body(...)):
+    name = data.get("name")
+    cfg = data.get("config")
+    if not name or not cfg:
+        return {"error": "name and config are required"}
+    try:
+        new_tools = await agent_decision.add_mcp_server(name, cfg)
+        _push_notification("server_added", f"MCP server connected: {name} ({len(new_tools)} tools)")
+        for tool in new_tools:
+            _push_notification("tool_added", f"New tool available: {tool}")
+        return {"status": "connected", "server": name, "tools": list(new_tools.keys())}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/api/remove-mcp-server", tags=["agent"], summary="Disconnect and remove an MCP server")
+async def remove_mcp_server(data: dict = Body(...)):
+    name = data.get("name")
+    if not name:
+        return {"error": "name is required"}
+    try:
+        removed_tools = [k for k in agent_decision.available_tools if k.startswith(f"{name}.")]
+        await agent_decision.remove_mcp_server(name)
+        _push_notification("server_removed", f"MCP server removed: {name}")
+        for tool in removed_tools:
+            _push_notification("tool_removed", f"Tool removed: {tool}")
+        return {"status": "removed", "server": name}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.post("/api/start-healthcare-conversation", tags=["agent"], summary="Set patient context for the AI agent")
@@ -963,6 +1098,7 @@ async def sse_events(request: Request):
                 print(f"[SSE] init error: {e}")
 
             keepalive_ticks = 0
+            notified_mcp: set = set()  # indices of already-sent MCP notifications
 
             while True:
                 # Sleep 1s, but wake up immediately if the server is shutting down
@@ -979,6 +1115,12 @@ async def sse_events(request: Request):
 
                 if await request.is_disconnected():
                     break
+
+                # Emit new MCP notifications
+                for i, notif in enumerate(_mcp_notifications):
+                    if i not in notified_mcp:
+                        notified_mcp.add(i)
+                        yield f"data: {json.dumps({'type': 'mcp_notification', **notif})}\n\n"
 
                 try:
                     tasks = db.list_tasks()

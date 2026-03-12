@@ -124,6 +124,8 @@ class AgentState:
 class AgenticAgent:
     """AI agent that decides which MCP tools to call based on context and data"""
 
+    _DISABLED_TOOLS_FILE = Path(__file__).parent / "data" / "disabled_tools.json"
+
     def __init__(self, callback=None, enable_debug_logging=True, log_level=logging.DEBUG):
         self.tool_registry = ToolRegistry()
         self.available_tools = {}
@@ -268,10 +270,27 @@ class AgenticAgent:
     def get_enabled_agent_tools(self) -> Dict[str, Dict]:
         return {name: info for name, info in self.available_tools.items() if name in self.agent_tools}
 
+    def _load_disabled_tools(self) -> Set[str]:
+        try:
+            if self._DISABLED_TOOLS_FILE.exists():
+                return set(json.loads(self._DISABLED_TOOLS_FILE.read_text()))
+        except Exception:
+            pass
+        return set()
+
+    def _save_disabled_tools(self):
+        disabled = set(self.available_tools.keys()) - self.agent_tools
+        try:
+            self._DISABLED_TOOLS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            self._DISABLED_TOOLS_FILE.write_text(json.dumps(list(disabled)))
+        except Exception as e:
+            print(f"Warning: could not save disabled tools: {e}")
+
     def enable_tool(self, tool_name: str):
         if tool_name in self.available_tools and tool_name not in self.agent_tools:
             self.agent_tools.add(tool_name)
             self._refresh_agent_components()
+            self._save_disabled_tools()
         elif tool_name in self.agent_tools:
             print(f"Tool already enabled: {tool_name}")
         else:
@@ -281,6 +300,7 @@ class AgenticAgent:
         if tool_name in self.agent_tools:
             self.agent_tools.remove(tool_name)
             self._refresh_agent_components()
+            self._save_disabled_tools()
         else:
             print(f"Tool not enabled: {tool_name}")
 
@@ -398,6 +418,90 @@ TOOL USAGE RULES:
         memory.add(fact, user_id=session_id, infer=False)
 
     
+
+        # MONAI tools
+        if tool_name == "monai.analyze_image":
+            analysis = result.get("analysis", {})
+            return {
+                "detected_modalities": analysis.get("detected_modalities", []),
+                "shape": result.get("shape"),
+                "path": result.get("path") or result.get("file_path"),
+            }
+
+        if tool_name == "monai.list_models":
+            models = result.get("models", [])
+            return {
+                "total_models": result.get("total", 0),
+                "models": [
+                    {"name": m.get("name"), "modality": m.get("modality"),
+                     "body_part": m.get("body_part"), "downloaded": m.get("downloaded")}
+                    for m in models
+                ],
+            }
+
+        if tool_name == "monai.download_model":
+            return {
+                "model_name": result.get("model_name"),
+                "status": result.get("status"),
+            }
+
+        if tool_name == "monai.run_inference":
+            results_data = result.get("results", {})
+            return {
+                "status": result.get("status"),
+                "model_used": result.get("model_name"),
+                "detected_structures": results_data.get("detected_structures", []),
+                "output_path": results_data.get("output_path"),
+            }
+
+        # FHIR tools
+        if tool_name.startswith("fhir."):
+            resource_type = result.get("resourceType")
+            if resource_type == "Bundle":
+                entries = result.get("entry", [])
+                return {
+                    "resource_type": "Bundle",
+                    "entry_count": len(entries),
+                    "entry_types": list(set(
+                        e.get("resource", {}).get("resourceType", "?") for e in entries
+                    )),
+                }
+            elif resource_type:
+                return {"resource_type": resource_type, "id": result.get("id")}
+
+        # RadLex tools
+        if tool_name.startswith("radlex."):
+            return {
+                "operation": tool_name.split(".")[-1],
+                "status": result.get("status", "completed"),
+            }
+
+        return {}
+    async def refresh_server_tools(self, name: str):
+        new_tools = await self.tool_registry.refresh_server_tools(name)
+        old = [k for k in self.available_tools if k.startswith(f"{name}.")]
+        for k in old:
+            self.available_tools.pop(k, None)
+            self.agent_tools.discard(k)
+        self.available_tools.update(new_tools)
+        self.agent_tools.update(new_tools.keys())
+        self._refresh_agent_components()
+        return new_tools
+
+    async def add_mcp_server(self, name: str, cfg: dict):
+        new_tools = await self.tool_registry.add_server(name, cfg)
+        self.available_tools.update(new_tools)
+        self.agent_tools.update(new_tools.keys())
+        self._refresh_agent_components()
+        return new_tools
+
+    async def remove_mcp_server(self, name: str):
+        await self.tool_registry.remove_server(name)
+        to_remove = [k for k in self.available_tools if k.startswith(f"{name}.")]
+        for k in to_remove:
+            self.available_tools.pop(k, None)
+            self.agent_tools.discard(k)
+        self._refresh_agent_components()
 
     async def refresh_available_tools(self):
         previous_tools = set(self.available_tools.keys())

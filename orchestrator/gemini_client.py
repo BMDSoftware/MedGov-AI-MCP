@@ -51,6 +51,15 @@ class GeminiClient:
         self.reset_conversation()
         print("System prompt updated for patient conversation")
 
+    def set_model(self, model_id: str):
+        """Switch to a different model, preserving the current chat history."""
+        if model_id == self.model_id:
+            return
+        history = list(self.chat_session.get_history()) if self.chat_session else []
+        self.model_id = model_id
+        self.start_chat(history=history)
+        print(f"Switched to model: {model_id}")
+
     def _initialize_gemini(self):
         """Initialize Gemini using new google.genai Client"""
         self.genai_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))

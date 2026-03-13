@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import os
 import json
+import re
 from typing import Dict, List, Optional, Any, Set
 from pathlib import Path
 from datetime import datetime
 import logging
+from dataclasses import dataclass, field, asdict
 
 from mem0 import Memory
 import mem0
@@ -60,6 +62,64 @@ You are communicating with medical professionals (physicians, radiologists, clin
 6. When something fails, explain it in plain clinical language and suggest what the user should do next.
 7. Keep responses to 2–4 sentences unless more clinical detail is genuinely needed.
 8. Do not narrate your internal process or the tools you called — only state the outcome to the user."""
+
+@dataclass
+class PlanStep:
+    id: int
+    description: str
+    status: str = "pending"          # "pending" | "done" | "failed" | "skipped"
+    tool_name: Optional[str] = None  # filled by code after execution
+    result_summary: Optional[str] = None
+
+
+@dataclass
+class AgentPlan:
+    goal: str
+    needs_skills: bool = True
+    steps: List[PlanStep] = field(default_factory=list)
+
+    def current_step(self) -> Optional[PlanStep]:
+        return next((s for s in self.steps if s.status == "pending"), None)
+
+    def mark_done(self, step_id: int, tool_name: str, result_summary: str):
+        for s in self.steps:
+            if s.id == step_id:
+                s.status = "done"
+                s.tool_name = tool_name
+                s.result_summary = result_summary
+
+    def mark_failed(self, step_id: int, tool_name: str, error: str):
+        for s in self.steps:
+            if s.id == step_id:
+                s.status = "failed"
+                s.tool_name = tool_name
+                s.result_summary = f"Error: {error}"
+
+    def render(self) -> str:
+        icons = {"pending": "[ ]", "done": "[x]", "failed": "[!]", "skipped": "[-]"}
+        lines = [f"EXECUTION PLAN — {self.goal}"]
+        for s in self.steps:
+            line = f"  {icons[s.status]} Step {s.id}: {s.description}"
+            if s.result_summary:
+                line += f"  → {s.result_summary}"
+            lines.append(line)
+        return "\n".join(lines)
+
+
+@dataclass
+class AgentState:
+    task: str
+    completed_steps: List[str] = field(default_factory=list)   # one-sentence per step
+    current_objective: str = ""
+    artifacts: List[str] = field(default_factory=list)          # file paths only
+    important_facts: Dict[str, Any] = field(
+        default_factory=lambda: {"task_constraints": {}, "agent_notes": {}}
+    )
+    status: str = "in_progress"   # in_progress | complete | failed
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), indent=2)
+
 
 class AgenticAgent:
     """AI agent that decides which MCP tools to call based on context and data"""
@@ -129,6 +189,53 @@ class AgenticAgent:
             "original_name": "list_tasks",
             "transport": "builtin",
         },
+        "update_agent_notes": {
+            "description": (
+                "Store an important finding or fact in your persistent notes for this task. "
+                "Use this after any tool returns clinically or technically significant information "
+                "you will need later — e.g. detected anatomy, output file paths, model names chosen, "
+                "DICOM metadata, or any fact needed to synthesize the final report. "
+                "Notes persist across all iterations. Keep values concise (one sentence or short list)."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Short label for this note, e.g. 'spleen_inference_result', 'dicom_modality'.",
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "The fact or finding to remember.",
+                    },
+                },
+                "required": ["key", "value"],
+            },
+            "server": "__builtin__",
+            "original_name": "update_agent_notes",
+            "transport": "builtin",
+        },
+        # Bug 1 fix: explicit completion tool so the LLM never has to say "GOAL_ACHIEVED" in text
+        "complete_task": {
+            "description": (
+                "Call this tool when you have fully completed the task goal and ALL plan steps. "
+                "Provide a concise final summary of what was accomplished. "
+                "This is the ONLY way to signal task completion — do NOT write 'GOAL_ACHIEVED' in text."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Concise final summary of what was accomplished.",
+                    }
+                },
+                "required": ["summary"],
+            },
+            "server": "__builtin__",
+            "original_name": "complete_task",
+            "transport": "builtin",
+        },
     }
 
     async def _initialize_components(self):
@@ -137,7 +244,7 @@ class AgenticAgent:
 
         self.available_tools = await self.tool_registry.discover_tools()
         # Register built-in tools alongside MCP tools
-        #self.available_tools.update(self.BUILTIN_TOOLS)
+        self.available_tools.update(self.BUILTIN_TOOLS)
         self.agent_tools = set(self.available_tools.keys())
         skills = self.load_all_skills()
         enabled_tools = self.get_enabled_agent_tools()
@@ -212,7 +319,8 @@ TOOL USAGE RULES:
 5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
 6. After a tool returns results, summarize them clearly for the user.
 7. MULTI-FILE RULE: When multiple paths are listed in "IMAGES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
-8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices that forms a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate or process individual files inside the directory."""
+8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices that forms a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate or process individual files inside the directory.
+9. NOTE-TAKING: After any tool returns important findings (detected anatomy, output paths, DICOM metadata, chosen model names), call update_agent_notes with a concise key and value. These notes are injected into every subsequent LLM call and help you avoid re-deriving the same information."""
         
         if self.llm_client:
             self.llm_client.update_system_prompt(patient_prompt)
@@ -289,20 +397,13 @@ TOOL USAGE RULES:
 
         memory.add(fact, user_id=session_id, infer=False)
 
-    def _extract_llm_observation(self, response) -> str:
-        """Extract the text observation from an LLM response (skips function call parts)."""
-        if not response or not response.candidates:
-            return ""
-        texts = []
-        for part in (response.candidates[0].content.parts or []):
-            if hasattr(part, 'text') and part.text and part.text.strip():
-                texts.append(part.text.strip())
-        return " ".join(texts)
+    
 
     async def refresh_available_tools(self):
         previous_tools = set(self.available_tools.keys())
         previous_enabled = set(self.agent_tools)
         self.available_tools = await self.tool_registry.reload_config_and_refresh()
+        self.available_tools.update(self.BUILTIN_TOOLS)
         current_tools = set(self.available_tools.keys())
         still_enabled = previous_enabled & current_tools
         new_tools = current_tools - previous_tools
@@ -352,6 +453,11 @@ TOOL USAGE RULES:
 
         pending = self.pending_tool_call
         self.pending_tool_call = None
+
+        # Retrieve plan state from pending
+        _plan: Optional[AgentPlan] = pending.get("plan")
+        _state: Optional[AgentState] = pending.get("state")
+        _all_results: List[tuple] = list(pending.get("all_results", []))
 
         # Execute the tool
         tool_name = pending["tool_name"]
@@ -409,10 +515,15 @@ TOOL USAGE RULES:
                 print(f"[agent] Saved radlex report to DB as task {_rtid[:8]}")
 
             confirmed_result = result
+            # Update plan step
+            if _plan:
+                _step = _plan.current_step()
+                if _step:
+                    self._update_plan_after_tool(_plan, _step.id, tool_name, True, result_summary)
+            _all_results.append((tool_name, confirmed_result))
+            if _state:
+                self._update_state_after_tool(_state, tool_name, confirmed_result, True, result_summary, _plan)
 
-            # Store skill metadata in mem0 after a successful skills tool call
-            if tool_name.startswith("skills.") and session_id:
-                self._mem0_store_skill_usage(tool_name, arguments, result, session_id)
         else:
             error_msg = result.get("error") if result else "No result"
             execution_history.append({
@@ -426,6 +537,14 @@ TOOL USAGE RULES:
             self.logger.error(f"  Error: {error_msg}")
 
             confirmed_result = {"error": str(error_msg) if error_msg else "Tool execution failed", "is_error": True}
+            # Update plan step
+            if _plan:
+                _step = _plan.current_step()
+                if _step:
+                    self._update_plan_after_tool(_plan, _step.id, tool_name, False, str(error_msg) if error_msg else "Tool execution failed")
+            _all_results.append((tool_name, confirmed_result))
+            if _state:
+                self._update_state_after_tool(_state, tool_name, confirmed_result, False, str(error_msg) if error_msg else "Tool execution failed", _plan)
 
         # Build the accumulated results list for this turn:
         # results confirmed so far (from before this call) + this call's result
@@ -519,6 +638,36 @@ TOOL USAGE RULES:
                     "result": _result,
                 })
                 turn_accumulated_results.append((next_name, _result))
+            elif next_name == "update_agent_notes":
+                turn_remaining_calls.pop(0)
+                note_key = next_args.get("key", "note")
+                note_value = next_args.get("value", "")
+                if _state:
+                    _state.important_facts["agent_notes"][note_key] = note_value
+                    self._prune_agent_notes(_state)
+                _result = {"status": "saved", "key": note_key}
+                execution_history.append({
+                    "tool": next_name,
+                    "success": True,
+                    "result_summary": f"Saved note: {note_key}",
+                    "result": _result,
+                })
+                turn_accumulated_results.append((next_name, _result))
+            elif next_name == "complete_task":
+                # Bug 1 fix: drain complete_task in the confirm path too
+                turn_remaining_calls.pop(0)
+                _summary = next_args.get("summary", "")
+                if _state:
+                    _state.status = "completed"
+                    _state.important_facts["agent_notes"]["final_summary"] = _summary
+                _result = {"status": "completed", "summary": _summary}
+                execution_history.append({
+                    "tool": next_name,
+                    "success": True,
+                    "result_summary": f"Task completed: {_summary[:80]}",
+                    "result": _result,
+                })
+                turn_accumulated_results.append((next_name, _result))
             else:
                 # Not a built-in tool — stop draining; this needs confirmation
                 break
@@ -542,6 +691,9 @@ TOOL USAGE RULES:
                 "session_id": pending.get("session_id"),
                 "turn_accumulated_results": turn_accumulated_results,
                 "turn_remaining_calls": turn_remaining_calls,
+                "plan": _plan,
+                "all_results": list(_all_results),
+                "state": _state,
             }
             return {
                 "type": "confirmation_required",
@@ -553,31 +705,45 @@ TOOL USAGE RULES:
 
         # All calls in the turn are resolved — send accumulated results to Gemini
 
+        # Bug 1 fix: if complete_task was called during the drain, return immediately
+        if _state and _state.status == "completed":
+            final_summary = _state.important_facts["agent_notes"].get("final_summary", "")
+            tools_used = [event['tool'] for event in execution_history if event.get('success')]
+            self.logger.info("TASK COMPLETED SUCCESSFULLY (via complete_task in confirm drain)")
+            return {
+                "type": "agent_response",
+                "answer": final_summary,
+                "tools_used": tools_used,
+                "execution_history": execution_history,
+                "success": True,
+            }
+
         llm_response = None
         if is_gemini and turn_accumulated_results:
             self.logger.info(f"\nSENDING {len(turn_accumulated_results)} RESULT(S) TO LLM after confirmation")
             try:
+                # Bug 1+4 fix: use complete_task instruction; add remaining steps (Bug 4)
+                _conf_remaining = [s for s in _plan.steps if s.status == "pending"] if _plan else []
+                _conf_remaining_text = ""
+                if _conf_remaining:
+                    _conf_remaining_text = "\n\nREMAINING PLAN STEPS (not yet completed):\n"
+                    _conf_remaining_text += "\n".join(f"  - {s.description}" for s in _conf_remaining)
                 goal_check = (
-                    f"\n\nORIGINAL GOAL: {pending['goal']}\n"
-                    "Does this result accomplish the goal?\n"
-                    "- YES → respond GOAL_ACHIEVED + final summary\n"
+                    f"\n\nORIGINAL GOAL: {pending['goal']}{_conf_remaining_text}\n"
+                    "Have ALL plan steps been completed and the goal fully achieved?\n"
+                    "- YES (all done) → call complete_task with a concise final summary. Do NOT write 'GOAL_ACHIEVED' in text.\n"
                     "- NO → call the next required tool"
                 )
+                state_ctx = self._render_state(_state) if _state else ""
+                mem0_context_arg = state_ctx + goal_check
                 if len(turn_accumulated_results) > 1:
-                    llm_response = self.llm_client.send_multiple_function_responses(turn_accumulated_results, mem0_context=mem0_block + goal_check)
+                    llm_response = self.llm_client.send_multiple_function_responses(turn_accumulated_results, mem0_context=mem0_context_arg)
                 else:
                     _single_name, _single_data = turn_accumulated_results[0]
-                    llm_response = self.llm_client.send_function_response(_single_name, _single_data, mem0_context=mem0_block + goal_check)
+                    llm_response = self.llm_client.send_function_response(_single_name, _single_data, mem0_context=mem0_context_arg)
                 self.logger.info("Captured LLM response from function_response(s) (Gemini)")
-                # Store LLM's observation of the tool result(s) rather than the raw result
-                observation = self._extract_llm_observation(llm_response)
-                if observation:
-                    _ephemeral_skills = {"skills.read_skill_file", "skills.read_references"}
-                    non_ephemeral = [name for name, _ in turn_accumulated_results if name not in _ephemeral_skills]
-                    if non_ephemeral:
-                        self._mem0_add(observation, session_id)
 
-                
+
             except Exception as llm_err:
                 print(f"LLM API error after tool execution: {type(llm_err).__name__}: {llm_err}")
                 return {"error": f"Tool executed but LLM API unreachable: {llm_err}", "is_error": True}
@@ -592,7 +758,10 @@ TOOL USAGE RULES:
             metadata=pending["metadata"],
             session_id=pending.get("session_id"),
             _resume_history=execution_history,
-            _resume_response=llm_response if is_gemini else None
+            _resume_response=llm_response if is_gemini else None,
+            _resume_plan=_plan,
+            _resume_last_results=_all_results,
+            _resume_state=_state,
         )
 
     def deny_tool_execution(self) -> Dict:
@@ -633,7 +802,202 @@ TOOL USAGE RULES:
         self.is_agent_autonomous = autonomous
         print(f"[agent] Autonomous execution set to {autonomous}")
 
-    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None) -> Optional[Dict]:
+    # ------------------------------------------------------------------ #
+    # Planning helpers                                                     #
+    # ------------------------------------------------------------------ #
+
+    def _parse_plan_json(self, raw_text: str) -> Optional[dict]:
+        """Three-attempt JSON parser: fenced → first-brace → raw."""
+        # Attempt 1: strip ```json ... ``` fences
+        fenced = re.sub(r"```(?:json)?\s*(.*?)\s*```", r"\1", raw_text, flags=re.DOTALL).strip()
+        try:
+            return json.loads(fenced)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # Attempt 2: extract first {...} block
+        m = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group())
+            except (json.JSONDecodeError, ValueError):
+                pass
+        # Attempt 3: direct parse
+        try:
+            return json.loads(raw_text.strip())
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def _create_execution_plan(self, goal: str, data_context: str, image_context: str) -> Optional[AgentPlan]:
+        """Ask Gemini (tool-free) to produce a JSON execution plan for the goal."""
+        if not hasattr(self, "llm_client") or self.llm_client is None:
+            return None
+        if not hasattr(self.llm_client, "genai_client"):
+            return None  # Ollama — no planning
+        try:
+            from google.genai import types as _gtypes
+            tool_names = list(self.available_tools.keys())
+            skills_text = getattr(self.llm_client, "skills", "") or ""
+            skills_block = (
+                f"\n\nAVAILABLE SKILLS (use exact names below):\n{skills_text}"
+                if skills_text and skills_text != "No skills available"
+                else ""
+            )
+            prompt = (
+                f"You are planning the execution of the following medical-AI task.\n\n"
+                f"GOAL: {goal}{data_context}{image_context}\n\n"
+                f"AVAILABLE TOOLS: {', '.join(tool_names)}{skills_block}\n\n"
+                "Produce a JSON execution plan with at most 8 steps. "
+                "Return ONLY valid JSON in this exact shape:\n"
+                '{"needs_skills": true, "steps": [{"id": 1, "description": "..."}, ...]}\n'
+                "Each description should be a concise (~10 word) action statement.\n\n"
+                "SKILL STEPS: When a step invokes a clinical skill, write the description as "
+                "'Use skill <exact_skill_name>' (e.g. 'Use skill ct_segmentation'). "
+                "Do NOT write 'Read skill file' or similar — name the skill directly.\n\n"
+                "Set needs_skills=false when the task only requires direct tool calls "
+                "(e.g. listing models, checking task status, parsing a DICOM file directly). "
+                "Set needs_skills=true when the task requires a clinical workflow skill "
+                "(e.g. generating a structured radiology report, running a FHIR workflow, "
+                "multi-step protocol that calls skills.read_skill_file)."
+            )
+            response = self.llm_client.genai_client.models.generate_content(
+                model=self.llm_client.model_id,
+                contents=prompt,
+                config=_gtypes.GenerateContentConfig(temperature=0.0),
+            )
+            raw = response.text if hasattr(response, "text") else ""
+            parsed = self._parse_plan_json(raw)
+            if not parsed or "steps" not in parsed:
+                self.logger.warning("[plan] Could not parse plan JSON — falling back to no-plan mode")
+                return None
+            steps = [
+                PlanStep(id=s["id"], description=s["description"])
+                for s in parsed["steps"]
+                if "id" in s and "description" in s
+            ]
+            if not steps:
+                return None
+            needs_skills = bool(parsed.get("needs_skills", True))
+            plan = AgentPlan(goal=goal, needs_skills=needs_skills, steps=steps)
+            self.logger.info(f"[plan] Created plan with {len(steps)} steps")
+            return plan
+        except Exception as e:
+            self.logger.warning(f"[plan] Planning call failed ({type(e).__name__}: {e}) — falling back")
+            return None
+
+    # ------------------------------------------------------------------ #
+    # AgentState helpers                                                   #
+    # ------------------------------------------------------------------ #
+
+    def _init_state(self, goal: str, plan: Optional["AgentPlan"], data: Dict, image_paths: List[str]) -> "AgentState":
+        """Create the initial AgentState at task start."""
+        first_step = plan.current_step().description if (plan and plan.current_step()) else goal
+        constraints = {"patient_data_available": True} if data else {}
+        return AgentState(
+            task=goal,
+            current_objective=first_step,
+            artifacts=list(image_paths),
+            important_facts={"task_constraints": constraints, "agent_notes": {}},
+        )
+
+    def _extract_artifacts(self, result: Any) -> List[str]:
+        """Extract absolute file paths from a tool result."""
+        result_str = json.dumps(result) if not isinstance(result, str) else result
+        found = re.findall(r'(?<!["\w])((?:/[\w.\-_]+)+\.[\w.]{1,6})(?!["\w])', result_str)
+        seen: List[str] = []
+        for p in found:
+            if p not in seen:
+                seen.append(p)
+        return seen
+
+    def _prune_agent_notes(self, state: "AgentState", budget_tokens: int = 200) -> None:
+        """Remove oldest agent_notes entries until under token budget."""
+        notes = state.important_facts.get("agent_notes", {})
+        while notes and len(json.dumps(notes)) // 4 > budget_tokens:
+            oldest_key = next(iter(notes))
+            del notes[oldest_key]
+
+    def _update_state_after_tool(
+        self,
+        state: "AgentState",
+        tool_name: str,
+        result: Any,
+        success: bool,
+        summary: str,
+        plan: Optional["AgentPlan"],
+    ) -> None:
+        """Update AgentState after a tool execution."""
+        prefix = "Completed" if success else "Failed"
+        state.completed_steps.append(f"{prefix}: {tool_name} — {summary}")
+
+        # Extract and deduplicate artifacts
+        new_artifacts = self._extract_artifacts(result)
+        for a in new_artifacts:
+            if a not in state.artifacts:
+                state.artifacts.append(a)
+
+        # Advance current objective
+        if plan:
+            next_step = plan.current_step()
+            if next_step:
+                state.current_objective = next_step.description
+
+        self._prune_agent_notes(state)
+
+    def _render_state(self, state: "AgentState") -> str:
+        """Serialize AgentState to JSON for injection into LLM context."""
+        return state.to_json()
+
+    def _build_plan_context(self, plan: Optional[AgentPlan], last_results: list) -> str:
+        """Format the plan + recent tool results for injection into mem0_context."""
+        if plan is None:
+            return ""
+        lines = [plan.render()]
+        if last_results:
+            lines.append("\nRECENT TOOL RESULTS (last 3):")
+            for tool_name, result in last_results[-3:]:
+                summary = json.dumps(result)
+                lines.append(f"  {tool_name}: {summary}")
+        return "\n".join(lines)
+
+    def _update_plan_after_tool(
+        self,
+        plan: Optional[AgentPlan],
+        step_id: int,
+        tool_name: str,
+        success: bool,
+        detail: str,
+    ):
+        """Mark the current plan step done or failed after a tool call."""
+        if plan is None:
+            return
+        if success:
+            plan.mark_done(step_id, tool_name, detail)
+            self.logger.info(f"[plan] Step {step_id} done via {tool_name}: {detail}")
+        else:
+            plan.mark_failed(step_id, tool_name, detail)
+            self.logger.warning(f"[plan] Step {step_id} failed via {tool_name}: {detail}")
+
+    def _coerce_args(self, args: dict, tool_name: str) -> dict:
+        """Bug 2b fix: flatten anyOf schema fragments Gemini sometimes returns as arg values.
+
+        When Gemini misreads an anyOf schema as the arg type, it passes a dict like
+        {"anyOf": ["spleen"]} instead of the string "spleen". Detect and unwrap these.
+        """
+        tool_info = self.available_tools.get(tool_name, {})
+        props = tool_info.get("inputSchema", tool_info.get("schema", {})).get("properties", {})
+        coerced = {}
+        for k, v in args.items():
+            expected_type = props.get(k, {}).get("type", "")
+            if expected_type == "string" and isinstance(v, dict):
+                if "anyOf" in v:
+                    candidates = [x for x in v["anyOf"] if isinstance(x, str)]
+                    v = candidates[0] if candidates else str(v)
+                else:
+                    v = str(v)
+            coerced[k] = v
+        return coerced
+
+    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None, _resume_plan: Optional[AgentPlan] = None, _resume_last_results: Optional[list] = None, _resume_state: Optional[AgentState] = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 
@@ -649,11 +1013,15 @@ TOOL USAGE RULES:
         Returns:
             Final result if successful, None if goal not achieved
         """
-        print(f"\n{'='*80}")    
+        _is_continuation = bool(_resume_history)
+        print(f"\n{'='*80}")
         print("Autonomous agent: ", self.is_agent_autonomous)
         print(f"Starting autonomous task: {goal}")
         self.logger.info("=" * 80)
-        self.logger.info(f"TASK START: {goal}")
+        if _is_continuation:
+            self.logger.info(f"TASK CONTINUATION ({max_iterations} iterations remaining): {goal}")
+        else:
+            self.logger.info(f"TASK START: {goal}")
         self.logger.info(f"Max iterations: {max_iterations}")
         if metadata:
             self.logger.info(f"Metadata: {json.dumps(metadata, indent=2)}")
@@ -675,18 +1043,50 @@ TOOL USAGE RULES:
         if is_gemini and not _resume_history and hasattr(self.llm_client, 'reset_conversation'):
             self.llm_client.reset_conversation()
 
+        # --- Plan-as-STM: create (or resume) an execution plan ---
+        # data_context / image_context aren't built yet here, so we pass empty strings;
+        # the planning call will re-read the goal for structure.  Full context is
+        # injected into every subsequent LLM call via _build_plan_context().
+        plan: Optional[AgentPlan] = _resume_plan
+        if is_gemini and not _resume_history and plan is None:
+            # Build a quick data/image summary for the planner
+            _plan_data_ctx = ""
+            if data:
+                _plan_data_ctx = f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)[:500]}"
+            _plan_img_ctx = ""
+            if imageList:
+                _plan_img_ctx = "\n\nIMAGES AVAILABLE: Yes"
+            plan = self._create_execution_plan(goal, _plan_data_ctx, _plan_img_ctx)
+        _all_results: List[tuple] = list(_resume_last_results or [])
+
+        # Gate skill tools based on plan.needs_skills (Gemini only, fresh tasks)
+        if is_gemini and not _resume_history:
+            _all_skill_tools = [t for t in self.available_tools if t.startswith("skills.")]
+            # Always restore first (in case previous task disabled them)
+            for t in _all_skill_tools:
+                self.agent_tools.add(t)
+            if plan is not None and not plan.needs_skills:
+                for t in _all_skill_tools:
+                    self.agent_tools.discard(t)
+                self._refresh_agent_components()
+                self.logger.info(f"[skills] Disabled {len(_all_skill_tools)} skill tools (task: {goal[:60]})")
+            elif plan is not None and plan.needs_skills:
+                self._refresh_agent_components()
+                self.logger.info(f"[skills] Skill tools active for this task")
+
+        # Init / resume AgentState
+        state: Optional[AgentState] = _resume_state
+        if is_gemini and not _resume_history and state is None:
+            _img_paths = [p for p, _ in (imageList or [])]
+            _data_dict = data if isinstance(data, dict) else {}
+            state = self._init_state(goal, plan, _data_dict, _img_paths)
+
         # Extract image path for workflow
         image_path = None
         if imageList and isinstance(imageList, list) and imageList:
             image_path = imageList[0][0]  # First image's temp file path
             print(f"Image path for workflow: {image_path}")
 
-        # Search mem0 for relevant session memories (skip on resume to avoid repeat searches)
-        global mem0_block  # For debugging visibility across iterations
-        mem0_block = ""
-        if session_id and not _resume_history:
-            mem0_block = self._mem0_search(goal, session_id)
-            print(f"[mem0] Initial search: {mem0_block or '(empty)'}")
         # Both Ollama and Gemini now use true agentic approach
         # The LLM decides which tools to call based on context
 
@@ -694,11 +1094,6 @@ TOOL USAGE RULES:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
 
-            # Refresh mem0 context each iteration using the stable goal as the query.
-            # This surfaces all previously stored facts relevant to this task reliably.
-            if session_id:
-                mem0_block = self._mem0_search(goal, session_id)
-                print(f"[mem0] Iteration {iterations} context: {mem0_block or '(empty)'}")
             try:
                 # Note: Execution history is now managed by Gemini's chat session
                 # We don't need to build history_text anymore - it's redundant!
@@ -748,8 +1143,6 @@ TOOL USAGE RULES:
                     else:
                         image_context = "\n\nIMAGES AVAILABLE:\nImage data provided"
 
-                # Build mem0 context block
-                session_block = mem0_block
 
                 # Check if we're using Gemini and have a response from previous send_function_response
                 is_gemini = LLM_BACKEND.lower() != "ollama"
@@ -771,8 +1164,9 @@ TOOL USAGE RULES:
                 else:
                     # Standard flow: prompt the LLM (always for Ollama, or first iteration for Gemini)
                     if not execution_history:
-                        # First iteration - include session context so agent knows what happened before
-                        prompt = f"""GOAL: {goal}{data_context}{image_context}{session_block}
+                        # First iteration - include plan as structured context
+                        session_context = ("\n\n" + plan.render()) if plan else ""
+                        prompt = f"""GOAL: {goal}{data_context}{image_context}{session_context}
 
 Analyze the goal and decide your next action."""
                     else:
@@ -802,11 +1196,18 @@ Analyze the goal and decide your next action."""
                                         error_msg = 'Tool execution failed'
                                     history_text += f"Failed: {error_msg}\n"
                         
+                        # Bug 3b+4 fix: include current state and remaining steps in the prompt
+                        _state_text = f"\n\nCURRENT TASK STATE:\n{self._render_state(state)}" if state else ""
+                        _ol_remaining = [s for s in plan.steps if s.status == "pending"] if plan else []
+                        _ol_remaining_text = ""
+                        if _ol_remaining:
+                            _ol_remaining_text = "\n\nREMAINING PLAN STEPS (not yet completed):\n"
+                            _ol_remaining_text += "\n".join(f"  - {s.description}" for s in _ol_remaining)
                         prompt = f"""{history_text}
-GOAL: {goal}
+GOAL: {goal}{_state_text}{_ol_remaining_text}
 
-Does this accomplish the goal?
-- If YES: Respond with explicitly "GOAL_ACHIEVED" and provide the final result
+Have ALL plan steps been completed and the goal fully achieved?
+- If YES: call complete_task with a concise final summary. Do NOT write "GOAL_ACHIEVED" in text.
 - If NO: Call the next tool you need
 - If you need more information, say "NEED MORE INFO" and specify what you need.
 
@@ -824,7 +1225,8 @@ Your decision:"""
                     # Prepare content with actual images for Gemini
                     content_parts = [prompt]
 
-                    response = self.llm_client.generate_content(content_parts, images_for_llm)
+                    _prompt_plan_ctx = self._render_state(state) if state else ""
+                    response = self.llm_client.generate_content(content_parts, images_for_llm, mem0_context=_prompt_plan_ctx)
                     self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
                 
                 # Check if agent declares success (text response, no tool call)
@@ -838,21 +1240,25 @@ Your decision:"""
                     for part in response.candidates[0].content.parts:
                         if hasattr(part, 'text') and part.text:
                             has_text = True
-                            text_content = part.text.strip().upper()
-                            if "GOAL_ACHIEVED" in text_content or "GOAL ACHIEVED" in text_content:
-                                print("Agent declares: Goal achieved!")
+                            text_content = part.text.strip()
+                            # Bug 1 fix (Step D): only treat as GOAL_ACHIEVED if it appears at the very start
+                            # of the response (anchored regex) to avoid false triggers from echoed prompts.
+                            if re.match(r"^\s*GOAL[_\s]ACHIEVED", text_content, re.IGNORECASE):
+                                print("Agent declares: Goal achieved! (text fallback)")
                                 # Return detailed response with execution history
                                 answer = self._extract_answer_from_results(part.text, execution_history, final_result)
                                 tools_used = [event['tool'] for event in execution_history if event['success']]
 
+                                if state:
+                                    state.status = "completed"
+
                                 self.logger.info(f"\n{'='*60}")
-                                self.logger.info("TASK COMPLETED SUCCESSFULLY")
+                                self.logger.info("TASK COMPLETED SUCCESSFULLY (text fallback)")
                                 self.logger.info(f"  Iterations used: {iterations}")
                                 self.logger.info(f"  Tools used: {tools_used}")
                                 self.logger.info(f"  Answer: {answer}")
                                 self.logger.info(f"{'='*80}\n")
 
-                                self._mem0_add(f"Goal: {goal} — Result: {answer[:500]}", session_id)
                                 return {
                                     "type": "agent_response",
                                     "answer": answer,
@@ -882,6 +1288,8 @@ Your decision:"""
                                         print(f"Resolved tool name: {_raw_name} -> {full_name}")
                                         _raw_name = full_name
                                         break
+                            # Bug 2b fix: coerce dict-valued args that Gemini filled with schema fragments
+                            _raw_args = self._coerce_args(_raw_args, _raw_name)
                             _turn_calls.append((_raw_name, _raw_args))
 
                 # --- Phase 2: process each function call in the turn ---
@@ -960,6 +1368,40 @@ Your decision:"""
                             "result": result,
                         })
                         final_result = result
+                        _turn_results.append((tool_name, result))
+                        continue
+
+                    if tool_name == "update_agent_notes":
+                        note_key = arguments.get("key", "note")
+                        note_value = arguments.get("value", "")
+                        if state:
+                            state.important_facts["agent_notes"][note_key] = note_value
+                            self._prune_agent_notes(state)
+                        result = {"status": "saved", "key": note_key}
+                        result_summary = f"Saved note: {note_key}"
+                        execution_history.append({
+                            "tool": tool_name,
+                            "success": True,
+                            "result_summary": result_summary,
+                            "result": result,
+                        })
+                        final_result = result
+                        _turn_results.append((tool_name, result))
+                        continue
+
+                    # Bug 1 fix (Step B): complete_task signals explicit task completion
+                    if tool_name == "complete_task":
+                        summary = arguments.get("summary", "")
+                        if state:
+                            state.status = "completed"
+                            state.important_facts["agent_notes"]["final_summary"] = summary
+                        result = {"status": "completed", "summary": summary}
+                        execution_history.append({
+                            "tool": tool_name,
+                            "success": True,
+                            "result_summary": f"Task completed: {summary[:80]}",
+                            "result": result,
+                        })
                         _turn_results.append((tool_name, result))
                         continue
 
@@ -1042,6 +1484,9 @@ Your decision:"""
                             "session_id": session_id,
                             "turn_accumulated_results": list(_turn_results),
                             "turn_remaining_calls": _remaining_calls,
+                            "plan": plan,
+                            "all_results": list(_all_results),
+                            "state": state,
                         }
                         return {
                             "type": "confirmation_required",
@@ -1103,6 +1548,14 @@ Your decision:"""
                             print(f"[agent] Saved radlex report to DB as task {_rtid[:8]}")
 
                         _turn_results.append((tool_name, result))
+                        _all_results.append((tool_name, result))
+                        # Update plan: mark current pending step done
+                        if plan:
+                            _step = plan.current_step()
+                            if _step:
+                                self._update_plan_after_tool(plan, _step.id, tool_name, True, result_summary)
+                        if state:
+                            self._update_state_after_tool(state, tool_name, result, True, result_summary, plan)
 
                     elif result and is_error:
                         # Ensure error_msg is always a string, never None
@@ -1135,6 +1588,13 @@ Your decision:"""
 
                         error_response = {"error": str(error_msg), "is_error": True}
                         _turn_results.append((tool_name, error_response))
+                        _all_results.append((tool_name, error_response))
+                        if plan:
+                            _step = plan.current_step()
+                            if _step:
+                                self._update_plan_after_tool(plan, _step.id, tool_name, False, str(error_msg))
+                        if state:
+                            self._update_state_after_tool(state, tool_name, error_response, False, str(error_msg), plan)
 
                     else:
                         execution_history.append({
@@ -1148,40 +1608,59 @@ Your decision:"""
 
                         error_response = {"error": "Execution returned no result", "is_error": True}
                         _turn_results.append((tool_name, error_response))
+                        _all_results.append((tool_name, error_response))
+                        if plan:
+                            _step = plan.current_step()
+                            if _step:
+                                self._update_plan_after_tool(plan, _step.id, tool_name, False, "Execution returned no result")
+                        if state:
+                            self._update_state_after_tool(state, tool_name, error_response, False, "Execution returned no result", plan)
+
+                # --- Bug 1 fix (Step C): check if LLM called complete_task this turn ---
+                if state and state.status == "completed":
+                    final_summary = state.important_facts["agent_notes"].get("final_summary", "")
+                    tools_used = [event['tool'] for event in execution_history if event.get('success')]
+                    self.logger.info(f"\n{'='*60}")
+                    self.logger.info("TASK COMPLETED SUCCESSFULLY (via complete_task)")
+                    self.logger.info(f"  Iterations used: {iterations}")
+                    self.logger.info(f"  Tools used: {tools_used}")
+                    self.logger.info(f"  Summary: {final_summary}")
+                    self.logger.info(f"{'='*80}\n")
+                    return {
+                        "type": "agent_response",
+                        "answer": final_summary,
+                        "tools_used": tools_used,
+                        "execution_history": execution_history,
+                        "success": True,
+                    }
 
                 # --- Phase 3: send ALL accumulated results to Gemini in one message ---
                 # For Ollama: skip this entirely — execution history goes into the next prompt
                 if is_gemini and _turn_results:
+                    # Bug 1+4 fix: replace "GOAL_ACHIEVED" text with complete_task call instruction;
+                    # also list remaining plan steps so LLM knows what's still pending (Bug 4).
+                    _remaining = [s for s in plan.steps if s.status == "pending"] if plan else []
+                    _remaining_text = ""
+                    if _remaining:
+                        _remaining_text = "\n\nREMAINING PLAN STEPS (not yet completed):\n"
+                        _remaining_text += "\n".join(f"  - {s.description}" for s in _remaining)
                     goal_check = (
-                        f"\n\nORIGINAL GOAL: {goal}\n"
-                        "Does this result accomplish the goal?\n"
-                        "- YES → respond GOAL_ACHIEVED + final summary\n"
+                        f"\n\nORIGINAL GOAL: {goal}{_remaining_text}\n"
+                        "Have ALL plan steps been completed and the goal fully achieved?\n"
+                        "- YES (all done) → call complete_task with a concise final summary. Do NOT write 'GOAL_ACHIEVED' in text.\n"
                         "- NO → call the next required tool"
                     )
+                    state_ctx = self._render_state(state) if state else ""
+                    mem0_context_arg = state_ctx + goal_check
                     if len(_turn_results) > 1:
                         self.logger.info(f"\nSENDING {len(_turn_results)} RESULTS TO LLM via send_multiple_function_responses")
-                        _resume_response = self.llm_client.send_multiple_function_responses(_turn_results, mem0_context=mem0_block + goal_check)
+                        _resume_response = self.llm_client.send_multiple_function_responses(_turn_results, mem0_context=mem0_context_arg)
                     else:
                         _single_name, _single_data = _turn_results[0]
                         self.logger.info("\nSENDING FULL RESULT TO LLM via send_function_response")
-                        _resume_response = self.llm_client.send_function_response(_single_name, _single_data, mem0_context=mem0_block + goal_check)
+                        _resume_response = self.llm_client.send_function_response(_single_name, _single_data, mem0_context=mem0_context_arg)
                     self.logger.info("Captured response from function_response(s) - will use on next iteration")
-                    # Store LLM's observation of the tool result(s) rather than the raw results
-                    observation = self._extract_llm_observation(_resume_response)
-                    if observation:
-                        _ephemeral_skills = {"skills.read_skill_file", "skills.read_references"}
-                        non_ephemeral = [name for name, _ in _turn_results if name not in _ephemeral_skills]
-                        if non_ephemeral:
-                            self._mem0_add(observation, session_id)
 
-
-                    function_result = ""
-                    for tool_name, result in _turn_results:
-                        function_result += f"{tool_name}: {result}\n"
-                    print("+"*20)
-                    print(function_result)
-                    print("+"*20)
-                    memory.add(function_result, user_id=session_id, infer=False)
                 
                 # If agent responded with text but no tool call
                 if has_text and not has_function_call:
@@ -1198,7 +1677,6 @@ Your decision:"""
                         else:
                             print("Agent responded with text (no tools needed for this query)")
                         tools_used = [event['tool'] for event in execution_history if event.get('success')]
-                        self._mem0_add(f"Goal: {goal} — Response: {text_response[:500]}", session_id)
                         return {
                             "type": "agent_response",
                             "answer": text_response,

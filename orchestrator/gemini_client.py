@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from hmac import new
 import json
 import os
 from typing import Dict, List, Any
@@ -6,7 +7,6 @@ from google import genai
 from google.genai import types
 from PIL import Image
 from dotenv import load_dotenv
-from logger import Logger
 
 load_dotenv()
 
@@ -30,7 +30,6 @@ class GeminiClient:
         self.custom_system_prompt = None  # Store custom system prompt
         self.mode_extension = ""  # Appended to system prompt in normal mode
         self.skills = skills  # Reference to skills manager for dynamic prompt generation
-        self.logger = Logger(name="GeminiClient")
         self._call_count = 0  # Track iteration number
 
         self._initialize_gemini()
@@ -194,7 +193,7 @@ Treat all tool outputs as raw clinical observations. Apply professional interpre
 - If `read_skill_file()` fails or returns empty: retry once silently, then surface a brief error message to the user if it fails again.
 - If a domain tool returns an error code: surface the status to the user concisely without technical jargon.
 - If results appear clinically inconsistent or out of expected range: flag this explicitly in your response before providing interpretation."""
-
+        return skills_section
         return f"""You are a healthcare AI assistant. You help medical professionals by analyzing medical images, parsing DICOM files, generating radiology reports, and retrieving patient data.
 
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
@@ -242,25 +241,22 @@ TOOL USAGE RULES:
             return f"[IMAGE] mime={getattr(part.inline_data, 'mime_type', 'unknown')}"
         return f"[OTHER] {type(part).__name__}"
 
-    def _log_contents(self, contents: List, label: str):
-        """Log the full list of Content objects being sent to the model."""
-        self.logger.info(f"\n{'='*80}")
-        self.logger.info(f"{label}  (iteration #{self._call_count})")
-        self.logger.info(f"History length: {len(contents)} message(s)")
-        self.logger.info(f"Model: {self.model_id}")
-        self.logger.info(f"{'='*80}")
-        for i, content in enumerate(contents):
-            role = getattr(content, 'role', 'unknown')
-            parts = getattr(content, 'parts', []) or []
-            self.logger.info(f"\n--- Message {i} | role={role} | parts={len(parts)} ---")
-            for j, part in enumerate(parts):
-                self.logger.info(f"  Part {j}: {self._serialize_part(part)}")
-        self.logger.info(f"{'='*80}\n")
-
     def _first_with_mem0(self, content: types.Content, mem0_context: str) -> types.Content:
-        """Return a copy of content with mem0_context appended as a text part."""
+        """Return a copy of content with mem0_context appended as a text part.
+
+        Bug 3a fix: the context injected here is always the current AgentState + goal
+        check prompt, not historical mem0 memory. Label it as CURRENT TASK STATE to
+        avoid confusing the LLM into thinking it's reading past session history.
+        """
+        # Detect whether this looks like actual mem0 session memory or current state
+        if mem0_context.strip().startswith("{") and "completed_steps" in mem0_context:
+            label = "CURRENT TASK STATE"
+        elif mem0_context.strip().startswith("SESSION MEMORY"):
+            label = "SESSION MEMORY (from previous interactions)"
+        else:
+            label = "CURRENT TASK STATE"
         mem0_part = types.Part.from_text(
-            text=f"\n\n---\nMemory from previous sessions:\n{mem0_context}\n---"
+            text=f"\n\n---\n{label}:\n{mem0_context}\n---"
         )
         return types.Content(role=content.role, parts=list(content.parts or []) + [mem0_part])
 
@@ -269,11 +265,13 @@ TOOL USAGE RULES:
 
         Every call sends:
           • First user message  : goal + mem0 context injected dynamically
-          • Last model turn     : the function_call the model just issued (required by API)
+          • Last two tool call/response pairs (4 messages): provides the model
+            with enough recent context to avoid repeating already-executed steps
           • new_content         : the function_response or next user prompt
 
-        Old completed call/response pairs are dropped. mem0 carries cross-turn
-        memory so the model doesn't need to re-read prior tool payloads.
+        Old completed call/response pairs beyond the last two are dropped.
+        mem0 carries cross-turn memory so the model doesn't need to re-read
+        prior tool payloads.
         """
         # new_content was just appended to conversation_history by _call_model
         history = self.conversation_history
@@ -286,7 +284,7 @@ TOOL USAGE RULES:
 
         # [0] first user message (goal) — with mem0 context injected on every call
         first = self._first_with_mem0(history[0], mem0_context) if mem0_context else history[0]
-        # [-2] last model turn (function_call) + [-1] new_content (function_response)
+        # [-2:] last two tool call/response pairs (call + result each)
         recent = history[-2:]
         return [first] + recent
 
@@ -299,14 +297,9 @@ TOOL USAGE RULES:
         self.conversation_history.append(new_content)
         send_contents = self._build_send_contents(new_content, mem0_context)
 
-        self._log_contents(send_contents, "SENDING TO LLM")
-        self.logger.info(
-            f"(history={len(self.conversation_history)} msgs, sending={len(send_contents)} msgs)"
-        )
-
         print(f"\n{'='*80}")
         print("Whats sending to Gemini:")
-        print(mem0_context)
+        print(send_contents)
         print(f"{'='*80}\n")
         response = self.genai_client.models.generate_content(
             model=self.model_id,
@@ -314,19 +307,25 @@ TOOL USAGE RULES:
             config=self.agent_config,
         )
 
-        # Record the model's reply in full local history for the next iteration's trim
+        # Record the model's reply in full local history for the next iteration's trim.
+        # Skip empty responses — they poison the trim window: when history[-2] is an
+        # empty model turn, the next call sends [goal] + [empty] + [prompt] and the
+        # model loses all context about what tools already ran.
         if response.candidates and response.candidates[0].content:
-            self.conversation_history.append(response.candidates[0].content)
-            self.logger.info(f"\n--- LLM RESPONSE (iteration #{self._call_count}) ---")
-            for j, part in enumerate(response.candidates[0].content.parts or []):
-                self.logger.info(f"  Part {j}: {self._serialize_part(part)}")
-            self.logger.info("--- END LLM RESPONSE ---\n")
-        else:
-            self.logger.warning(f"LLM returned no content (iteration #{self._call_count})")
+            content = response.candidates[0].content
+            parts = content.parts or []
+            has_meaningful_content = any(
+                (hasattr(p, "text") and p.text and p.text.strip())
+                or hasattr(p, "function_call")
+                for p in parts
+            )
+            if has_meaningful_content:
+                self.conversation_history.append(content)
+            
 
         return response
 
-    def generate_content(self, prompt: str, imageList: Any = None) -> Any:
+    def generate_content(self, prompt: str, imageList: Any = None, mem0_context: str = "") -> Any:
         """Build a user Content from text + optional images, then call the model."""
         if isinstance(prompt, list):
             prompt = " ".join(map(str, prompt))
@@ -357,7 +356,7 @@ TOOL USAGE RULES:
                     print(f"Error loading image from {temp_filepath}: {e}")
 
         user_content = types.Content(role="user", parts=parts)
-        return self._call_model(user_content)
+        return self._call_model(user_content, mem0_context=mem0_context)
 
     def send_function_response(self, function_name: str, response_data: Any, mem0_context: str= "") -> Any:
         """Send a single function/tool result back to Gemini."""

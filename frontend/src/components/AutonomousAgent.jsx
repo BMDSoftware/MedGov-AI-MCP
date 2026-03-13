@@ -242,13 +242,16 @@ const AutonomousAgent = ({ currentSessionId }) => {
     
     try {
       const query = type === 'directory' 
-      ? `A new directory named "${name}" has been uploaded (Path: ${path}). Autonomously run the spleen model on each file to extract clinical findings. Once every file has been processed and all findings are gathered, synthesize the results into a final medical report. Start by calling radiology-workflow-sequencer skill`
+      ? `A new directory named "${name}" has been uploaded (Path: ${path}). Autonomously run the spleen model on each file to extract clinical findings. Once every file has been processed and all findings are gathered, synthesize the results into a final medical report.`
       : `A new file named "${name}" has been uploaded. Analyze it using the spleen model to extract clinical findings and generate a final medical report summary.`;
+      console.log("query sent to backend:", query);
       const response = await fetch(getApiUrl('/api/process-query'), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: query
       });
+
+      
       
       const data = await response.json();
 

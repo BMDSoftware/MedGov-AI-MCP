@@ -63,48 +63,6 @@ You are communicating with medical professionals (physicians, radiologists, clin
 7. Keep responses to 2–4 sentences unless more clinical detail is genuinely needed.
 8. Do not narrate your internal process or the tools you called — only state the outcome to the user."""
 
-@dataclass
-class PlanStep:
-    id: int
-    description: str
-    status: str = "pending"          # "pending" | "done" | "failed" | "skipped"
-    tool_name: Optional[str] = None  # filled by code after execution
-    result_summary: Optional[str] = None
-
-
-@dataclass
-class AgentPlan:
-    goal: str
-    needs_skills: bool = True
-    steps: List[PlanStep] = field(default_factory=list)
-
-    def current_step(self) -> Optional[PlanStep]:
-        return next((s for s in self.steps if s.status == "pending"), None)
-
-    def mark_done(self, step_id: int, tool_name: str, result_summary: str):
-        for s in self.steps:
-            if s.id == step_id:
-                s.status = "done"
-                s.tool_name = tool_name
-                s.result_summary = result_summary
-
-    def mark_failed(self, step_id: int, tool_name: str, error: str):
-        for s in self.steps:
-            if s.id == step_id:
-                s.status = "failed"
-                s.tool_name = tool_name
-                s.result_summary = f"Error: {error}"
-
-    def render(self) -> str:
-        icons = {"pending": "[ ]", "done": "[x]", "failed": "[!]", "skipped": "[-]"}
-        lines = [f"EXECUTION PLAN — {self.goal}"]
-        for s in self.steps:
-            line = f"  {icons[s.status]} Step {s.id}: {s.description}"
-            if s.result_summary:
-                line += f"  → {s.result_summary}"
-            lines.append(line)
-        return "\n".join(lines)
-
 
 @dataclass
 class AgentState:
@@ -217,10 +175,29 @@ class AgenticAgent:
             "original_name": "update_agent_notes",
             "transport": "builtin",
         },
-        # Bug 1 fix: explicit completion tool so the LLM never has to say "GOAL_ACHIEVED" in text
+        "set_next_objective": {
+            "description": (
+                "Declare what you will do next to make progress toward the goal. "
+                "Call this after each tool result to set your next working objective. "
+                "The objective should be a concise action statement describing your immediate next step."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "objective": {
+                        "type": "string",
+                        "description": "Concise action statement for your next step, e.g. 'Run spleen segmentation on the CT volume'.",
+                    },
+                },
+                "required": ["objective"],
+            },
+            "server": "__builtin__",
+            "original_name": "set_next_objective",
+            "transport": "builtin",
+        },
         "complete_task": {
             "description": (
-                "Call this tool when you have fully completed the task goal and ALL plan steps. "
+                "Call this tool when you have fully achieved the goal. "
                 "Provide a concise final summary of what was accomplished. "
                 "This is the ONLY way to signal task completion — do NOT write 'GOAL_ACHIEVED' in text."
             ),
@@ -340,7 +317,8 @@ TOOL USAGE RULES:
 6. After a tool returns results, summarize them clearly for the user.
 7. MULTI-FILE RULE: When multiple paths are listed in "IMAGES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
 8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices that forms a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate or process individual files inside the directory.
-9. NOTE-TAKING: After any tool returns important findings (detected anatomy, output paths, DICOM metadata, chosen model names), call update_agent_notes with a concise key and value. These notes are injected into every subsequent LLM call and help you avoid re-deriving the same information."""
+9. NOTE-TAKING: After any tool returns important findings (detected anatomy, output paths, DICOM metadata, chosen model names), call update_agent_notes with a concise key and value. These notes are injected into every subsequent LLM call and help you avoid re-deriving the same information.
+10. OBJECTIVE TRACKING: After each tool result, call set_next_objective to declare what you will do next to progress toward the goal. Base your decision on completed steps, artifacts, and agent notes in the current task state."""
         
         if self.llm_client:
             self.llm_client.update_system_prompt(patient_prompt)
@@ -638,8 +616,6 @@ TOOL USAGE RULES:
         pending = self.pending_tool_call
         self.pending_tool_call = None
 
-        # Retrieve plan state from pending
-        _plan: Optional[AgentPlan] = pending.get("plan")
         _state: Optional[AgentState] = pending.get("state")
         _all_results: List[tuple] = list(pending.get("all_results", []))
 
@@ -699,14 +675,9 @@ TOOL USAGE RULES:
                 print(f"[agent] Saved radlex report to DB as task {_rtid[:8]}")
 
             confirmed_result = result
-            # Update plan step
-            if _plan:
-                _step = _plan.current_step()
-                if _step:
-                    self._update_plan_after_tool(_plan, _step.id, tool_name, True, result_summary)
             _all_results.append((tool_name, confirmed_result))
             if _state:
-                self._update_state_after_tool(_state, tool_name, confirmed_result, True, result_summary, _plan)
+                self._update_state_after_tool(_state, tool_name, confirmed_result, True, result_summary)
 
         else:
             error_msg = result.get("error") if result else "No result"
@@ -721,14 +692,9 @@ TOOL USAGE RULES:
             self.logger.error(f"  Error: {error_msg}")
 
             confirmed_result = {"error": str(error_msg) if error_msg else "Tool execution failed", "is_error": True}
-            # Update plan step
-            if _plan:
-                _step = _plan.current_step()
-                if _step:
-                    self._update_plan_after_tool(_plan, _step.id, tool_name, False, str(error_msg) if error_msg else "Tool execution failed")
             _all_results.append((tool_name, confirmed_result))
             if _state:
-                self._update_state_after_tool(_state, tool_name, confirmed_result, False, str(error_msg) if error_msg else "Tool execution failed", _plan)
+                self._update_state_after_tool(_state, tool_name, confirmed_result, False, str(error_msg) if error_msg else "Tool execution failed")
 
         # Build the accumulated results list for this turn:
         # results confirmed so far (from before this call) + this call's result
@@ -837,8 +803,20 @@ TOOL USAGE RULES:
                     "result": _result,
                 })
                 turn_accumulated_results.append((next_name, _result))
+            elif next_name == "set_next_objective":
+                turn_remaining_calls.pop(0)
+                _objective = next_args.get("objective", "")
+                if _state:
+                    _state.current_objective = _objective
+                _result = {"status": "objective_set", "objective": _objective}
+                execution_history.append({
+                    "tool": next_name,
+                    "success": True,
+                    "result_summary": f"Next objective: {_objective[:80]}",
+                    "result": _result,
+                })
+                turn_accumulated_results.append((next_name, _result))
             elif next_name == "complete_task":
-                # Bug 1 fix: drain complete_task in the confirm path too
                 turn_remaining_calls.pop(0)
                 _summary = next_args.get("summary", "")
                 if _state:
@@ -875,7 +853,6 @@ TOOL USAGE RULES:
                 "session_id": pending.get("session_id"),
                 "turn_accumulated_results": turn_accumulated_results,
                 "turn_remaining_calls": turn_remaining_calls,
-                "plan": _plan,
                 "all_results": list(_all_results),
                 "state": _state,
             }
@@ -906,19 +883,16 @@ TOOL USAGE RULES:
         if is_gemini and turn_accumulated_results:
             self.logger.info(f"\nSENDING {len(turn_accumulated_results)} RESULT(S) TO LLM after confirmation")
             try:
-                # Bug 1+4 fix: use complete_task instruction; add remaining steps (Bug 4)
-                _conf_remaining = [s for s in _plan.steps if s.status == "pending"] if _plan else []
-                _conf_remaining_text = ""
-                if _conf_remaining:
-                    _conf_remaining_text = "\n\nREMAINING PLAN STEPS (not yet completed):\n"
-                    _conf_remaining_text += "\n".join(f"  - {s.description}" for s in _conf_remaining)
                 goal_check = (
-                    f"\n\nORIGINAL GOAL: {pending['goal']}{_conf_remaining_text}\n"
-                    "Have ALL plan steps been completed and the goal fully achieved?\n"
-                    "- YES (all done) → call complete_task with a concise final summary. Do NOT write 'GOAL_ACHIEVED' in text.\n"
-                    "- NO → call the next required tool"
+                    f"\n\nORIGINAL GOAL: {pending['goal']}\n"
+                    "Have you fully achieved the goal?\n"
+                    "- YES → call complete_task with a concise final summary. Do NOT write 'GOAL_ACHIEVED' in text.\n"
+                    "- NO → call set_next_objective to declare your next step, then call the tool you need."
                 )
                 state_ctx = self._render_state(_state) if _state else ""
+                print("????"*10)
+                print(f"State context for LLM:\n{state_ctx}")
+                print("????"*10)
                 mem0_context_arg = state_ctx + goal_check
                 if len(turn_accumulated_results) > 1:
                     llm_response = self.llm_client.send_multiple_function_responses(turn_accumulated_results, mem0_context=mem0_context_arg)
@@ -943,7 +917,6 @@ TOOL USAGE RULES:
             session_id=pending.get("session_id"),
             _resume_history=execution_history,
             _resume_response=llm_response if is_gemini else None,
-            _resume_plan=_plan,
             _resume_last_results=_all_results,
             _resume_state=_state,
         )
@@ -990,95 +963,17 @@ TOOL USAGE RULES:
     # Planning helpers                                                     #
     # ------------------------------------------------------------------ #
 
-    def _parse_plan_json(self, raw_text: str) -> Optional[dict]:
-        """Three-attempt JSON parser: fenced → first-brace → raw."""
-        # Attempt 1: strip ```json ... ``` fences
-        fenced = re.sub(r"```(?:json)?\s*(.*?)\s*```", r"\1", raw_text, flags=re.DOTALL).strip()
-        try:
-            return json.loads(fenced)
-        except (json.JSONDecodeError, ValueError):
-            pass
-        # Attempt 2: extract first {...} block
-        m = re.search(r"\{.*\}", raw_text, re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group())
-            except (json.JSONDecodeError, ValueError):
-                pass
-        # Attempt 3: direct parse
-        try:
-            return json.loads(raw_text.strip())
-        except (json.JSONDecodeError, ValueError):
-            return None
-
-    def _create_execution_plan(self, goal: str, data_context: str, image_context: str) -> Optional[AgentPlan]:
-        """Ask Gemini (tool-free) to produce a JSON execution plan for the goal."""
-        if not hasattr(self, "llm_client") or self.llm_client is None:
-            return None
-        if not hasattr(self.llm_client, "genai_client"):
-            return None  # Ollama — no planning
-        try:
-            from google.genai import types as _gtypes
-            tool_names = list(self.available_tools.keys())
-            skills_text = getattr(self.llm_client, "skills", "") or ""
-            skills_block = (
-                f"\n\nAVAILABLE SKILLS (use exact names below):\n{skills_text}"
-                if skills_text and skills_text != "No skills available"
-                else ""
-            )
-            prompt = (
-                f"You are planning the execution of the following medical-AI task.\n\n"
-                f"GOAL: {goal}{data_context}{image_context}\n\n"
-                f"AVAILABLE TOOLS: {', '.join(tool_names)}{skills_block}\n\n"
-                "Produce a JSON execution plan with at most 8 steps. "
-                "Return ONLY valid JSON in this exact shape:\n"
-                '{"needs_skills": true, "steps": [{"id": 1, "description": "..."}, ...]}\n'
-                "Each description should be a concise (~10 word) action statement.\n\n"
-                "SKILL STEPS: When a step invokes a clinical skill, write the description as "
-                "'Use skill <exact_skill_name>' (e.g. 'Use skill ct_segmentation'). "
-                "Do NOT write 'Read skill file' or similar — name the skill directly.\n\n"
-                "Set needs_skills=false when the task only requires direct tool calls "
-                "(e.g. listing models, checking task status, parsing a DICOM file directly). "
-                "Set needs_skills=true when the task requires a clinical workflow skill "
-                "(e.g. generating a structured radiology report, running a FHIR workflow, "
-                "multi-step protocol that calls skills.read_skill_file)."
-            )
-            response = self.llm_client.genai_client.models.generate_content(
-                model=self.llm_client.model_id,
-                contents=prompt,
-                config=_gtypes.GenerateContentConfig(temperature=0.0),
-            )
-            raw = response.text if hasattr(response, "text") else ""
-            parsed = self._parse_plan_json(raw)
-            if not parsed or "steps" not in parsed:
-                self.logger.warning("[plan] Could not parse plan JSON — falling back to no-plan mode")
-                return None
-            steps = [
-                PlanStep(id=s["id"], description=s["description"])
-                for s in parsed["steps"]
-                if "id" in s and "description" in s
-            ]
-            if not steps:
-                return None
-            needs_skills = bool(parsed.get("needs_skills", True))
-            plan = AgentPlan(goal=goal, needs_skills=needs_skills, steps=steps)
-            self.logger.info(f"[plan] Created plan with {len(steps)} steps")
-            return plan
-        except Exception as e:
-            self.logger.warning(f"[plan] Planning call failed ({type(e).__name__}: {e}) — falling back")
-            return None
 
     # ------------------------------------------------------------------ #
     # AgentState helpers                                                   #
     # ------------------------------------------------------------------ #
 
-    def _init_state(self, goal: str, plan: Optional["AgentPlan"], data: Dict, image_paths: List[str]) -> "AgentState":
+    def _init_state(self, goal: str, data: Dict, image_paths: List[str]) -> "AgentState":
         """Create the initial AgentState at task start."""
-        first_step = plan.current_step().description if (plan and plan.current_step()) else goal
         constraints = {"patient_data_available": True} if data else {}
         return AgentState(
             task=goal,
-            current_objective=first_step,
+            current_objective=goal,
             artifacts=list(image_paths),
             important_facts={"task_constraints": constraints, "agent_notes": {}},
         )
@@ -1107,7 +1002,6 @@ TOOL USAGE RULES:
         result: Any,
         success: bool,
         summary: str,
-        plan: Optional["AgentPlan"],
     ) -> None:
         """Update AgentState after a tool execution."""
         prefix = "Completed" if success else "Failed"
@@ -1119,47 +1013,12 @@ TOOL USAGE RULES:
             if a not in state.artifacts:
                 state.artifacts.append(a)
 
-        # Advance current objective
-        if plan:
-            next_step = plan.current_step()
-            if next_step:
-                state.current_objective = next_step.description
-
         self._prune_agent_notes(state)
 
     def _render_state(self, state: "AgentState") -> str:
         """Serialize AgentState to JSON for injection into LLM context."""
         return state.to_json()
 
-    def _build_plan_context(self, plan: Optional[AgentPlan], last_results: list) -> str:
-        """Format the plan + recent tool results for injection into mem0_context."""
-        if plan is None:
-            return ""
-        lines = [plan.render()]
-        if last_results:
-            lines.append("\nRECENT TOOL RESULTS (last 3):")
-            for tool_name, result in last_results[-3:]:
-                summary = json.dumps(result)
-                lines.append(f"  {tool_name}: {summary}")
-        return "\n".join(lines)
-
-    def _update_plan_after_tool(
-        self,
-        plan: Optional[AgentPlan],
-        step_id: int,
-        tool_name: str,
-        success: bool,
-        detail: str,
-    ):
-        """Mark the current plan step done or failed after a tool call."""
-        if plan is None:
-            return
-        if success:
-            plan.mark_done(step_id, tool_name, detail)
-            self.logger.info(f"[plan] Step {step_id} done via {tool_name}: {detail}")
-        else:
-            plan.mark_failed(step_id, tool_name, detail)
-            self.logger.warning(f"[plan] Step {step_id} failed via {tool_name}: {detail}")
 
     def _coerce_args(self, args: dict, tool_name: str) -> dict:
         """Bug 2b fix: flatten anyOf schema fragments Gemini sometimes returns as arg values.
@@ -1181,7 +1040,7 @@ TOOL USAGE RULES:
             coerced[k] = v
         return coerced
 
-    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None, _resume_plan: Optional[AgentPlan] = None, _resume_last_results: Optional[list] = None, _resume_state: Optional[AgentState] = None) -> Optional[Dict]:
+    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None, _resume_last_results: Optional[list] = None, _resume_state: Optional[AgentState] = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 
@@ -1227,43 +1086,14 @@ TOOL USAGE RULES:
         if is_gemini and not _resume_history and hasattr(self.llm_client, 'reset_conversation'):
             self.llm_client.reset_conversation()
 
-        # --- Plan-as-STM: create (or resume) an execution plan ---
-        # data_context / image_context aren't built yet here, so we pass empty strings;
-        # the planning call will re-read the goal for structure.  Full context is
-        # injected into every subsequent LLM call via _build_plan_context().
-        plan: Optional[AgentPlan] = _resume_plan
-        if is_gemini and not _resume_history and plan is None:
-            # Build a quick data/image summary for the planner
-            _plan_data_ctx = ""
-            if data:
-                _plan_data_ctx = f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)[:500]}"
-            _plan_img_ctx = ""
-            if imageList:
-                _plan_img_ctx = "\n\nIMAGES AVAILABLE: Yes"
-            plan = self._create_execution_plan(goal, _plan_data_ctx, _plan_img_ctx)
         _all_results: List[tuple] = list(_resume_last_results or [])
-
-        # Gate skill tools based on plan.needs_skills (Gemini only, fresh tasks)
-        if is_gemini and not _resume_history:
-            _all_skill_tools = [t for t in self.available_tools if t.startswith("skills.")]
-            # Always restore first (in case previous task disabled them)
-            for t in _all_skill_tools:
-                self.agent_tools.add(t)
-            if plan is not None and not plan.needs_skills:
-                for t in _all_skill_tools:
-                    self.agent_tools.discard(t)
-                self._refresh_agent_components()
-                self.logger.info(f"[skills] Disabled {len(_all_skill_tools)} skill tools (task: {goal[:60]})")
-            elif plan is not None and plan.needs_skills:
-                self._refresh_agent_components()
-                self.logger.info(f"[skills] Skill tools active for this task")
 
         # Init / resume AgentState
         state: Optional[AgentState] = _resume_state
         if is_gemini and not _resume_history and state is None:
             _img_paths = [p for p, _ in (imageList or [])]
             _data_dict = data if isinstance(data, dict) else {}
-            state = self._init_state(goal, plan, _data_dict, _img_paths)
+            state = self._init_state(goal, _data_dict, _img_paths)
 
         # Extract image path for workflow
         image_path = None
@@ -1348,8 +1178,7 @@ TOOL USAGE RULES:
                 else:
                     # Standard flow: prompt the LLM (always for Ollama, or first iteration for Gemini)
                     if not execution_history:
-                        # First iteration - include plan as structured context
-                        session_context = ("\n\n" + plan.render()) if plan else ""
+                        session_context = ""
                         prompt = f"""GOAL: {goal}{data_context}{image_context}{session_context}
 
 Analyze the goal and decide your next action."""
@@ -1380,19 +1209,13 @@ Analyze the goal and decide your next action."""
                                         error_msg = 'Tool execution failed'
                                     history_text += f"Failed: {error_msg}\n"
                         
-                        # Bug 3b+4 fix: include current state and remaining steps in the prompt
                         _state_text = f"\n\nCURRENT TASK STATE:\n{self._render_state(state)}" if state else ""
-                        _ol_remaining = [s for s in plan.steps if s.status == "pending"] if plan else []
-                        _ol_remaining_text = ""
-                        if _ol_remaining:
-                            _ol_remaining_text = "\n\nREMAINING PLAN STEPS (not yet completed):\n"
-                            _ol_remaining_text += "\n".join(f"  - {s.description}" for s in _ol_remaining)
                         prompt = f"""{history_text}
-GOAL: {goal}{_state_text}{_ol_remaining_text}
+GOAL: {goal}{_state_text}
 
-Have ALL plan steps been completed and the goal fully achieved?
+Have you fully achieved the goal?
 - If YES: call complete_task with a concise final summary. Do NOT write "GOAL_ACHIEVED" in text.
-- If NO: Call the next tool you need
+- If NO: call set_next_objective to declare your next step, then call the tool you need.
 - If you need more information, say "NEED MORE INFO" and specify what you need.
 
 Your decision:"""
@@ -1409,8 +1232,8 @@ Your decision:"""
                     # Prepare content with actual images for Gemini
                     content_parts = [prompt]
 
-                    _prompt_plan_ctx = self._render_state(state) if state else ""
-                    response = self.llm_client.generate_content(content_parts, images_for_llm, mem0_context=_prompt_plan_ctx)
+                    _state_ctx = self._render_state(state) if state else ""
+                    response = self.llm_client.generate_content(content_parts, images_for_llm, mem0_context=_state_ctx)
                     self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
                 
                 # Check if agent declares success (text response, no tool call)
@@ -1573,7 +1396,21 @@ Your decision:"""
                         _turn_results.append((tool_name, result))
                         continue
 
-                    # Bug 1 fix (Step B): complete_task signals explicit task completion
+                    if tool_name == "set_next_objective":
+                        objective = arguments.get("objective", "")
+                        if state:
+                            state.current_objective = objective
+                        result = {"status": "objective_set", "objective": objective}
+                        result_summary = f"Next objective: {objective[:80]}"
+                        execution_history.append({
+                            "tool": tool_name,
+                            "success": True,
+                            "result_summary": result_summary,
+                            "result": result,
+                        })
+                        _turn_results.append((tool_name, result))
+                        continue
+
                     if tool_name == "complete_task":
                         summary = arguments.get("summary", "")
                         if state:
@@ -1668,7 +1505,6 @@ Your decision:"""
                             "session_id": session_id,
                             "turn_accumulated_results": list(_turn_results),
                             "turn_remaining_calls": _remaining_calls,
-                            "plan": plan,
                             "all_results": list(_all_results),
                             "state": state,
                         }
@@ -1733,13 +1569,8 @@ Your decision:"""
 
                         _turn_results.append((tool_name, result))
                         _all_results.append((tool_name, result))
-                        # Update plan: mark current pending step done
-                        if plan:
-                            _step = plan.current_step()
-                            if _step:
-                                self._update_plan_after_tool(plan, _step.id, tool_name, True, result_summary)
                         if state:
-                            self._update_state_after_tool(state, tool_name, result, True, result_summary, plan)
+                            self._update_state_after_tool(state, tool_name, result, True, result_summary)
 
                     elif result and is_error:
                         # Ensure error_msg is always a string, never None
@@ -1773,12 +1604,8 @@ Your decision:"""
                         error_response = {"error": str(error_msg), "is_error": True}
                         _turn_results.append((tool_name, error_response))
                         _all_results.append((tool_name, error_response))
-                        if plan:
-                            _step = plan.current_step()
-                            if _step:
-                                self._update_plan_after_tool(plan, _step.id, tool_name, False, str(error_msg))
                         if state:
-                            self._update_state_after_tool(state, tool_name, error_response, False, str(error_msg), plan)
+                            self._update_state_after_tool(state, tool_name, error_response, False, str(error_msg))
 
                     else:
                         execution_history.append({
@@ -1793,12 +1620,8 @@ Your decision:"""
                         error_response = {"error": "Execution returned no result", "is_error": True}
                         _turn_results.append((tool_name, error_response))
                         _all_results.append((tool_name, error_response))
-                        if plan:
-                            _step = plan.current_step()
-                            if _step:
-                                self._update_plan_after_tool(plan, _step.id, tool_name, False, "Execution returned no result")
                         if state:
-                            self._update_state_after_tool(state, tool_name, error_response, False, "Execution returned no result", plan)
+                            self._update_state_after_tool(state, tool_name, error_response, False, "Execution returned no result")
 
                 # --- Bug 1 fix (Step C): check if LLM called complete_task this turn ---
                 if state and state.status == "completed":
@@ -1821,18 +1644,11 @@ Your decision:"""
                 # --- Phase 3: send ALL accumulated results to Gemini in one message ---
                 # For Ollama: skip this entirely — execution history goes into the next prompt
                 if is_gemini and _turn_results:
-                    # Bug 1+4 fix: replace "GOAL_ACHIEVED" text with complete_task call instruction;
-                    # also list remaining plan steps so LLM knows what's still pending (Bug 4).
-                    _remaining = [s for s in plan.steps if s.status == "pending"] if plan else []
-                    _remaining_text = ""
-                    if _remaining:
-                        _remaining_text = "\n\nREMAINING PLAN STEPS (not yet completed):\n"
-                        _remaining_text += "\n".join(f"  - {s.description}" for s in _remaining)
                     goal_check = (
-                        f"\n\nORIGINAL GOAL: {goal}{_remaining_text}\n"
-                        "Have ALL plan steps been completed and the goal fully achieved?\n"
-                        "- YES (all done) → call complete_task with a concise final summary. Do NOT write 'GOAL_ACHIEVED' in text.\n"
-                        "- NO → call the next required tool"
+                        f"\n\nORIGINAL GOAL: {goal}\n"
+                        "Have you fully achieved the goal?\n"
+                        "- YES → call complete_task with a concise final summary. Do NOT write 'GOAL_ACHIEVED' in text.\n"
+                        "- NO → call set_next_objective to declare your next step, then call the tool you need."
                     )
                     state_ctx = self._render_state(state) if state else ""
                     mem0_context_arg = state_ctx + goal_check

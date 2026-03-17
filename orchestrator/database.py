@@ -81,6 +81,15 @@ def init_db():
             created_at TEXT NOT NULL,
             completed_at TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS watched_directories (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            custom_prompt TEXT,
+            enabled INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
     """)
     conn.commit()
     conn.close()
@@ -379,3 +388,65 @@ def list_tasks(session_id: Optional[str] = None) -> List[Dict]:
             d["result"] = json.loads(d["result"])
         results.append(d)
     return results
+
+
+# --- Watched Directories ---
+
+def create_watched_directory(name: str, path: str, custom_prompt: Optional[str] = None) -> str:
+    dir_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO watched_directories (id, name, path, custom_prompt, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
+        (dir_id, name, path, custom_prompt, now)
+    )
+    conn.commit()
+    conn.close()
+    return dir_id
+
+
+def list_watched_directories() -> List[Dict]:
+    conn = _get_conn()
+    rows = conn.execute("SELECT * FROM watched_directories ORDER BY created_at").fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_watched_directory(dir_id: str) -> Optional[Dict]:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM watched_directories WHERE id = ?", (dir_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_watched_directory(dir_id: str, name: Optional[str] = None, path: Optional[str] = None,
+                              custom_prompt: Optional[str] = None, enabled: Optional[bool] = None):
+    conn = _get_conn()
+    updates = []
+    params = []
+    if name is not None:
+        updates.append("name = ?")
+        params.append(name)
+    if path is not None:
+        updates.append("path = ?")
+        params.append(path)
+    if custom_prompt is not None:
+        updates.append("custom_prompt = ?")
+        params.append(custom_prompt)
+    if enabled is not None:
+        updates.append("enabled = ?")
+        params.append(1 if enabled else 0)
+    if not updates:
+        conn.close()
+        return
+    params.append(dir_id)
+    conn.execute(f"UPDATE watched_directories SET {', '.join(updates)} WHERE id = ?", params)
+    conn.commit()
+    conn.close()
+
+
+def delete_watched_directory(dir_id: str):
+    conn = _get_conn()
+    conn.execute("DELETE FROM watched_directories WHERE id = ?", (dir_id,))
+    conn.commit()
+    conn.close()

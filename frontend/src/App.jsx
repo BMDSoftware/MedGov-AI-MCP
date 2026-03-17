@@ -9,6 +9,7 @@ import Report from './components/Report';
 import Toast from './components/Toast';
 import HomePage from './components/HomePage';
 import AutonomousAgent from './components/AutonomousAgent';
+import Directories from './components/Directories';
 
 function App() {
   // --- State and refs ---
@@ -340,6 +341,7 @@ function App() {
             {unreadTaskCount > 0 && <span className="nav-unread-badge">!</span>}
           </a>
           <a href="#" className={`nav-item${page === 'report' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('report'); }}>Report</a>
+          <a href="#" className={`nav-item${page === 'directories' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('directories'); }}>Directories</a>
           <a href="#" className={`nav-item${page === 'settings' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('settings'); }}>Settings</a>
         </nav>
         <div className="sidebar-footer">
@@ -414,6 +416,8 @@ function App() {
           <Results refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />
         ) : page === 'report' ? (
           <Report refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />
+        ) : page === 'directories' ? (
+          <Directories />
         ) : page === 'history' ? (
           <Sessions onLoadSession={(data) => {
             if (!data) return;

@@ -8,11 +8,22 @@ services:
     volumes:
       - ./orchestrator/data:/app/orchestrator/data         # uploads + DB persist
       - ./mcp-monai/bundles:/app/mcp-monai/bundles         # model bundles persist
+      # Watched directories: mount the paths you want the AI to be able to monitor.
+      # The path inside the container must match what you enter in the Directories UI.
+      # Example: - /home:/home  (gives access to all home directories)
+      # Uncomment whichever you need, or add your own. You can have multiple.
+      - /home:/home
     env_file: ./orchestrator/.env
     environment:
       - APP_ROOT=/app
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   frontend:
     build:
@@ -21,4 +32,5 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - orchestrator
+      orchestrator:
+        condition: service_healthy

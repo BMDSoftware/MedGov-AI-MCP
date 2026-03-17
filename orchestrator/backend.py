@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from agenticAgent import agent_decision
 import database as db
 import task_runner
+from watcher_service import watcher_service
 
 current_session_id: Optional[str] = None
 _shutdown_event: Optional[asyncio.Event] = None
@@ -87,6 +88,49 @@ async def _poll_mcp_tools(interval: int = 30):
             pass
 
 
+async def _watcher_execute(dir_id: str, files: list):
+    """Called by watcher_service when new files are detected in a watched directory."""
+    wd = db.get_watched_directory(dir_id)
+    if not wd or not wd["enabled"]:
+        return
+
+    file_list = "\n".join(f"  - {f}" for f in files)
+    custom = (wd.get("custom_prompt") or "").strip()
+
+    if custom:
+        # Custom prompt is the full job description — don't layer medical analysis on top
+        goal = (
+            f"New file(s) detected in watched directory '{wd['name']}' (path: {wd['path']}).\n\n"
+            f"Files detected:\n{file_list}\n\n"
+            f"{custom}"
+        )
+    else:
+        # Default: classify and organize only. Do NOT run analysis or inference automatically.
+        # Inference should only happen when the user explicitly asks for it via a custom prompt.
+        goal = (
+            f"New file(s) detected in watched directory '{wd['name']}' (path: {wd['path']}).\n\n"
+            f"Files detected:\n{file_list}\n\n"
+            "Your job is to CLASSIFY and ORGANIZE these files only. Do NOT run analysis or inference unless explicitly instructed.\n\n"
+            "Steps:\n"
+            "1. Check if each file is a DICOM, NIfTI, or other medical imaging format using the available parse tools.\n"
+            "2. Based on the file type, move it to an appropriate subdirectory:\n"
+            "   - DICOM → 'dicom/'\n"
+            "   - NIfTI (.nii, .nii.gz) → 'nifti/'\n"
+            "   - Unknown or unreadable → 'uncertain/'\n"
+            "3. Write a brief one-line note alongside each file if helpful.\n"
+            "Do NOT call analyze_image or run_inference. Classification and organization is the only goal."
+        )
+    watcher_service.push_console(dir_id, "[AI] Starting autonomous analysis...")
+    agent_decision.set_agent_type(True)
+    try:
+        result = await agent_decision.execute_task(goal, session_id=current_session_id)
+    finally:
+        agent_decision.set_agent_type(False)
+    if result and result.get("answer"):
+        watcher_service.push_console(dir_id, f"[AI] {result['answer']}")
+    watcher_service.push_console(dir_id, "[AI] Analysis complete.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global current_session_id, _shutdown_event
@@ -98,6 +142,13 @@ async def lifespan(app: FastAPI):
     agent_decision.set_mode(_app_settings.get("mode", "debug"))
     task_runner.init()
     asyncio.create_task(_poll_mcp_tools(30))
+
+    # Start watcher service and resume all enabled watched directories
+    watcher_service.set_execute_callback(_watcher_execute)
+    await watcher_service.start()
+    for wd in db.list_watched_directories():
+        if wd["enabled"]:
+            watcher_service.start_watching(wd["id"], wd["path"], wd["name"])
     try:
         yield
     except asyncio.CancelledError:
@@ -111,6 +162,7 @@ async def lifespan(app: FastAPI):
     finally:
         # Signal SSE connections to exit cleanly before MCP sessions close
         _shutdown_event.set()
+        await watcher_service.stop()
         # Shutdown - close MCP sessions
         agent_decision.reset_session_context()
         try:
@@ -176,6 +228,91 @@ async def set_mode(data: dict = Body(...)):
     _save_settings(_app_settings)
     agent_decision.set_mode(mode)
     return {"mode": mode}
+
+
+# --- Watched Directories ---
+
+@app.get("/api/watched-directories", tags=["system"], summary="List all watched directories")
+async def list_watched_directories():
+    dirs = db.list_watched_directories()
+    for d in dirs:
+        d["watching"] = watcher_service.is_watching(d["id"])
+    return dirs
+
+
+@app.post("/api/watched-directories", tags=["system"], summary="Add a new watched directory")
+async def create_watched_directory(data: dict = Body(...)):
+    name = data.get("name", "").strip()
+    path = data.get("path", "").strip()
+    custom_prompt = (data.get("custom_prompt") or "").strip() or None
+    if not name or not path:
+        raise HTTPException(status_code=400, detail="name and path are required")
+    dir_id = db.create_watched_directory(name, path, custom_prompt)
+    watcher_service.push_console(dir_id, f"[INFO] Directory '{name}' added.")
+    wd = db.get_watched_directory(dir_id)
+    watcher_service.start_watching(dir_id, wd["path"], wd["name"])
+    wd["watching"] = watcher_service.is_watching(dir_id)
+    return wd
+
+
+@app.put("/api/watched-directories/{dir_id}", tags=["system"], summary="Update a watched directory")
+async def update_watched_directory(dir_id: str, data: dict = Body(...)):
+    wd = db.get_watched_directory(dir_id)
+    if not wd:
+        raise HTTPException(status_code=404, detail="Not found")
+    was_watching = watcher_service.is_watching(dir_id)
+    db.update_watched_directory(
+        dir_id,
+        name=data.get("name"),
+        path=data.get("path"),
+        custom_prompt=data.get("custom_prompt"),
+        enabled=data.get("enabled")
+    )
+    wd = db.get_watched_directory(dir_id)
+    # Restart watcher if path changed while active
+    if was_watching and data.get("path"):
+        watcher_service.stop_watching(dir_id)
+        watcher_service.start_watching(dir_id, wd["path"], wd["name"])
+    # Handle enable/disable
+    if "enabled" in data:
+        if data["enabled"] and not watcher_service.is_watching(dir_id):
+            watcher_service.start_watching(dir_id, wd["path"], wd["name"])
+        elif not data["enabled"] and watcher_service.is_watching(dir_id):
+            watcher_service.stop_watching(dir_id)
+    wd["watching"] = watcher_service.is_watching(dir_id)
+    return wd
+
+
+@app.delete("/api/watched-directories/{dir_id}", tags=["system"], summary="Remove a watched directory")
+async def delete_watched_directory(dir_id: str):
+    wd = db.get_watched_directory(dir_id)
+    if not wd:
+        raise HTTPException(status_code=404, detail="Not found")
+    watcher_service.stop_watching(dir_id)
+    db.delete_watched_directory(dir_id)
+    return {"status": "deleted"}
+
+
+@app.get("/api/watched-directories/{dir_id}/console", tags=["system"], summary="Get console log for a watched directory")
+async def get_directory_console(dir_id: str):
+    return watcher_service.get_console_log(dir_id)
+
+
+@app.get("/api/browse-directory", tags=["system"], summary="Browse filesystem directories for the directory picker")
+async def browse_directory(path: str = "/"):
+    path = os.path.abspath(path)
+    try:
+        entries = []
+        for name in sorted(os.listdir(path)):
+            full = os.path.join(path, name)
+            if os.path.isdir(full) and not name.startswith('.'):
+                entries.append({"name": name, "path": full})
+        parent = str(Path(path).parent) if path != "/" else "/"
+        return {"path": path, "parent": parent, "entries": entries}
+    except PermissionError:
+        return {"path": path, "parent": str(Path(path).parent), "entries": [], "error": "Permission denied"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/set-directory", tags=["files"], summary="Add, remove, or clear registered DICOM series directories")
@@ -1103,6 +1240,7 @@ async def sse_events(request: Request):
 
             keepalive_ticks = 0
             notified_mcp: set = set()  # indices of already-sent MCP notifications
+            notified_console: int = 0  # index into watcher_service console log
 
             while True:
                 # Sleep 1s, but wake up immediately if the server is shutting down
@@ -1125,6 +1263,12 @@ async def sse_events(request: Request):
                     if i not in notified_mcp:
                         notified_mcp.add(i)
                         yield f"data: {json.dumps({'type': 'mcp_notification', **notif})}\n\n"
+
+                # Emit new directory console lines
+                console_log = watcher_service.get_console_log()
+                for entry in console_log[notified_console:]:
+                    notified_console += 1
+                    yield f"data: {json.dumps({'type': 'directory_console', **entry})}\n\n"
 
                 try:
                     tasks = db.list_tasks()

@@ -21,3 +21,6 @@ pyyaml>=6.0
 
 # MCP core
 mcp
+
+# Filesystem watching (watched directories feature)
+watchdog>=4.0.0

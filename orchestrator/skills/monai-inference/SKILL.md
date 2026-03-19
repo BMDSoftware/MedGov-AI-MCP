@@ -8,13 +8,10 @@ description: Translates MONAI inference outputs into professional clinical findi
 This skill converts MONAI model outputs into structured, report-ready clinical findings.
 
 ## How to Use
-- For a given MONAI model, load the corresponding file from `references/models/` (e.g., `spleen_ct_segmentation.md`).
-- Load one modality file from `references/modalities/` when modality is known (`CT.md` or `MRI.md`).
-- Use the tables to map:
-  - `volume_cm3` to severity (Normal/Mild/Moderate/Severe)
-  - `intensity_mean` (HU or MRI units) to tissue type
-  - confidence score to clinical wording
-- All mappings are table-based for clarity and automation.
+1. Load the model reference file from `references/models/` (e.g., `spleen_ct_segmentation.md`) using `skills.read_references`.
+2. Load the modality file from `references/modalities/` (`CT.md` or `MRI.md`) using `skills.read_references`.
+3. **Apply the mapping tables yourself in your reasoning** — there is NO tool for this step. You (the LLM) look up the inference results (volume_cm3, intensity, confidence) in the tables and produce the clinical wording directly. For example: volume 248.43 cm³ in the spleen table → "Mild splenomegaly".
+4. Use the mapped findings when calling `complete_task` with the final report.
 
 ## Available Model Mappings
 - `references/models/spleen_ct_segmentation.md`

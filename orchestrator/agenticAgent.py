@@ -73,7 +73,7 @@ class AgentState:
     important_facts: Dict[str, Any] = field(
         default_factory=lambda: {"task_constraints": {}, "agent_notes": {}}
     )
-    status: str = "in_progress"   # in_progress | complete | failed
+    status: str = "in_progress"   # in_progress | completed | failed
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
@@ -98,64 +98,23 @@ class AgenticAgent:
         
         # Setup debug logging using Logger class
         self.logger = Logger(name="AgenticAgent", log_level=log_level, is_active=enable_debug_logging)
-        
+
+        # TTL-based skill context: skills stay for 2 iterations then get dropped
+        self.active_skills: Dict[str, dict] = {}  # {skill_name: {"content": result, "ttl": int}}
+
         # Use async init pattern for tool discovery
         # You must call await self._initialize_components() after instantiation
 
     # Built-in tool schema for queue_task - registered alongside MCP tools so the
     # LLM knows it can call it. Execution is handled locally (never goes to MCP).
     BUILTIN_TOOLS = {
-        "queue_task": {
-            "description": (
-                "Queue a long-running operation as a background task. "
-                "Use this instead of calling a tool directly whenever the operation may take more than a few seconds "
-                "(e.g. MONAI inference, report generation, bulk analysis). "
-                "The function returns immediately so you can keep talking to the user. "
-                "The user will receive a notification when the task finishes."
-            ),
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "task_type": {
-                        "type": "string",
-                        "description": "Category of the task. Use 'inference' for MONAI model runs, 'report' for report generation, or any descriptive string for other tasks.",
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Human-readable label shown in the Results tab, e.g. 'WholeBody segmentation on PANCREAS_0001'.",
-                    },
-                    "input_data": {
-                        "type": "object",
-                        "description": "Task-specific inputs as a JSON object. For 'inference': {image_path, model_name}. For 'report': {task_ids, patient_context}.",
-                    },
-                },
-                "required": ["task_type", "description", "input_data"],
-            },
-            "server": "__builtin__",
-            "original_name": "queue_task",
-            "transport": "builtin",
-        },
-        "list_tasks": {
-            "description": (
-                "List all background tasks for the current session and their status. "
-                "Use this when the user asks whether their inference or report tasks have finished, "
-                "or to check how many tasks are still running."
-            ),
-            "schema": {
-                "type": "object",
-                "properties": {},
-            },
-            "server": "__builtin__",
-            "original_name": "list_tasks",
-            "transport": "builtin",
-        },
         "update_agent_notes": {
             "description": (
-                "Store an important finding or fact in your persistent notes for this task. "
-                "Use this after any tool returns clinically or technically significant information "
-                "you will need later — e.g. detected anatomy, output file paths, model names chosen, "
-                "DICOM metadata, or any fact needed to synthesize the final report. "
-                "Notes persist across all iterations. Keep values concise (one sentence or short list)."
+                "Store a finding or fact in your persistent notes for this task. "
+                "Use this after EVERY tool result to capture ALL data you will need later — "
+                "numeric values, measurements, identifiers, file paths, names, statuses, and errors. "
+                "Notes persist across all iterations and are your only long-term memory — anything "
+                "not noted here will be lost. Write the actual data, not vague summaries."
             ),
             "schema": {
                 "type": "object",
@@ -198,15 +157,14 @@ class AgenticAgent:
         "complete_task": {
             "description": (
                 "Call this tool when you have fully achieved the goal. "
-                "Provide a concise final summary of what was accomplished. "
-                "This is the ONLY way to signal task completion — do NOT write 'GOAL_ACHIEVED' in text."
+                "Include the complete final deliverable (e.g. the full structured report) in the summary field, not just a short description."
             ),
             "schema": {
                 "type": "object",
                 "properties": {
                     "summary": {
                         "type": "string",
-                        "description": "Concise final summary of what was accomplished.",
+                        "description": "The complete final deliverable. Include the full report or answer, not a short summary.",
                     }
                 },
                 "required": ["summary"],
@@ -317,7 +275,7 @@ TOOL USAGE RULES:
 6. After a tool returns results, summarize them clearly for the user.
 7. MULTI-FILE RULE: When multiple paths are listed in "IMAGES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
 8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices that forms a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate or process individual files inside the directory.
-9. NOTE-TAKING: After any tool returns important findings (detected anatomy, output paths, DICOM metadata, chosen model names), call update_agent_notes with a concise key and value. These notes are injected into every subsequent LLM call and help you avoid re-deriving the same information.
+9. NOTE-TAKING: After EVERY tool result, call update_agent_notes to record ONLY the key values you need — measurements, identifiers, file paths, statuses, errors. NEVER paste raw JSON or full tool responses. Extract and summarize in plain text.
 10. OBJECTIVE TRACKING: After each tool result, call set_next_objective to declare what you will do next to progress toward the goal. Base your decision on completed steps, artifacts, and agent notes in the current task state."""
         
         if self.llm_client:
@@ -674,6 +632,11 @@ TOOL USAGE RULES:
                 db.update_task(_rtid, "done", result=_report_wrap)
                 print(f"[agent] Saved radlex report to DB as task {_rtid[:8]}")
 
+            # Register activated skills with the distiller
+            if tool_name == "skills.read_skill_file" and isinstance(result, dict) and "content" in result:
+                _sk_name = result.get("name", arguments.get("skill_name", ""))
+                self._register_skill(_sk_name, result)
+
             confirmed_result = result
             _all_results.append((tool_name, confirmed_result))
             if _state:
@@ -796,12 +759,7 @@ TOOL USAGE RULES:
                     _state.important_facts["agent_notes"][note_key] = note_value
                     self._prune_agent_notes(_state)
                 _result = {"status": "saved", "key": note_key}
-                execution_history.append({
-                    "tool": next_name,
-                    "success": True,
-                    "result_summary": f"Saved note: {note_key}",
-                    "result": _result,
-                })
+                print(f"Agent note saved: {note_key}")
                 turn_accumulated_results.append((next_name, _result))
             elif next_name == "set_next_objective":
                 turn_remaining_calls.pop(0)
@@ -809,12 +767,7 @@ TOOL USAGE RULES:
                 if _state:
                     _state.current_objective = _objective
                 _result = {"status": "objective_set", "objective": _objective}
-                execution_history.append({
-                    "tool": next_name,
-                    "success": True,
-                    "result_summary": f"Next objective: {_objective[:80]}",
-                    "result": _result,
-                })
+                print(f"Next objective: {_objective[:80]}")
                 turn_accumulated_results.append((next_name, _result))
             elif next_name == "complete_task":
                 turn_remaining_calls.pop(0)
@@ -886,14 +839,15 @@ TOOL USAGE RULES:
                 goal_check = (
                     f"\n\nORIGINAL GOAL: {pending['goal']}\n"
                     "Have you fully achieved the goal?\n"
-                    "- YES → call complete_task with a concise final summary. Do NOT write 'GOAL_ACHIEVED' in text.\n"
-                    "- NO → call set_next_objective to declare your next step, then call the tool you need."
+                    "- YES → call complete_task with the complete final deliverable (e.g. the full structured report), not just a short description.\n"
+                    "- NO → Call the next tool you need. You may also call update_agent_notes and set_next_objective in the same response to track your progress."
                 )
                 state_ctx = self._render_state(_state) if _state else ""
-                print("????"*10)
-                print(f"State context for LLM:\n{state_ctx}")
-                print("????"*10)
                 mem0_context_arg = state_ctx + goal_check
+                # Re-inject active skills as labeled text in context
+                _skill_ctx = self._get_skill_context_injection()
+                if _skill_ctx:
+                    mem0_context_arg += f"\n\n{_skill_ctx}"
                 if len(turn_accumulated_results) > 1:
                     llm_response = self.llm_client.send_multiple_function_responses(turn_accumulated_results, mem0_context=mem0_context_arg)
                 else:
@@ -988,7 +942,7 @@ TOOL USAGE RULES:
                 seen.append(p)
         return seen
 
-    def _prune_agent_notes(self, state: "AgentState", budget_tokens: int = 200) -> None:
+    def _prune_agent_notes(self, state: "AgentState", budget_tokens: int = 1000) -> None:
         """Remove oldest agent_notes entries until under token budget."""
         notes = state.important_facts.get("agent_notes", {})
         while notes and len(json.dumps(notes)) // 4 > budget_tokens:
@@ -1019,6 +973,50 @@ TOOL USAGE RULES:
         """Serialize AgentState to JSON for injection into LLM context."""
         return state.to_json()
 
+    # ------------------------------------------------------------------ #
+    # TTL-based skill context (replaces SkillDistiller)                    #
+    # ------------------------------------------------------------------ #
+
+    def _register_skill(self, skill_name: str, result: dict) -> None:
+        """Track a newly activated skill with a TTL of 2 iterations."""
+        self.active_skills[skill_name] = {"content": result, "ttl": 2}
+        self.logger.info(f"[SkillTTL] REGISTERED: {skill_name} (ttl=2)")
+
+    def _tick_skill_ttls(self) -> None:
+        """Decrement TTL for all active skills; drop those that hit 0."""
+        to_remove = []
+        for name, entry in self.active_skills.items():
+            entry["ttl"] -= 1
+            if entry["ttl"] <= 0:
+                self.logger.info(f"[SkillTTL] DROP: {name} (ttl expired)")
+                to_remove.append(name)
+            else:
+                self.logger.info(f"[SkillTTL] KEEP: {name} (ttl={entry['ttl']})")
+        for name in to_remove:
+            del self.active_skills[name]
+
+    def _get_skill_context_injection(self) -> str:
+        """Return active skill content as labeled text for context injection."""
+        if not self.active_skills:
+            return ""
+        sections = []
+        for name, entry in self.active_skills.items():
+            result = entry["content"]
+            content = result.get("content", "") if isinstance(result, dict) else str(result)
+            sections.append(
+                f"[ACTIVE SKILL REFERENCE — {name}]\n"
+                f"Use these instructions to complete the task. This is reference material, not a completed deliverable.\n"
+                f"{content}\n"
+                f"[END SKILL REFERENCE — {name}]"
+            )
+        return "\n\n".join(sections)
+
+    def _get_active_skill_results(self) -> list:
+        """Return active skills as (tool_name, result) tuples for function_response injection."""
+        return [
+            ("skills.read_skill_file", entry["content"])
+            for entry in self.active_skills.values()
+        ]
 
     def _coerce_args(self, args: dict, tool_name: str) -> dict:
         """Bug 2b fix: flatten anyOf schema fragments Gemini sometimes returns as arg values.
@@ -1040,7 +1038,7 @@ TOOL USAGE RULES:
             coerced[k] = v
         return coerced
 
-    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None, _resume_last_results: Optional[list] = None, _resume_state: Optional[AgentState] = None) -> Optional[Dict]:
+    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 40, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None, _resume_last_results: Optional[list] = None, _resume_state: Optional[AgentState] = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 
@@ -1086,6 +1084,10 @@ TOOL USAGE RULES:
         if is_gemini and not _resume_history and hasattr(self.llm_client, 'reset_conversation'):
             self.llm_client.reset_conversation()
 
+        # Fresh skill context per task
+        if not _resume_history:
+            self.active_skills = {}
+
         _all_results: List[tuple] = list(_resume_last_results or [])
 
         # Init / resume AgentState
@@ -1103,10 +1105,15 @@ TOOL USAGE RULES:
 
         # Both Ollama and Gemini now use true agentic approach
         # The LLM decides which tools to call based on context
+        _consecutive_busywork = 0  # counts iterations with ONLY update_agent_notes/set_next_objective
 
         while iterations < max_iterations:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
+
+            # Tick skill TTLs: decrement and drop expired skills
+            if self.active_skills:
+                self._tick_skill_ttls()
 
             try:
                 # Note: Execution history is now managed by Gemini's chat session
@@ -1210,13 +1217,16 @@ Analyze the goal and decide your next action."""
                                     history_text += f"Failed: {error_msg}\n"
                         
                         _state_text = f"\n\nCURRENT TASK STATE:\n{self._render_state(state)}" if state else ""
+                        # Re-inject active skills as labeled text
+                        _skill_ctx = self._get_skill_context_injection()
+                        if _skill_ctx:
+                            _state_text += f"\n\n{_skill_ctx}"
                         prompt = f"""{history_text}
 GOAL: {goal}{_state_text}
 
 Have you fully achieved the goal?
-- If YES: call complete_task with a concise final summary. Do NOT write "GOAL_ACHIEVED" in text.
-- If NO: call set_next_objective to declare your next step, then call the tool you need.
-- If you need more information, say "NEED MORE INFO" and specify what you need.
+- If YES: call complete_task with the complete final deliverable (e.g. the full structured report), not just a short description.
+- If NO: Call the next tool you need. You may also call update_agent_notes and set_next_objective in the same response to track your progress.
 
 Your decision:"""
 
@@ -1233,6 +1243,10 @@ Your decision:"""
                     content_parts = [prompt]
 
                     _state_ctx = self._render_state(state) if state else ""
+                    # For generate_content fallback, format active skills as labeled tool outputs
+                    _skill_tool_results2 = self._get_active_skill_results()
+                    for _sk_tool_name2, _sk_tool_data2 in _skill_tool_results2:
+                        _state_ctx += f"\n\n[TOOL OUTPUT from {_sk_tool_name2}]:\n{json.dumps(_sk_tool_data2, indent=2)}"
                     response = self.llm_client.generate_content(content_parts, images_for_llm, mem0_context=_state_ctx)
                     self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
                 
@@ -1247,42 +1261,6 @@ Your decision:"""
                     for part in response.candidates[0].content.parts:
                         if hasattr(part, 'text') and part.text:
                             has_text = True
-                            text_content = part.text.strip()
-                            # Bug 1 fix (Step D): only treat as GOAL_ACHIEVED if it appears at the very start
-                            # of the response (anchored regex) to avoid false triggers from echoed prompts.
-                            if re.match(r"^\s*GOAL[_\s]ACHIEVED", text_content, re.IGNORECASE):
-                                print("Agent declares: Goal achieved! (text fallback)")
-                                # Return detailed response with execution history
-                                answer = self._extract_answer_from_results(part.text, execution_history, final_result)
-                                tools_used = [event['tool'] for event in execution_history if event['success']]
-
-                                if state:
-                                    state.status = "completed"
-
-                                self.logger.info(f"\n{'='*60}")
-                                self.logger.info("TASK COMPLETED SUCCESSFULLY (text fallback)")
-                                self.logger.info(f"  Iterations used: {iterations}")
-                                self.logger.info(f"  Tools used: {tools_used}")
-                                self.logger.info(f"  Answer: {answer}")
-                                self.logger.info(f"{'='*80}\n")
-
-                                return {
-                                    "type": "agent_response",
-                                    "answer": answer,
-                                    "tools_used": tools_used,
-                                    "execution_history": execution_history,
-                                    "success": True
-                                }
-
-                            if "NEED MORE INFO" in text_content:
-                                print("Agent requests more information to proceed.")
-                                return {
-                                    "type": "agent_response",
-                                    "answer": part.text.strip(),
-                                    "tools_used": [],
-                                    "execution_history": execution_history,
-                                    "success": False
-                                }
 
                         if hasattr(part, 'function_call') and part.function_call:
                             has_function_call = True
@@ -1303,6 +1281,15 @@ Your decision:"""
                 _turn_results: list = []  # list of (tool_name, result_data) to send to Gemini together
 
                 for tool_name, arguments in _turn_calls:
+
+                    # Guard: reject hallucinated tool names that don't exist
+                    if tool_name not in self.available_tools:
+                        _err_msg = f"Tool '{tool_name}' does not exist. Available tools: {', '.join(sorted(self.agent_tools))}"
+                        print(f"[agent] Blocked hallucinated tool call: {tool_name}")
+                        self.logger.info(f"  BLOCKED: {tool_name} (not a real tool)")
+                        execution_history.append({"tool": tool_name, "success": False, "error": _err_msg})
+                        _turn_results.append((tool_name, {"error": _err_msg, "is_error": True}))
+                        continue
 
                     # Check if agent is repeating a failed tool (block only after 2 consecutive failures)
                     if len(execution_history) >= 2:
@@ -1385,14 +1372,7 @@ Your decision:"""
                             state.important_facts["agent_notes"][note_key] = note_value
                             self._prune_agent_notes(state)
                         result = {"status": "saved", "key": note_key}
-                        result_summary = f"Saved note: {note_key}"
-                        execution_history.append({
-                            "tool": tool_name,
-                            "success": True,
-                            "result_summary": result_summary,
-                            "result": result,
-                        })
-                        final_result = result
+                        print(f"Agent note saved: {note_key}")
                         _turn_results.append((tool_name, result))
                         continue
 
@@ -1401,13 +1381,7 @@ Your decision:"""
                         if state:
                             state.current_objective = objective
                         result = {"status": "objective_set", "objective": objective}
-                        result_summary = f"Next objective: {objective[:80]}"
-                        execution_history.append({
-                            "tool": tool_name,
-                            "success": True,
-                            "result_summary": result_summary,
-                            "result": result,
-                        })
+                        print(f"Next objective: {objective[:80]}")
                         _turn_results.append((tool_name, result))
                         continue
 
@@ -1567,6 +1541,11 @@ Your decision:"""
                             db.update_task(_rtid, "done", result=_report_wrap)
                             print(f"[agent] Saved radlex report to DB as task {_rtid[:8]}")
 
+                        # Register activated skills with the distiller
+                        if tool_name == "skills.read_skill_file" and isinstance(result, dict) and "content" in result:
+                            _sk_name = result.get("name", arguments.get("skill_name", ""))
+                            self._register_skill(_sk_name, result)
+
                         _turn_results.append((tool_name, result))
                         _all_results.append((tool_name, result))
                         if state:
@@ -1641,17 +1620,36 @@ Your decision:"""
                         "success": True,
                     }
 
+                # --- Busywork guard: detect loops of only update_agent_notes/set_next_objective ---
+                _busywork_tools = {"update_agent_notes", "set_next_objective"}
+                _turn_tool_names = {name for name, _ in _turn_calls}
+                if _turn_tool_names and _turn_tool_names.issubset(_busywork_tools):
+                    _consecutive_busywork += 1
+                else:
+                    _consecutive_busywork = 0
+
+                if _consecutive_busywork >= 3:
+                    self.logger.info("[BUSYWORK GUARD] 3 consecutive busywork-only iterations — stripping update_agent_notes and set_next_objective from tools")
+                    _enabled = self.get_enabled_agent_tools()
+                    _stripped = {k: v for k, v in _enabled.items() if k not in _busywork_tools}
+                    self.llm_client.update_tools(_stripped)
+                    _consecutive_busywork = 0
+
                 # --- Phase 3: send ALL accumulated results to Gemini in one message ---
                 # For Ollama: skip this entirely — execution history goes into the next prompt
                 if is_gemini and _turn_results:
                     goal_check = (
                         f"\n\nORIGINAL GOAL: {goal}\n"
                         "Have you fully achieved the goal?\n"
-                        "- YES → call complete_task with a concise final summary. Do NOT write 'GOAL_ACHIEVED' in text.\n"
-                        "- NO → call set_next_objective to declare your next step, then call the tool you need."
+                        "- YES → call complete_task with the complete final deliverable (e.g. the full structured report), not just a short description.\n"
+                        "- NO → Call the next tool you need. You may also call update_agent_notes and set_next_objective in the same response to track your progress."
                     )
                     state_ctx = self._render_state(state) if state else ""
                     mem0_context_arg = state_ctx + goal_check
+                    # Re-inject active skills as labeled text in context
+                    _skill_ctx3 = self._get_skill_context_injection()
+                    if _skill_ctx3:
+                        mem0_context_arg += f"\n\n{_skill_ctx3}"
                     if len(_turn_results) > 1:
                         self.logger.info(f"\nSENDING {len(_turn_results)} RESULTS TO LLM via send_multiple_function_responses")
                         _resume_response = self.llm_client.send_multiple_function_responses(_turn_results, mem0_context=mem0_context_arg)
@@ -1662,35 +1660,15 @@ Your decision:"""
                     self.logger.info("Captured response from function_response(s) - will use on next iteration")
 
                 
-                # If agent responded with text but no tool call
+                # If agent responded with text but no tool call, log it and continue
                 if has_text and not has_function_call:
                     text_response = response.text.strip()
-                    # Check if it's a GOAL_ACHIEVED response
-                    if "GOAL_ACHIEVED" in text_response.upper() or "GOAL ACHIEVED" in text_response.upper():
-                        pass  # Already handled above
-                    elif len(text_response) > 20:
-                        # Agent gave a substantial text response - return it
-                        # This covers: conversational replies, error explanations, asking user for info
-                        last_failed = execution_history and not execution_history[-1].get('success')
-                        if last_failed:
-                            print("Agent explaining tool error to user")
-                        else:
-                            print("Agent responded with text (no tools needed for this query)")
-                        tools_used = [event['tool'] for event in execution_history if event.get('success')]
-                        return {
-                            "type": "agent_response",
-                            "answer": text_response,
-                            "tools_used": tools_used,
-                            "execution_history": execution_history,
-                            "success": not last_failed
-                        }
-                    else:
-                        print("Agent response too short, continuing...")
-                        execution_history.append({
-                            "tool": "none",
-                            "success": False,
-                            "error": "Agent response was not actionable"
-                        })
+                    print(f"Agent responded with text (no tool call): {text_response[:100]}")
+                    execution_history.append({
+                        "tool": "none",
+                        "success": True,
+                        "result_summary": text_response[:200],
+                    })
                     
             except Exception as e:
                 print(f"Error in agentic workflow: {type(e).__name__}: {e}")
@@ -1715,11 +1693,23 @@ Your decision:"""
                     "result": None
                 })
         
+        # Restore full tool set in case busywork guard stripped some
+        self._refresh_agent_components()
         print("Max iterations reached or goal not achieved.")
+        if state:
+            state.status = "failed"
         self.logger.warning(f"TASK ENDED: Max iterations reached ({max_iterations}) - goal not achieved")
         self.logger.info(f"Total successful tools: {sum(1 for e in execution_history if e.get('success'))}")
         self.logger.info(f"={'='*80}\n")
-        return None
+        answer = self._extract_answer_from_results(execution_history, goal)
+        tools_used = [event['tool'] for event in execution_history if event.get('success')]
+        return {
+            "type": "agent_response",
+            "answer": answer or "Max iterations reached without completing the task.",
+            "tools_used": tools_used,
+            "execution_history": execution_history,
+            "success": False,
+        }
     
     def _create_result_summary(self, tool_name: str, result: Any) -> str:
         """Create a human-readable summary of tool results"""
@@ -1745,12 +1735,26 @@ Your decision:"""
 
         elif tool_name == "monai.run_inference":
             status = result.get("status", "unknown")
+            model_used = result.get("model_used", "unknown")
             results = result.get("results", {})
             detected = results.get("detected_structures", [])
             if detected:
-                names = [s.get("name", "?") for s in detected]
-                return f"Inference {status}: detected {', '.join(names)}"
-            return f"Inference {status}"
+                parts = []
+                for s in detected:
+                    name = s.get("name", "?")
+                    vol = s.get("volume_cm3")
+                    voxels = s.get("voxel_count")
+                    pct = s.get("volume_percentage")
+                    detail = name
+                    if vol is not None:
+                        detail += f" volume={vol}cm³"
+                    if voxels is not None:
+                        detail += f" voxels={voxels}"
+                    if pct is not None:
+                        detail += f" ({pct}%)"
+                    parts.append(detail)
+                return f"Inference {status} (model={model_used}): {'; '.join(parts)}"
+            return f"Inference {status} (model={model_used})"
 
         # RadLex tools
         elif tool_name.startswith("radlex."):
@@ -1816,10 +1820,9 @@ Your decision:"""
         # Build response with tool results
         response_parts = []
 
-        # Add agent's text if it's more than just GOAL_ACHIEVED
-        clean_text = agent_text.replace("GOAL_ACHIEVED", "").replace("GOAL ACHIEVED", "").strip()
-        if clean_text and len(clean_text) > 20:
-            response_parts.append(clean_text)
+        # Add agent's text if substantial
+        if agent_text and len(agent_text) > 20:
+            response_parts.append(agent_text)
 
         # Add results from successful tool executions
         for event in execution_history:

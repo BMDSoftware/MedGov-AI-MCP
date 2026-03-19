@@ -241,9 +241,9 @@ const AutonomousAgent = ({ currentSessionId }) => {
     addActivity('info', `Agent is analyzing ${typeLabel} "${name}" to determine the best course of action...`);
     
     try {
-      const query = type === 'directory' 
-      ? `A new directory named "${name}" has been uploaded (Path: ${path}). Autonomously run the spleen model on each file to extract clinical findings. Once every file has been processed and all findings are gathered, synthesize the results into a final medical report.`
-      : `A new file named "${name}" has been uploaded. Analyze it using the spleen model to extract clinical findings and generate a final medical report summary.`;
+      const query = type === 'directory'
+      ? `A new directory named "${name}" has been uploaded (Path: ${path}). Autonomously run the spleen model on each file to extract clinical findings. Generate a complete structured medical report with all clinical findings and include it in full in your final answer.`
+      : `A new file named "${name}" has been uploaded. Analyze it using the spleen model to extract clinical findings. Generate a complete structured medical report with all clinical findings and include it in full in your final answer.`;
       console.log("query sent to backend:", query);
       const response = await fetch(getApiUrl('/api/process-query'), {
         method: 'POST',

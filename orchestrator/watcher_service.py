@@ -8,7 +8,6 @@ that streams to the frontend via SSE.
 
 import asyncio
 import os
-import time
 from datetime import datetime
 from typing import Dict, Optional, Callable, List, Set
 

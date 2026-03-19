@@ -39,7 +39,7 @@ function DirBrowser({ current, onSelect, onClose }) {
       <div className="modal browser-modal">
         <div className="browser-header">
           <span className="browser-icon">📁</span>
-          <span className="browser-title">Select Directory</span>
+          <span className="browser-title">Select Folder</span>
           <button className="browser-close" onClick={onClose}>✕</button>
         </div>
 
@@ -118,7 +118,7 @@ function ConsolePanel({ dir, onClose }) {
       </div>
       <div className="console-output">
         {lines.length === 0 ? (
-          <div className="console-empty">No activity yet. Drop a file into the watched directory to begin.</div>
+          <div className="console-empty">No activity yet. Drop a file into this workspace to begin.</div>
         ) : (
           lines.map((l, i) => (
             <div key={i} className={`console-line ${classifyLine(l.message)}`}>
@@ -135,7 +135,7 @@ function ConsolePanel({ dir, onClose }) {
 
 // ─── Add / Edit Modal ─────────────────────────────────────────────────────────
 
-function DirModal({ initial, onSave, onClose }) {
+function WorkspaceModal({ initial, onSave, onClose }) {
   const [name, setName] = useState(initial?.name || '');
   const [path, setPath] = useState(initial?.path || '');
   const [prompt, setPrompt] = useState(initial?.custom_prompt || '');
@@ -152,7 +152,7 @@ function DirModal({ initial, onSave, onClose }) {
       <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
         <div className="modal">
           <div className="modal-header">
-            <h3>{initial ? 'Edit Directory' : 'Add Watched Directory'}</h3>
+            <h3>{initial ? 'Edit Workspace' : 'Add Workspace'}</h3>
             <button className="modal-close" onClick={onClose}>✕</button>
           </div>
           <form onSubmit={handleSubmit}>
@@ -195,7 +195,7 @@ function DirModal({ initial, onSave, onClose }) {
             <div className="modal-actions">
               <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
               <button type="submit" className="btn-primary">
-                {initial ? 'Save changes' : 'Add directory'}
+                {initial ? 'Save changes' : 'Add workspace'}
               </button>
             </div>
           </form>
@@ -223,7 +223,7 @@ function StatusBadge({ dir }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function Directories() {
+export default function Workspaces() {
   const [dirs, setDirs] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
@@ -272,7 +272,7 @@ export default function Directories() {
   }
 
   async function handleDelete(dir) {
-    if (!confirm(`Remove watched directory "${dir.name}"?`)) return;
+    if (!confirm(`Remove workspace "${dir.name}"?`)) return;
     await fetch(getApiUrl(`/api/watched-directories/${dir.id}`), { method: 'DELETE' });
     if (openConsole?.id === dir.id) setOpenConsole(null);
     load();
@@ -282,23 +282,23 @@ export default function Directories() {
     <div className="directories-page">
       <div className="directories-header">
         <div>
-          <h2>Watched Directories</h2>
+          <h2>Workspaces</h2>
           <p className="directories-subtitle">
-            Drop files into a watched directory and the AI will automatically analyze and organize them.
+            Drop files into a workspace and the AI will automatically analyze and organize them.
           </p>
         </div>
         <button className="btn-primary btn-add" onClick={() => setShowModal(true)}>
-          + Add directory
+          + Add workspace
         </button>
       </div>
 
       {dirs.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">📁</div>
-          <strong>No watched directories</strong>
-          <p>Add a directory and the AI will process new files automatically.</p>
+          <strong>No workspaces yet</strong>
+          <p>Add a workspace and the AI will process new files automatically.</p>
           <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => setShowModal(true)}>
-            + Add your first directory
+            + Add your first workspace
           </button>
         </div>
       ) : (
@@ -357,11 +357,11 @@ export default function Directories() {
       )}
 
       {showModal && (
-        <DirModal onSave={handleAdd} onClose={() => setShowModal(false)} />
+        <WorkspaceModal onSave={handleAdd} onClose={() => setShowModal(false)} />
       )}
 
       {editTarget && (
-        <DirModal initial={editTarget} onSave={handleEdit} onClose={() => setEditTarget(null)} />
+        <WorkspaceModal initial={editTarget} onSave={handleEdit} onClose={() => setEditTarget(null)} />
       )}
     </div>
   );

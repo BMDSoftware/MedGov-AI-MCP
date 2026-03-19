@@ -9,7 +9,7 @@ import Report from './components/Report';
 import Toast from './components/Toast';
 import HomePage from './components/HomePage';
 import AutonomousAgent from './components/AutonomousAgent';
-import Directories from './components/Directories';
+import Workspaces from './components/Workspaces';
 
 function App() {
   // --- State and refs ---
@@ -333,15 +333,19 @@ function App() {
           <a href="#" className={`nav-item${page === 'home' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('home'); }}>Home</a>
           <a href="#" className={`nav-item${page === 'autonomous' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('autonomous'); }}>Autonomous</a>
           <a href="#" className={`nav-item${page === 'analysis' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('analysis'); }}>Analysis</a>
-          <a href="#" className={`nav-item${page === 'history' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('history'); }}>History</a>
-          <a href="#" className={`nav-item${page === 'test' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('test'); }}>Test</a>
           <a href="#" className={`nav-item${page === 'results' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('results'); }}>
             Results
             {runningTaskCount > 0 && <span className="nav-task-badge">{runningTaskCount}</span>}
             {unreadTaskCount > 0 && <span className="nav-unread-badge">!</span>}
           </a>
-          <a href="#" className={`nav-item${page === 'report' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('report'); }}>Report</a>
-          <a href="#" className={`nav-item${page === 'directories' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('directories'); }}>Directories</a>
+          {appMode === 'debug' && (
+            <>
+              <a href="#" className={`nav-item${page === 'history' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('history'); }}>Sessions</a>
+              <a href="#" className={`nav-item${page === 'test' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('test'); }}>Test</a>
+              <a href="#" className={`nav-item${page === 'report' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('report'); }}>Report</a>
+            </>
+          )}
+          <a href="#" className={`nav-item${page === 'workspaces' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('workspaces'); }}>Workspaces</a>
           <a href="#" className={`nav-item${page === 'settings' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('settings'); }}>Settings</a>
         </nav>
         <div className="sidebar-footer">
@@ -416,8 +420,8 @@ function App() {
           <Results refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />
         ) : page === 'report' ? (
           <Report refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />
-        ) : page === 'directories' ? (
-          <Directories />
+        ) : page === 'workspaces' ? (
+          <Workspaces />
         ) : page === 'history' ? (
           <Sessions onLoadSession={(data) => {
             if (!data) return;

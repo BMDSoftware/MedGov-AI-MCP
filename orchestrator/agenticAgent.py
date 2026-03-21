@@ -104,6 +104,43 @@ class AgenticAgent:
             "original_name": "list_tasks",
             "transport": "builtin",
         },
+        "goal_achieved": {
+            "description": (
+                "Call this tool when you have completed the user's goal or answered their question. "
+                "You MUST call this tool to signal completion — do not just say 'done' in text."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Final answer or summary of what was accomplished.",
+                    },
+                },
+                "required": ["summary"],
+            },
+            "server": "__builtin__",
+            "original_name": "goal_achieved",
+            "transport": "builtin",
+        },
+        "need_more_info": {
+            "description": (
+                "Call this tool when you cannot proceed without additional information from the user."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "What specific information is needed from the user.",
+                    },
+                },
+                "required": ["question"],
+            },
+            "server": "__builtin__",
+            "original_name": "need_more_info",
+            "transport": "builtin",
+        },
     }
 
     async def _initialize_components(self):
@@ -833,9 +870,9 @@ Analyze the goal and decide your next action."""
                         
                         prompt = f"""{history_text}
 Does this accomplish the goal?
-- If YES: Respond with explicitly "GOAL_ACHIEVED" and provide the final result
+- If YES: Call the goal_achieved tool with a summary of what was accomplished
 - If NO: Call the next tool you need
-- If you need more information, say "NEED MORE INFO" and specify what you need.
+- If you need more information from the user: Call the need_more_info tool
 
 Your decision:"""
 
@@ -867,8 +904,9 @@ Your decision:"""
                             has_text = True
                             text_content = part.text.strip().upper()
                             if "GOAL_ACHIEVED" in text_content or "GOAL ACHIEVED" in text_content:
-                                print("Agent declares: Goal achieved!")
-                                # Return detailed response with execution history
+                                self.logger.warning("LLM used text GOAL_ACHIEVED instead of goal_achieved tool — falling back to string detection")
+                                print("Agent declares: Goal achieved! (text fallback)")
+                                # Fallback: return detailed response with execution history
                                 answer = self._extract_answer_from_results(part.text, execution_history, final_result)
                                 tools_used = [event['tool'] for event in execution_history if event['success']]
 
@@ -888,7 +926,8 @@ Your decision:"""
                                 }
 
                             if "NEED MORE INFO" in text_content:
-                                print("Agent requests more information to proceed.")
+                                self.logger.warning("LLM used text NEED MORE INFO instead of need_more_info tool — falling back to string detection")
+                                print("Agent requests more information to proceed. (text fallback)")
                                 return {
                                     "type": "agent_response",
                                     "answer": part.text.strip(),
@@ -988,6 +1027,36 @@ Your decision:"""
                         final_result = result
                         _turn_results.append((tool_name, result))
                         continue
+
+                    if tool_name == "goal_achieved":
+                        summary = arguments.get("summary", "")
+                        answer = summary if summary else self._extract_answer_from_results("", execution_history, final_result)
+                        tools_used = [event['tool'] for event in execution_history if event.get('success')]
+
+                        self.logger.info(f"\n{'='*60}")
+                        self.logger.info("TASK COMPLETED VIA goal_achieved TOOL")
+                        self.logger.info(f"  Iterations used: {iterations}")
+                        self.logger.info(f"  Tools used: {tools_used}")
+                        self.logger.info(f"  Answer: {answer}")
+                        self.logger.info(f"{'='*60}\n")
+
+                        return {
+                            "type": "agent_response",
+                            "answer": answer,
+                            "tools_used": tools_used,
+                            "execution_history": execution_history,
+                            "success": True
+                        }
+
+                    if tool_name == "need_more_info":
+                        question = arguments.get("question", "I need more information to proceed.")
+                        return {
+                            "type": "agent_response",
+                            "answer": question,
+                            "tools_used": [],
+                            "execution_history": execution_history,
+                            "success": False
+                        }
 
                     # run_inference always runs in the background so the user
                     # can keep chatting and the result lands in the Results tab.

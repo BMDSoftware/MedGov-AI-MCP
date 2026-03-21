@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -23,6 +24,11 @@ import database as db
 
 # ── Module-level state ────────────────────────────────────────────────────────
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="task_worker")
+
+# Inference tasks are CPU/memory heavy (loads a multi-GB model + sliding window).
+# Running more than one at a time causes OOM → subprocess crash → "Connection closed".
+# This semaphore serialises inference so they queue and run one at a time.
+_inference_semaphore = threading.Semaphore(1)
 
 
 def init():
@@ -38,7 +44,9 @@ def submit_task(session_id: str, task_type: str, description: str, input_data: D
     Returns the task_id immediately so the agent can respond to the user.
     """
     task_id = db.create_task(session_id, task_type, description, input_data)
-    _executor.submit(_run_task, task_id, task_type, description, input_data, session_id)
+    # Inject task_id so inference handler can update status after acquiring semaphore
+    enriched = {**input_data, "_task_id": task_id}
+    _executor.submit(_run_task, task_id, task_type, description, enriched, session_id)
     print(f"[task_runner] Queued {task_type} task {task_id[:8]}: {description}")
     return task_id
 
@@ -59,7 +67,9 @@ def _unwrap_exception_message(e: Exception) -> str:
 def _run_task(task_id: str, task_type: str, description: str, input_data: Dict, session_id: str):
     """Entry point for each worker thread."""
     print(f"[task_runner] Starting {task_id[:8]} ({task_type})")
-    db.update_task(task_id, "running")
+    # Inference tasks delay the 'running' status until the semaphore is acquired
+    if task_type != "inference":
+        db.update_task(task_id, "running")
 
     try:
         handler = _HANDLERS.get(task_type)
@@ -91,16 +101,31 @@ def _handle_inference(input_data: Dict, session_id: str) -> Dict:
     """
     Run MONAI inference via a fresh MCP session opened in this thread's event loop.
     input_data: {image_path, model_name}
+
+    Inference is serialised by _inference_semaphore — only one runs at a time to
+    prevent OOM from loading multiple large models simultaneously.
+    While waiting for the semaphore the task stays in 'queued' status so the UI
+    shows it correctly.
     """
     image_path = input_data["image_path"]
     model_name = input_data["model_name"]
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    task_id = input_data.get("_task_id")
+
+    # Wait for exclusive access — stay in 'queued' until we actually start
+    _inference_semaphore.acquire()
+    if task_id:
+        db.update_task(task_id, "running")
+        print(f"[task_runner] Semaphore acquired, running inference {task_id[:8]}")
     try:
-        return loop.run_until_complete(_async_run_inference(image_path, model_name))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_async_run_inference(image_path, model_name))
+        finally:
+            loop.close()
     finally:
-        loop.close()
+        _inference_semaphore.release()
 
 
 async def _async_run_inference(image_path: str, model_name: str) -> Dict:
@@ -115,8 +140,8 @@ async def _async_run_inference(image_path: str, model_name: str) -> Dict:
 
     monai_cfg = config["mcpServers"]["monai"]
     params = StdioServerParameters(
-        command=monai_cfg["command"],
-        args=monai_cfg.get("args", []),
+        command=os.path.expandvars(monai_cfg["command"]),
+        args=[os.path.expandvars(a) for a in monai_cfg.get("args", [])],
         env={**os.environ, **monai_cfg.get("env", {})},
     )
 
@@ -283,8 +308,8 @@ async def _async_radlex_report(query: str, findings: list, patient_context: Dict
 
     radlex_cfg = config["mcpServers"]["radlex"]
     params = StdioServerParameters(
-        command=radlex_cfg["command"],
-        args=radlex_cfg.get("args", []),
+        command=os.path.expandvars(radlex_cfg["command"]),
+        args=[os.path.expandvars(a) for a in radlex_cfg.get("args", [])],
         env={**os.environ, **radlex_cfg.get("env", {})},
     )
 

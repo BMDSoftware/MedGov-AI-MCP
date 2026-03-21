@@ -4,25 +4,63 @@ import json
 import os
 import shutil
 import uuid
-from typing import Optional, List
+from dataclasses import dataclass, field
+from typing import Optional, List, Dict
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Load env BEFORE importing agenticAgent so LLM_BACKEND is set
 load_dotenv()
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Body, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Body, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
-from agenticAgent import agent_decision
+from agenticAgent import AgenticAgent
 import database as db
 import task_runner
 from watcher_service import watcher_service
+import auth
+from auth import get_current_user
 
-current_session_id: Optional[str] = None
 _shutdown_event: Optional[asyncio.Event] = None
 _mcp_notifications: list = []  # in-memory MCP event log
+
+# --- Per-user state ---
+
+@dataclass
+class UserState:
+    current_session_id: Optional[str] = None
+    uploaded_files: list = field(default_factory=list)
+    temp_file_paths: dict = field(default_factory=dict)
+    uploaded_dirs: list = field(default_factory=list)
+    image_metadata: dict = field(default_factory=lambda: {"modality": None, "bodyPart": None})
+
+_user_states: Dict[str, UserState] = {}
+_agents: Dict[str, AgenticAgent] = {}
+_agents_lock = asyncio.Lock()
+
+
+def _get_user_state(user_id: str) -> UserState:
+    if user_id not in _user_states:
+        _user_states[user_id] = UserState()
+    return _user_states[user_id]
+
+
+async def get_or_create_agent(user_id: str) -> AgenticAgent:
+    """Return the existing agent for this user, or lazily create and initialise one."""
+    async with _agents_lock:
+        if user_id not in _agents:
+            agent = AgenticAgent()
+            await agent._initialize_components()
+            # Apply this user's disabled tools from DB
+            disabled = db.get_disabled_tools_for_user(user_id)
+            for t in disabled:
+                agent.agent_tools.discard(t)
+            agent._refresh_agent_components()
+            agent.set_mode(_app_settings.get("mode", "debug"))
+            _agents[user_id] = agent
+        return _agents[user_id]
 
 
 def _push_notification(event_type: str, message: str):
@@ -56,7 +94,7 @@ _app_settings = _load_settings()
 
 
 async def _poll_mcp_tools(interval: int = 30):
-    """Periodically re-query all connected MCP servers for tool changes."""
+    """Periodically re-query all connected MCP servers for tool changes across all user agents."""
     while True:
         try:
             await asyncio.wait_for(_shutdown_event.wait(), timeout=interval)
@@ -64,26 +102,32 @@ async def _poll_mcp_tools(interval: int = 30):
         except asyncio.TimeoutError:
             pass
         try:
-            servers = list(agent_decision.tool_registry.sessions.keys())
-            for name in servers:
+            async with _agents_lock:
+                agents_snapshot = list(_agents.values())
+            for agent in agents_snapshot:
                 try:
-                    old_keys = set(k for k in agent_decision.available_tools if k.startswith(f"{name}."))
-                    new_tools = await agent_decision.tool_registry.refresh_server_tools(name)
-                    new_keys = set(new_tools.keys())
-                    added = new_keys - old_keys
-                    removed = old_keys - new_keys
-                    for k in old_keys:
-                        agent_decision.available_tools.pop(k, None)
-                        agent_decision.agent_tools.discard(k)
-                    agent_decision.available_tools.update(new_tools)
-                    agent_decision.agent_tools.update(new_keys)
-                    for k in added:
-                        _push_notification("tool_added", f"New tool available: {k}")
-                    for k in removed:
-                        _push_notification("tool_removed", f"Tool removed: {k}")
+                    servers = list(agent.tool_registry.sessions.keys())
+                    for name in servers:
+                        try:
+                            old_keys = set(k for k in agent.available_tools if k.startswith(f"{name}."))
+                            new_tools = await agent.tool_registry.refresh_server_tools(name)
+                            new_keys = set(new_tools.keys())
+                            added = new_keys - old_keys
+                            removed = old_keys - new_keys
+                            for k in old_keys:
+                                agent.available_tools.pop(k, None)
+                                agent.agent_tools.discard(k)
+                            agent.available_tools.update(new_tools)
+                            agent.agent_tools.update(new_keys)
+                            for k in added:
+                                _push_notification("tool_added", f"New tool available: {k}")
+                            for k in removed:
+                                _push_notification("tool_removed", f"Tool removed: {k}")
+                        except Exception:
+                            pass
+                    agent._refresh_agent_components()
                 except Exception:
                     pass
-            agent_decision._refresh_agent_components()
         except Exception:
             pass
 
@@ -94,19 +138,26 @@ async def _watcher_execute(dir_id: str, files: list):
     if not wd or not wd["enabled"]:
         return
 
+    user_id = wd.get("user_id")
+    if not user_id:
+        watcher_service.push_console(dir_id, "[WARN] Workspace has no owner, skipping.")
+        return
+
+    agent = await get_or_create_agent(user_id)
+    state = _get_user_state(user_id)
+    if not state.current_session_id:
+        state.current_session_id = db.create_session(name="Watcher Session", user_id=user_id)
+
     file_list = "\n".join(f"  - {f}" for f in files)
     custom = (wd.get("custom_prompt") or "").strip()
 
     if custom:
-        # Custom prompt is the full job description — don't layer medical analysis on top
         goal = (
             f"New file(s) detected in watched directory '{wd['name']}' (path: {wd['path']}).\n\n"
             f"Files detected:\n{file_list}\n\n"
             f"{custom}"
         )
     else:
-        # Default: classify and organize only. Do NOT run analysis or inference automatically.
-        # Inference should only happen when the user explicitly asks for it via a custom prompt.
         goal = (
             f"New file(s) detected in watched directory '{wd['name']}' (path: {wd['path']}).\n\n"
             f"Files detected:\n{file_list}\n\n"
@@ -120,25 +171,26 @@ async def _watcher_execute(dir_id: str, files: list):
             "3. Write a brief one-line note alongside each file if helpful.\n"
             "Do NOT call analyze_image or run_inference. Classification and organization is the only goal."
         )
+
     watcher_service.push_console(dir_id, "[AI] Starting autonomous analysis...")
-    agent_decision.set_agent_type(True)
-    original_require_confirmation = agent_decision.require_confirmation
-    agent_decision.require_confirmation = False
-    allowed_tools = wd.get("allowed_tools")  # None = all tools, list = restricted set
+    agent.set_agent_type(True)
+    original_require_confirmation = agent.require_confirmation
+    agent.require_confirmation = False
+    allowed_tools = wd.get("allowed_tools")
     original_agent_tools = None
     if allowed_tools is not None:
-        original_agent_tools = set(agent_decision.agent_tools)
-        agent_decision.agent_tools = original_agent_tools & set(allowed_tools)
-        agent_decision._refresh_agent_components()
+        original_agent_tools = set(agent.agent_tools)
+        agent.agent_tools = original_agent_tools & set(allowed_tools)
+        agent._refresh_agent_components()
     try:
-        image_list = [(f, b"") for f in files]
-        result = await agent_decision.execute_task(goal, fileList=image_list, session_id=current_session_id)
+        file_list_data = [(f, b"") for f in files]
+        result = await agent.execute_task(goal, fileList=file_list_data, session_id=state.current_session_id)
     finally:
-        agent_decision.set_agent_type(False)
-        agent_decision.require_confirmation = original_require_confirmation
+        agent.set_agent_type(False)
+        agent.require_confirmation = original_require_confirmation
         if original_agent_tools is not None:
-            agent_decision.agent_tools = original_agent_tools
-            agent_decision._refresh_agent_components()
+            agent.agent_tools = original_agent_tools
+            agent._refresh_agent_components()
     if result and result.get("answer"):
         watcher_service.push_console(dir_id, f"[AI] {result['answer']}")
     watcher_service.push_console(dir_id, "[AI] Analysis complete.")
@@ -146,42 +198,35 @@ async def _watcher_execute(dir_id: str, files: list):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global current_session_id, _shutdown_event
+    global _shutdown_event
     _shutdown_event = asyncio.Event()
     # Startup
     db.init_db()
-    current_session_id = db.create_session()
-    await agent_decision._initialize_components()
-    agent_decision.set_mode(_app_settings.get("mode", "debug"))
     task_runner.init()
     asyncio.create_task(_poll_mcp_tools(30))
 
     # Start watcher service and resume all enabled watched directories
     watcher_service.set_execute_callback(_watcher_execute)
     await watcher_service.start()
-    for wd in db.list_watched_directories():
+    for wd in db.list_watched_directories_all():
         if wd["enabled"]:
             watcher_service.start_watching(wd["id"], wd["path"], wd["name"])
     try:
         yield
     except asyncio.CancelledError:
-        # uvicorn cancels the lifespan task on shutdown. Uncancel so that
-        # cleanup awaits below can run without immediately re-raising, and
-        # so that @asynccontextmanager sees the generator exit normally
-        # (causing starlette to send shutdown.complete, not shutdown.failed).
         task = asyncio.current_task()
         if task is not None:
             task.uncancel()
     finally:
-        # Signal SSE connections to exit cleanly before MCP sessions close
         _shutdown_event.set()
         await watcher_service.stop()
-        # Shutdown - close MCP sessions
-        agent_decision.reset_session_context()
-        try:
-            await agent_decision.close()
-        except BaseException:
-            pass
+        async with _agents_lock:
+            agents_snapshot = list(_agents.values())
+        for agent in agents_snapshot:
+            try:
+                await agent.close()
+            except BaseException:
+                pass
 
 _OPENAPI_TAGS = [
     {"name": "agent", "description": "AI agent query processing, tool management, and patient context"},
@@ -205,63 +250,101 @@ app = FastAPI(
 )
 
 
+_default_origins = "http://localhost:5173,http://localhost:3000,http://localhost,http://localhost:80"
+_cors_origins_env = os.getenv("CORS_ORIGINS", _default_origins)
+_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost", "http://localhost:80"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-uploaded_files = []  # In-memory buffer for uploaded files (appended, not replaced)
-temp_file_paths = {}  # Temp file paths mapped by filename
-uploaded_dirs: List[str] = []  # Directory paths registered for the current session
+@app.post("/api/auth/register", tags=["auth"], summary="Register a new user account")
+async def register(data: dict = Body(...)):
+    username = (data.get("username") or "").strip()
+    email = (data.get("email") or "").strip()
+    password = data.get("password") or ""
+    if not username or not email or not password:
+        raise HTTPException(400, "username, email, and password are required")
+    if len(password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    if db.get_user_by_username(username):
+        raise HTTPException(409, "Username already taken")
+    if db.get_user_by_email(email):
+        raise HTTPException(409, "Email already registered")
+    hashed = auth.hash_password(password)
+    user_id = db.create_user(username, email, hashed)
+    token = auth.create_access_token(user_id, username)
+    return {"access_token": token, "token_type": "bearer", "user_id": user_id, "username": username}
 
 
-image_metadata = {"modality": None, "bodyPart": None}
+@app.post("/api/auth/login", tags=["auth"], summary="Login and receive a JWT token")
+async def login(data: dict = Body(...)):
+    username = data.get("username") or ""
+    password = data.get("password") or ""
+    user = db.get_user_by_username(username)
+    if not user or not auth.verify_password(password, user["password_hash"]):
+        raise HTTPException(401, "Invalid credentials")
+    token = auth.create_access_token(user["id"], user["username"])
+    return {"access_token": token, "token_type": "bearer", "user_id": user["id"], "username": user["username"]}
+
+
+@app.get("/api/auth/me", tags=["auth"], summary="Get current user info")
+async def me(current_user: dict = Depends(get_current_user)):
+    user = db.get_user_by_id(current_user["user_id"])
+    if not user:
+        raise HTTPException(404, "User not found")
+    return {"user_id": user["id"], "username": user["username"], "email": user["email"]}
+
 
 @app.post("/api/set-metadata", tags=["files"], summary="Set image modality and body part metadata")
-async def set_metadata(data: dict = Body(...)):
-    global image_metadata
-    image_metadata["modality"] = data.get("modality")
-    image_metadata["bodyPart"] = data.get("bodyPart")
+async def set_metadata(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    state = _get_user_state(current_user["user_id"])
+    state.image_metadata["modality"] = data.get("modality")
+    state.image_metadata["bodyPart"] = data.get("bodyPart")
     return {"status": "ok"}
 
 
 @app.get("/api/mode", tags=["system"], summary="Get current UI mode (debug or normal)")
-async def get_mode():
+async def get_mode(current_user: dict = Depends(get_current_user)):
     return {"mode": _app_settings.get("mode", "debug")}
 
 @app.post("/api/mode", tags=["system"], summary="Set UI mode — 'debug' shows tool calls, 'normal' uses clinical language")
-async def set_mode(data: dict = Body(...)):
+async def set_mode(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     mode = data.get("mode", "debug")
     if mode not in ("debug", "normal"):
         raise HTTPException(status_code=400, detail="mode must be 'debug' or 'normal'")
     _app_settings["mode"] = mode
     _save_settings(_app_settings)
-    agent_decision.set_mode(mode)
+    # Update all active agents
+    async with _agents_lock:
+        for agent in _agents.values():
+            agent.set_mode(mode)
     return {"mode": mode}
 
 
 # --- Watched Directories ---
 
 @app.get("/api/watched-directories", tags=["system"], summary="List all watched directories")
-async def list_watched_directories():
-    dirs = db.list_watched_directories()
+async def list_watched_directories(current_user: dict = Depends(get_current_user)):
+    dirs = db.list_watched_directories(user_id=current_user["user_id"])
     for d in dirs:
         d["watching"] = watcher_service.is_watching(d["id"])
     return dirs
 
 
 @app.post("/api/watched-directories", tags=["system"], summary="Add a new watched directory")
-async def create_watched_directory(data: dict = Body(...)):
+async def create_watched_directory(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     name = data.get("name", "").strip()
     path = data.get("path", "").strip()
     custom_prompt = (data.get("custom_prompt") or "").strip() or None
     allowed_tools = data.get("allowed_tools") or None
     if not name or not path:
         raise HTTPException(status_code=400, detail="name and path are required")
-    dir_id = db.create_watched_directory(name, path, custom_prompt, allowed_tools)
+    dir_id = db.create_watched_directory(name, path, custom_prompt, allowed_tools, user_id=current_user["user_id"])
     watcher_service.push_console(dir_id, f"[INFO] Directory '{name}' added.")
     wd = db.get_watched_directory(dir_id)
     watcher_service.start_watching(dir_id, wd["path"], wd["name"])
@@ -270,9 +353,9 @@ async def create_watched_directory(data: dict = Body(...)):
 
 
 @app.put("/api/watched-directories/{dir_id}", tags=["system"], summary="Update a watched directory")
-async def update_watched_directory(dir_id: str, data: dict = Body(...)):
+async def update_watched_directory(dir_id: str, data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     wd = db.get_watched_directory(dir_id)
-    if not wd:
+    if not wd or wd.get("user_id") != current_user["user_id"]:
         raise HTTPException(status_code=404, detail="Not found")
     was_watching = watcher_service.is_watching(dir_id)
     allowed_tools = data.get("allowed_tools")
@@ -301,9 +384,9 @@ async def update_watched_directory(dir_id: str, data: dict = Body(...)):
 
 
 @app.delete("/api/watched-directories/{dir_id}", tags=["system"], summary="Remove a watched directory")
-async def delete_watched_directory(dir_id: str):
+async def delete_watched_directory(dir_id: str, current_user: dict = Depends(get_current_user)):
     wd = db.get_watched_directory(dir_id)
-    if not wd:
+    if not wd or wd.get("user_id") != current_user["user_id"]:
         raise HTTPException(status_code=404, detail="Not found")
     watcher_service.stop_watching(dir_id)
     db.delete_watched_directory(dir_id)
@@ -311,12 +394,15 @@ async def delete_watched_directory(dir_id: str):
 
 
 @app.get("/api/watched-directories/{dir_id}/console", tags=["system"], summary="Get console log for a watched directory")
-async def get_directory_console(dir_id: str):
+async def get_directory_console(dir_id: str, current_user: dict = Depends(get_current_user)):
+    wd = db.get_watched_directory(dir_id)
+    if not wd or wd.get("user_id") != current_user["user_id"]:
+        raise HTTPException(status_code=404, detail="Not found")
     return watcher_service.get_console_log(dir_id)
 
 
 @app.get("/api/browse-directory", tags=["system"], summary="Browse filesystem directories for the directory picker")
-async def browse_directory(path: str = "/"):
+async def browse_directory(path: str = "/", current_user: dict = Depends(get_current_user)):
     path = os.path.abspath(path)
     try:
         entries = []
@@ -333,38 +419,35 @@ async def browse_directory(path: str = "/"):
 
 
 @app.post("/api/set-directory", tags=["files"], summary="Add, remove, or clear registered DICOM series directories")
-async def set_directory(data: dict = Body(...)):
-    """
-    Manage the list of registered directories for the current session.
-      { dir_path: "/path" }            → add directory
-      { dir_path: "/path", remove: true } → remove that specific directory
-      { dir_path: null }               → clear all directories
-    """
+async def set_directory(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    state = _get_user_state(uid)
     dir_path = data.get("dir_path")
     remove = data.get("remove", False)
 
+    # Ensure a session exists before writing to the DB
+    if not state.current_session_id:
+        state.current_session_id = db.create_session(user_id=uid)
+
     if dir_path is None:
-        # Clear all
-        uploaded_dirs.clear()
-        db.remove_session_dirs(current_session_id)
+        state.uploaded_dirs.clear()
+        db.remove_session_dirs(state.current_session_id)
     elif remove:
-        # Remove specific directory
-        if dir_path in uploaded_dirs:
-            uploaded_dirs.remove(dir_path)
-        db.remove_session_dir(current_session_id, dir_path)
+        if dir_path in state.uploaded_dirs:
+            state.uploaded_dirs.remove(dir_path)
+        db.remove_session_dir(state.current_session_id, dir_path)
     else:
-        # Add directory if valid and not already in list
-        if os.path.isdir(dir_path) and dir_path not in uploaded_dirs:
-            uploaded_dirs.append(dir_path)
+        if os.path.isdir(dir_path) and dir_path not in state.uploaded_dirs:
+            state.uploaded_dirs.append(dir_path)
             dirname = Path(dir_path).name
             total_size = sum(f.stat().st_size for f in Path(dir_path).iterdir() if f.is_file())
-            db.save_uploaded_file(current_session_id, dirname, dir_path, 'dicom_dir', total_size)
+            db.save_uploaded_file(state.current_session_id, dirname, dir_path, 'dicom_dir', total_size)
 
-    return {"status": "ok", "dirs": uploaded_dirs}
+    return {"status": "ok", "dirs": state.uploaded_dirs}
 
 
 @app.get("/api/available-models", tags=["agent"], summary="List available Gemini models for the configured API key")
-async def available_models():
+async def available_models(current_user: dict = Depends(get_current_user)):
     try:
         from google import genai as google_genai
         client = google_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
@@ -375,51 +458,52 @@ async def available_models():
 
 
 @app.post("/api/set-model", tags=["agent"], summary="Switch the LLM model for the current session")
-async def set_model(data: dict = Body(...)):
+async def set_model(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     model_id = data.get("model_id")
     if not model_id:
         return {"error": "model_id is required"}
-    if agent_decision.llm_client:
-        agent_decision.llm_client.set_model(model_id)
+    agent = await get_or_create_agent(current_user["user_id"])
+    if agent.llm_client:
+        agent.llm_client.set_model(model_id)
     return {"status": "ok", "model_id": model_id}
 
 
 @app.get("/api/current-model", tags=["agent"], summary="Get the currently active LLM model")
-async def get_current_model():
-    model_id = agent_decision.llm_client.model_id if agent_decision.llm_client else os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+async def get_current_model(current_user: dict = Depends(get_current_user)):
+    agent = await get_or_create_agent(current_user["user_id"])
+    model_id = agent.llm_client.model_id if agent.llm_client else os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     return {"model_id": model_id}
 
 
 @app.post("/api/change-agent-type", tags=["agent"], summary="Switch between default and autonomous agent modes")
-async def change_agent_type(data: str = Body(...)):
-    if data == "autonomous":
-        autonomous = True
-    else:
-        autonomous = False
-    agent_decision.set_agent_type(autonomous=autonomous)
+async def change_agent_type(data: str = Body(...), current_user: dict = Depends(get_current_user)):
+    agent = await get_or_create_agent(current_user["user_id"])
+    autonomous = data == "autonomous"
+    agent.set_agent_type(autonomous=autonomous)
     return {"status": "ok", "agent_type": "autonomous" if autonomous else "default"}
 
 
 @app.post("/api/process-query", tags=["agent"], summary="Send a natural language query to the AI agent")
-async def process_query(query: str = Body(..., media_type="text/plain")):
+async def process_query(query: str = Body(..., media_type="text/plain"), current_user: dict = Depends(get_current_user)):
     print(f"Processing ad-hoc query: {query}")
+    uid = current_user["user_id"]
+    agent = await get_or_create_agent(uid)
+    state = _get_user_state(uid)
+    if not state.current_session_id:
+        state.current_session_id = db.create_session(user_id=uid)
     try:
-        # Get files for current session from DB (persistent paths)
-        session_files = db.get_session_files(current_session_id)
+        session_files = db.get_session_files(state.current_session_id)
 
-        if not uploaded_files and not session_files and not uploaded_dirs:
-            result = await agent_decision.execute_task(query, session_id=current_session_id)
+        if not state.uploaded_files and not session_files and not state.uploaded_dirs:
+            result = await agent.execute_task(query, session_id=state.current_session_id)
         else:
             image_data = []
-            # Use in-memory files first (just uploaded), fall back to DB files
-            if uploaded_files:
-                for filename, contents in uploaded_files:
-                    stored_path = temp_file_paths.get(filename)
+            if state.uploaded_files:
+                for filename, contents in state.uploaded_files:
+                    stored_path = state.temp_file_paths.get(filename)
                     if stored_path and os.path.exists(stored_path):
                         image_data.append((stored_path, contents))
-                        print(f"Using persistent file: {stored_path}")
             elif session_files:
-                # Load from persistent storage (skip dicom_dir entries - handled separately)
                 for f in session_files:
                     if f.get("file_type") == "dicom_dir":
                         continue
@@ -428,34 +512,29 @@ async def process_query(query: str = Body(..., media_type="text/plain")):
                         with open(path, "rb") as fh:
                             contents = fh.read()
                         image_data.append((path, contents))
-                        print(f"Using DB file: {path}")
 
-            # Include all registered directories
-            for dir_path in uploaded_dirs:
+            for dir_path in state.uploaded_dirs:
                 if os.path.isdir(dir_path):
                     image_data.append((dir_path, b""))
-                    print(f"Using uploaded directory: {dir_path}")
 
-            # If no in-memory files, fall back to session dirs from DB
             if not image_data or all(p == b"" for _, p in image_data):
                 session_dirs = [f for f in session_files if f.get("file_type") == "dicom_dir"]
                 for f in session_dirs:
-                    if os.path.isdir(f["stored_path"]) and f["stored_path"] not in uploaded_dirs:
+                    if os.path.isdir(f["stored_path"]) and f["stored_path"] not in state.uploaded_dirs:
                         image_data.append((f["stored_path"], b""))
-                        print(f"Using DB directory: {f['stored_path']}")
 
             if image_data:
-                result = await agent_decision.execute_task(query, fileList=image_data, session_id=current_session_id)
+                result = await agent.execute_task(query, fileList=image_data, session_id=state.current_session_id)
             else:
-                result = await agent_decision.execute_task(query, session_id=current_session_id)
+                result = await agent.execute_task(query, session_id=state.current_session_id)
 
-        db.save_message(current_session_id, "user", query)
+        db.save_message(state.current_session_id, "user", query)
         if isinstance(result, dict):
             agent_text = result.get("answer") or result.get("response") or result.get("error") or ""
         else:
             agent_text = str(result)
         if agent_text:
-            db.save_message(current_session_id, "assistant", agent_text)
+            db.save_message(state.current_session_id, "assistant", agent_text)
         return {"result": result}
     except Exception as e:
         print(f"Error processing query: {e}")
@@ -464,13 +543,14 @@ async def process_query(query: str = Body(..., media_type="text/plain")):
 
 
 @app.post("/api/upload", tags=["files"], summary="Upload a single medical image file (.dcm, .nii.gz, etc.)")
-async def upload_file(file: UploadFile = File(...)):
-    global uploaded_files, temp_file_paths
+async def upload_file(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    state = _get_user_state(uid)
+    if not state.current_session_id:
+        state.current_session_id = db.create_session(user_id=uid)
     print(f"Received file: {file.filename}")
     try:
         contents = await file.read()
-
-        # Persist to data/uploads/ with unique name
         ext = os.path.splitext(file.filename)[1] if not file.filename.endswith('.nii.gz') else '.nii.gz'
         stored_name = f"{uuid.uuid4().hex[:12]}_{file.filename}"
         stored_path = str(db.UPLOADS_DIR / stored_name)
@@ -478,13 +558,11 @@ async def upload_file(file: UploadFile = File(...)):
         with open(stored_path, "wb") as f:
             f.write(contents)
 
-        # Track in database
         file_type = ext.lstrip('.') or 'unknown'
-        file_id = db.save_uploaded_file(current_session_id, file.filename, stored_path, file_type, len(contents))
+        file_id = db.save_uploaded_file(state.current_session_id, file.filename, stored_path, file_type, len(contents))
 
-        # Keep in memory for immediate query use
-        uploaded_files.append((file.filename, contents))
-        temp_file_paths[file.filename] = stored_path
+        state.uploaded_files.append((file.filename, contents))
+        state.temp_file_paths[file.filename] = stored_path
 
         print(f"Uploaded {file.filename} -> {stored_path} (file_id={file_id})")
         return {"status": "success", "filename": file.filename, "size": len(contents), "file_id": file_id, "stored_path": stored_path}
@@ -493,32 +571,27 @@ async def upload_file(file: UploadFile = File(...)):
 
 
 @app.delete("/api/upload", tags=["files"], summary="Remove an uploaded file from the session")
-async def remove_file(filename: str):
-    global uploaded_files, temp_file_paths
+async def remove_file(filename: str, current_user: dict = Depends(get_current_user)):
+    state = _get_user_state(current_user["user_id"])
     print(f"Removing file: {filename}")
-    for i, (fname, _) in enumerate(uploaded_files):
+    for i, (fname, _) in enumerate(state.uploaded_files):
         if fname == filename:
-            del uploaded_files[i]
-            # Remove corresponding temp file if exists
-            if filename in temp_file_paths:
+            del state.uploaded_files[i]
+            if filename in state.temp_file_paths:
                 try:
-                    os.unlink(temp_file_paths[filename])
+                    os.unlink(state.temp_file_paths[filename])
                 except Exception:
                     pass
-                del temp_file_paths[filename]
+                del state.temp_file_paths[filename]
             return {"status": "success", "message": f"Removed {filename}"}
     raise HTTPException(status_code=404, detail="File not found")
 
 
 @app.post("/api/upload-directory", tags=["files"], summary="Upload a directory of DICOM slices (multipart, up to 10k files)")
-async def upload_directory(request: Request):
+async def upload_directory(request: Request, current_user: dict = Depends(get_current_user)):
     """Upload a directory of medical image files. Supports up to 10k files."""
-    from starlette.formparsers import MultiPartParser
-    parser = MultiPartParser(request.headers, request.stream(), max_files=10000, max_fields=10000)
-    multipart = await parser.parse()
-    files = multipart.multi_items()
-    # Filter to just UploadFile objects
-    files = [v for k, v in files if hasattr(v, 'read')]
+    form = await request.form(max_files=10_000, max_fields=10_000)
+    files = [v for k, v in form.multi_items() if hasattr(v, 'read')]
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
     try:
@@ -564,29 +637,37 @@ async def upload_directory(request: Request):
 
 
 @app.get("/api/available-tools", tags=["agent"], summary="List all discovered MCP tools across all servers")
-async def get_available_tools():
-    return agent_decision.available_tools
+async def get_available_tools(current_user: dict = Depends(get_current_user)):
+    agent = await get_or_create_agent(current_user["user_id"])
+    return agent.available_tools
 
 @app.get("/api/enabled-tools", tags=["agent"], summary="List tools currently enabled for the agent")
-async def get_enabled_tools():
-    return list(agent_decision.agent_tools)
+async def get_enabled_tools(current_user: dict = Depends(get_current_user)):
+    agent = await get_or_create_agent(current_user["user_id"])
+    return list(agent.agent_tools)
 
 @app.post("/api/enable-tool", tags=["agent"], summary="Enable a specific MCP tool for the agent")
-async def enable_tool(data: dict = Body(...)):
+async def enable_tool(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     tool_name = data.get("tool_name")
     if not tool_name:
         return {"error": "tool_name required"}
-    agent_decision.enable_tool(tool_name)
+    uid = current_user["user_id"]
+    agent = await get_or_create_agent(uid)
+    agent.enable_tool(tool_name)
+    db.set_tool_enabled(uid, tool_name, True)
     if data.get("notify", True):
         _push_notification("tool_enabled", f"Tool enabled: {tool_name}")
     return {"status": "enabled", "tool": tool_name}
 
 @app.post("/api/disable-tool", tags=["agent"], summary="Disable a specific MCP tool from the agent")
-async def disable_tool(data: dict = Body(...)):
+async def disable_tool(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     tool_name = data.get("tool_name")
     if not tool_name:
         return {"error": "tool_name required"}
-    agent_decision.disable_tool(tool_name)
+    uid = current_user["user_id"]
+    agent = await get_or_create_agent(uid)
+    agent.disable_tool(tool_name)
+    db.set_tool_enabled(uid, tool_name, False)
     if data.get("notify", True):
         _push_notification("tool_disabled", f"Tool disabled: {tool_name}")
     return {"status": "disabled", "tool": tool_name}
@@ -602,36 +683,39 @@ async def push_notification(data: dict = Body(...)):
 
 
 @app.post("/api/refresh-config", tags=["agent"], summary="Reload mcp-config.json and rediscover available tools")
-async def refresh_config():
-    await agent_decision.refresh_available_tools()
-    return {"status": "refreshed", "available_tools": list(agent_decision.available_tools.keys())}
+async def refresh_config(current_user: dict = Depends(get_current_user)):
+    agent = await get_or_create_agent(current_user["user_id"])
+    await agent.refresh_available_tools()
+    return {"status": "refreshed", "available_tools": list(agent.available_tools.keys())}
 
 
 @app.get("/api/notifications", tags=["agent"], summary="Get MCP event notifications")
-async def get_notifications():
+async def get_notifications(current_user: dict = Depends(get_current_user)):
     return {"notifications": list(_mcp_notifications)}
 
 
 @app.post("/api/refresh-server-tools", tags=["agent"], summary="Re-query tools from an already-connected MCP server")
-async def refresh_server_tools(data: dict = Body(...)):
+async def refresh_server_tools(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     name = data.get("name")
     if not name:
         return {"error": "name is required"}
     try:
-        new_tools = await agent_decision.refresh_server_tools(name)
+        agent = await get_or_create_agent(current_user["user_id"])
+        new_tools = await agent.refresh_server_tools(name)
         return {"status": "refreshed", "server": name, "tools": list(new_tools.keys())}
     except Exception as e:
         return {"error": str(e)}
 
 
 @app.post("/api/add-mcp-server", tags=["agent"], summary="Connect a new MCP server live without restarting")
-async def add_mcp_server(data: dict = Body(...)):
+async def add_mcp_server(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     name = data.get("name")
     cfg = data.get("config")
     if not name or not cfg:
         return {"error": "name and config are required"}
     try:
-        new_tools = await agent_decision.add_mcp_server(name, cfg)
+        agent = await get_or_create_agent(current_user["user_id"])
+        new_tools = await agent.add_mcp_server(name, cfg)
         _push_notification("server_added", f"MCP server connected: {name} ({len(new_tools)} tools)")
         for tool in new_tools:
             _push_notification("tool_added", f"New tool available: {tool}")
@@ -641,13 +725,14 @@ async def add_mcp_server(data: dict = Body(...)):
 
 
 @app.delete("/api/remove-mcp-server", tags=["agent"], summary="Disconnect and remove an MCP server")
-async def remove_mcp_server(data: dict = Body(...)):
+async def remove_mcp_server(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     name = data.get("name")
     if not name:
         return {"error": "name is required"}
     try:
-        removed_tools = [k for k in agent_decision.available_tools if k.startswith(f"{name}.")]
-        await agent_decision.remove_mcp_server(name)
+        agent = await get_or_create_agent(current_user["user_id"])
+        removed_tools = [k for k in agent.available_tools if k.startswith(f"{name}.")]
+        await agent.remove_mcp_server(name)
         _push_notification("server_removed", f"MCP server removed: {name}")
         for tool in removed_tools:
             _push_notification("tool_removed", f"Tool removed: {tool}")
@@ -657,180 +742,169 @@ async def remove_mcp_server(data: dict = Body(...)):
 
 
 @app.post("/api/start-healthcare-conversation", tags=["agent"], summary="Set patient context for the AI agent")
-async def start_healthcare_conversation(request: Request):
-    """Start a healthcare conversation focused on a specific patient"""
+async def start_healthcare_conversation(request: Request, current_user: dict = Depends(get_current_user)):
     try:
         data = await request.json()
         patient_id = data.get("patient_id")
         patient_name = data.get("patient_name")
-        
         if not patient_id or not patient_name:
             return {"error": "patient_id and patient_name are required"}
-        
-        # Set the agent to focus on this patient
-        agent_decision.set_patient_focus(patient_id, patient_name)
-        
-        return {
-            "status": "success",
-            "message": f"Healthcare conversation started for patient {patient_name}",
-            "patient_id": patient_id,
-            "patient_name": patient_name
-        }
+        agent = await get_or_create_agent(current_user["user_id"])
+        agent.set_patient_focus(patient_id, patient_name)
+        return {"status": "success", "message": f"Healthcare conversation started for patient {patient_name}", "patient_id": patient_id, "patient_name": patient_name}
     except Exception as e:
         return {"error": str(e)}
 
 
 @app.get("/api/pending-tool", tags=["agent"], summary="Get the tool call awaiting user confirmation (debug mode)")
-async def get_pending_tool():
-    """Get the current pending tool call awaiting confirmation"""
-    pending = agent_decision.get_pending_tool()
+async def get_pending_tool(current_user: dict = Depends(get_current_user)):
+    agent = await get_or_create_agent(current_user["user_id"])
+    pending = agent.get_pending_tool()
     if pending:
-        return {
-            "pending": True,
-            "tool_name": pending["tool_name"],
-            "arguments": pending["arguments"]
-        }
+        return {"pending": True, "tool_name": pending["tool_name"], "arguments": pending["arguments"]}
     return {"pending": False}
 
 
 @app.post("/api/confirm-tool", tags=["agent"], summary="Confirm and execute the pending tool call")
-async def confirm_tool():
-    """Confirm and execute the pending tool"""
+async def confirm_tool(current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    agent = await get_or_create_agent(uid)
+    state = _get_user_state(uid)
     try:
-        result = await agent_decision.confirm_tool_execution(session_id=current_session_id)
+        result = await agent.confirm_tool_execution(session_id=state.current_session_id)
         return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Tool execution failed: {e}")
 
 
 @app.post("/api/deny-tool", tags=["agent"], summary="Cancel the pending tool call")
-async def deny_tool():
-    """Deny/cancel the pending tool execution"""
-    result = agent_decision.deny_tool_execution()
+async def deny_tool(current_user: dict = Depends(get_current_user)):
+    agent = await get_or_create_agent(current_user["user_id"])
+    result = agent.deny_tool_execution()
     return {"result": result}
 
 
 
 @app.post("/api/clear-files", tags=["files"], summary="Clear the in-memory uploaded file buffer")
-async def clear_files():
-    """Clear in-memory file buffer"""
-    global uploaded_files, temp_file_paths
-    temp_file_paths.clear()
-    uploaded_files.clear()
-    uploaded_dirs.clear()
+async def clear_files(current_user: dict = Depends(get_current_user)):
+    state = _get_user_state(current_user["user_id"])
+    state.temp_file_paths.clear()
+    state.uploaded_files.clear()
+    state.uploaded_dirs.clear()
     return {"status": "cleared"}
 
 
 @app.post("/api/reset-session", tags=["sessions"], summary="Start a fresh session — clears context, LLM history, and uploaded files")
-async def reset_session():
-    """Start a fresh session - clears context and LLM history, creates new session"""
-    global current_session_id, uploaded_files, temp_file_paths
-    temp_file_paths.clear()
-    uploaded_files.clear()
-    uploaded_dirs.clear()
-    agent_decision.reset_session_context()
-    if agent_decision.llm_client:
-        agent_decision.llm_client.start_chat()
-    # Create a new session
-    current_session_id = db.create_session()
-    return {"status": "session_reset", "session_id": current_session_id}
+async def reset_session(current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    state = _get_user_state(uid)
+    state.temp_file_paths.clear()
+    state.uploaded_files.clear()
+    state.uploaded_dirs.clear()
+    agent = await get_or_create_agent(uid)
+    agent.reset_session_context()
+    if agent.llm_client:
+        agent.llm_client.start_chat()
+    state.current_session_id = db.create_session(user_id=uid)
+    return {"status": "session_reset", "session_id": state.current_session_id}
 
 
 # --- Session Management ---
 
 @app.post("/api/save-session", tags=["sessions"], summary="Persist the current session with a display name")
-async def save_session(data: dict = Body(...)):
-    """Save/persist the current session with a name"""
+async def save_session(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    state = _get_user_state(uid)
     name = data.get("name")
     if not name:
         return {"error": "name is required"}
-    db.update_session(current_session_id, name=name, persisted=True)
-    # Save current in-memory context to DB
-    agent_decision.save_context_to_db(current_session_id)
-    return {"status": "saved", "session_id": current_session_id, "name": name}
+    if not state.current_session_id:
+        return {"error": "No active session"}
+    db.update_session(state.current_session_id, name=name, persisted=True)
+    agent = await get_or_create_agent(uid)
+    agent.save_context_to_db(state.current_session_id)
+    return {"status": "saved", "session_id": state.current_session_id, "name": name}
 
 
 @app.get("/api/sessions", tags=["sessions"], summary="List all sessions (optionally filter to persisted only)")
-async def list_sessions(persisted_only: bool = False):
-    """List all sessions"""
-    sessions = db.list_sessions(persisted_only=persisted_only)
+async def list_sessions(persisted_only: bool = False, current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    state = _get_user_state(uid)
+    sessions = db.list_sessions(persisted_only=persisted_only, user_id=uid)
     for s in sessions:
         files = db.get_session_files(s["id"])
         s["file_count"] = len(files)
         s["total_size"] = db.get_session_total_size(s["id"])
-    return {"sessions": sessions, "current_session_id": current_session_id}
+    return {"sessions": sessions, "current_session_id": state.current_session_id}
 
 
 @app.delete("/api/delete-session", tags=["sessions"], summary="Delete a saved session and its associated files")
-async def delete_session(data: dict = Body(...)):
-    """Delete a session and all its files"""
-    global current_session_id
+async def delete_session(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    state = _get_user_state(uid)
     session_id = data.get("session_id")
     if not session_id:
         return {"error": "session_id is required"}
-    if session_id == current_session_id:
+    if session_id == state.current_session_id:
         return {"error": "Cannot delete the active session. Switch to another session first."}
     session = db.get_session(session_id)
-    if not session:
+    if not session or session.get("user_id") != uid:
         return {"error": "Session not found"}
     db.delete_session(session_id)
     return {"status": "deleted", "session_id": session_id}
 
 
 @app.delete("/api/delete-all-sessions", tags=["sessions"], summary="Delete all sessions except the currently active one")
-async def delete_all_sessions():
-    """Delete all saved sessions except the currently active one."""
-    sessions = db.list_sessions()
+async def delete_all_sessions(current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    state = _get_user_state(uid)
+    sessions = db.list_sessions(user_id=uid)
     deleted = []
     for s in sessions:
-        if s["id"] != current_session_id:
+        if s["id"] != state.current_session_id:
             db.delete_session(s["id"])
             deleted.append(s["id"])
     return {"status": "deleted", "count": len(deleted)}
 
 
 @app.post("/api/load-session", tags=["sessions"], summary="Load a saved session — restores context and file references")
-async def load_session(data: dict = Body(...)):
-    """Load a saved session - restores context and file references"""
-    global current_session_id, uploaded_files, temp_file_paths
+async def load_session(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    state = _get_user_state(uid)
     session_id = data.get("session_id")
     if not session_id:
         return {"error": "session_id is required"}
 
     session = db.get_session(session_id)
-    if not session:
+    if not session or session.get("user_id") != uid:
         return {"error": "Session not found"}
 
-    # Switch to this session
-    current_session_id = session_id
-    uploaded_files.clear()
-    temp_file_paths.clear()
+    state.current_session_id = session_id
+    state.uploaded_files.clear()
+    state.temp_file_paths.clear()
 
-    # Restore uploaded directories from DB
     session_files_all = db.get_session_files(session_id)
-    uploaded_dirs.clear()
+    state.uploaded_dirs.clear()
     for f in session_files_all:
         if f.get("file_type") == "dicom_dir" and os.path.isdir(f["stored_path"]):
-            uploaded_dirs.append(f["stored_path"])
+            state.uploaded_dirs.append(f["stored_path"])
 
-    # Restore context into the agent
-    agent_decision.load_context_from_db(session_id)
+    agent = await get_or_create_agent(uid)
+    agent.load_context_from_db(session_id)
 
-    # Restore conversation messages and rebuild LLM chat history
     saved_messages = db.get_messages(session_id)
-    if agent_decision.llm_client and saved_messages:
+    if agent.llm_client and saved_messages:
         from google.genai import types as genai_types
         history = []
         for msg in saved_messages:
             role = "user" if msg["role"] == "user" else "model"
             history.append(genai_types.Content(role=role, parts=[genai_types.Part(text=msg["content"])]))
-        agent_decision.llm_client.start_chat(history=history)
-    elif agent_decision.llm_client:
-        agent_decision.llm_client.start_chat()
+        agent.llm_client.start_chat(history=history)
+    elif agent.llm_client:
+        agent.llm_client.start_chat()
 
-    # Restore patient focus if session had one
     if session.get("patient_id") and session.get("patient_name"):
-        agent_decision.set_patient_focus(session["patient_id"], session["patient_name"])
+        agent.set_patient_focus(session["patient_id"], session["patient_name"])
 
     return {
         "status": "loaded",
@@ -842,18 +916,18 @@ async def load_session(data: dict = Body(...)):
 
 
 @app.get("/api/session-files", tags=["sessions"], summary="Get uploaded files for a session (defaults to current session)")
-async def get_session_files(session_id: Optional[str] = None):
-    """Get files for a session (defaults to current)"""
-    sid = session_id or current_session_id
-    files = db.get_session_files(sid)
+async def get_session_files(session_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    state = _get_user_state(current_user["user_id"])
+    sid = session_id or state.current_session_id
+    files = db.get_session_files(sid) if sid else []
     return {"session_id": sid, "files": files}
 
 
 @app.get("/api/messages", tags=["sessions"], summary="Get conversation messages for a session")
-async def get_messages(session_id: Optional[str] = None):
-    """Get saved conversation messages for a session (defaults to current)"""
-    sid = session_id or current_session_id
-    messages = db.get_messages(sid)
+async def get_messages(session_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    state = _get_user_state(current_user["user_id"])
+    sid = session_id or state.current_session_id
+    messages = db.get_messages(sid) if sid else []
     return {"session_id": sid, "messages": messages}
 
 
@@ -864,7 +938,7 @@ async def get_messages(session_id: Optional[str] = None):
 # (select file -> analyze -> pick model -> download -> run inference).
 
 @app.get("/api/monai/sample-data", tags=["monai"], summary="List available sample/test medical image files and DICOM series directories")
-async def list_sample_data():
+async def list_sample_data(current_user: dict = Depends(get_current_user)):
     """List available sample data files for testing"""
     base = Path(__file__).parent.parent
     # Scan known sample/test directories for medical image files
@@ -972,13 +1046,12 @@ async def list_sample_data():
 
 
 @app.post("/api/monai/validate-series", tags=["monai"], summary="Validate a DICOM series directory — returns series metadata and warnings")
-async def validate_series(data: dict = Body(...)):
+async def validate_series(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     """Validate a DICOM series directory using utils.parse_dicom_directory"""
     dir_path = data.get("path")
     if not dir_path or not os.path.isdir(dir_path):
         raise HTTPException(status_code=400, detail="Valid directory path is required")
 
-    # Check if this is an image directory (JPEG/PNG) - not a DICOM series
     IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif'}
     dir_files = [f for f in Path(dir_path).iterdir() if f.is_file() and not f.name.startswith('.')]
     if dir_files and Path(dir_files[0].name).suffix.lower() in IMAGE_EXTS:
@@ -999,7 +1072,8 @@ async def validate_series(data: dict = Body(...)):
         }
 
     try:
-        result = await agent_decision.tool_registry.execute_tool(
+        agent = await get_or_create_agent(current_user["user_id"])
+        result = await agent.tool_registry.execute_tool(
             "utils.parse_dicom_directory", {"dir_path": dir_path}, logs=True
         )
     except Exception as e:
@@ -1039,20 +1113,19 @@ async def validate_series(data: dict = Body(...)):
 
 
 @app.post("/api/monai/analyze", tags=["monai"], summary="Analyze a medical image — returns modality, shape, body part, and compatible models")
-async def monai_analyze(data: dict = Body(...)):
-    """Analyze a medical image - direct MONAI tool call"""
+async def monai_analyze(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     path = data.get("path")
     if not path:
         raise HTTPException(status_code=400, detail="path is required")
-    result = await agent_decision.tool_registry.execute_tool(
-        "monai.analyze_image", {"path": path}, logs=True
+    agent = await get_or_create_agent(current_user["user_id"])
+    result = await agent.tool_registry.execute_tool(
+        "monai.analyze_image", {"image_path": path}, logs=True
     )
     return result
 
 
 @app.post("/api/monai/list-models", tags=["monai"], summary="List available MONAI model bundles (filterable by category, modality, body part)")
-async def monai_list_models(data: dict = Body(...)):
-    """List available MONAI models"""
+async def monai_list_models(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     args = {}
     if data.get("category"):
         args["category"] = data["category"]
@@ -1060,32 +1133,31 @@ async def monai_list_models(data: dict = Body(...)):
         args["modality"] = data["modality"]
     if data.get("body_part"):
         args["body_part"] = data["body_part"]
-    result = await agent_decision.tool_registry.execute_tool(
-        "monai.list_models", args, logs=True
-    )
+    agent = await get_or_create_agent(current_user["user_id"])
+    result = await agent.tool_registry.execute_tool("monai.list_models", args, logs=True)
     return result
 
 
 @app.post("/api/monai/download-model", tags=["monai"], summary="Download a MONAI Model Zoo bundle by name")
-async def monai_download_model(data: dict = Body(...)):
-    """Download a model bundle from MONAI Model Zoo"""
+async def monai_download_model(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     model_name = data.get("model_name")
     if not model_name:
         raise HTTPException(status_code=400, detail="model_name is required")
-    result = await agent_decision.tool_registry.execute_tool(
+    agent = await get_or_create_agent(current_user["user_id"])
+    result = await agent.tool_registry.execute_tool(
         "monai.download_model", {"model_name": model_name}, logs=True
     )
     return result
 
 
 @app.post("/api/monai/run-inference", tags=["monai"], summary="Run MONAI inference on a medical image with a specified model")
-async def monai_run_inference(data: dict = Body(...)):
-    """Run inference on a medical image"""
+async def monai_run_inference(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     image_path = data.get("image_path")
     model_name = data.get("model_name")
     if not image_path or not model_name:
         raise HTTPException(status_code=400, detail="image_path and model_name required")
-    result = await agent_decision.tool_registry.execute_tool(
+    agent = await get_or_create_agent(current_user["user_id"])
+    result = await agent.tool_registry.execute_tool(
         "monai.run_inference",
         {"image_path": image_path, "model_name": model_name},
         logs=True
@@ -1094,7 +1166,7 @@ async def monai_run_inference(data: dict = Body(...)):
 
 
 @app.get("/api/patients", tags=["system"], summary="Get patient list from FHIR server (falls back to mock data if unavailable)")
-async def get_patients():
+async def get_patients(current_user: dict = Depends(get_current_user)):
     """Get list of patients from FHIR server"""
     try:
         # Call FHIR MCP server directly
@@ -1226,7 +1298,7 @@ def get_mock_patients():
 # --- Background Tasks & SSE ---
 
 @app.get("/api/events", tags=["events"], summary="SSE stream — emits task_queued, task_running, task_done, task_failed events")
-async def sse_events(request: Request):
+async def sse_events(request: Request, token: Optional[str] = Query(None), current_user: dict = Depends(get_current_user)):
     """
     Server-Sent Events endpoint.  Polls the DB every second and emits an event
     the first time a task reaches 'done' or 'failed'.
@@ -1246,7 +1318,7 @@ async def sse_events(request: Request):
             started: set = set()    # tasks already sent running event
             seen_ids: set = set()   # all task IDs ever seen (to detect brand-new tasks)
             try:
-                for t in db.list_tasks():
+                for t in db.list_tasks(user_id=current_user["user_id"]):
                     seen_ids.add(t["id"])
                     if t["status"] in ("done", "failed"):
                         notified.add(t["id"])
@@ -1288,7 +1360,7 @@ async def sse_events(request: Request):
                     yield f"data: {json.dumps({'type': 'directory_console', **entry})}\n\n"
 
                 try:
-                    tasks = db.list_tasks()
+                    tasks = db.list_tasks(user_id=current_user["user_id"])
                 except Exception as e:
                     print(f"[SSE] db.list_tasks error: {e}")
                     continue
@@ -1358,18 +1430,17 @@ async def sse_events(request: Request):
 
 
 @app.get("/api/tasks", tags=["events"], summary="List background inference/report tasks, optionally filtered by session")
-async def list_tasks(session_id: Optional[str] = None):
-    """Return all background tasks, optionally filtered by session_id."""
-    tasks = db.list_tasks(session_id=session_id)
+async def list_tasks(session_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    tasks = db.list_tasks(session_id=session_id, user_id=current_user["user_id"])
     return {"tasks": tasks}
 
 
 @app.post("/api/generate-report", tags=["events"], summary="Queue a radiology report generation task from selected inference results")
-async def generate_report(data: dict = Body(...)):
-    """
-    Queue a report-generation background task from selected inference results.
-    Body: {task_ids: [...], patient_context: {...}}
-    """
+async def generate_report(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    state = _get_user_state(uid)
+    if not state.current_session_id:
+        state.current_session_id = db.create_session(user_id=uid)
     task_ids = data.get("task_ids", [])
     if not task_ids:
         raise HTTPException(status_code=400, detail="task_ids is required")
@@ -1378,7 +1449,7 @@ async def generate_report(data: dict = Body(...)):
     description = f"Report from {len(task_ids)} inference result(s)"
 
     task_id = task_runner.submit_task(
-        session_id=current_session_id,
+        session_id=state.current_session_id,
         task_type="report",
         description=description,
         input_data={"task_ids": task_ids, "patient_context": patient_context},

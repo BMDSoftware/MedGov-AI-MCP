@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { API_CONFIG, getApiUrl } from './config';
+import { isAuthenticated, getToken, getUsername, setAuth, clearAuth } from './auth';
+import { apiFetch, safeJson, authEventSourceUrl } from './apiFetch';
 import './App.css';
+import Login from './components/Login';
 import Settings from './components/Settings';
 import Sessions from './components/Sessions';
 import InferenceTest from './components/InferenceTest';
@@ -10,10 +13,20 @@ import Toast from './components/Toast';
 import HomePage from './components/HomePage';
 import AutonomousAgent from './components/AutonomousAgent';
 import Workspaces from './components/Workspaces';
+import NavDock from './components/NavDock';
+import { MdHome, MdSmartToy, MdBiotech, MdBarChart, MdDescription, MdFolder, MdSettings, MdHistory, MdScience } from 'react-icons/md';
 
 function App() {
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  // ALL hooks must be declared here, before any conditional return.
+  // Moving them after an early `return` violates the Rules of Hooks and causes
+  // React error #310 ("rendered more hooks than previous render").
+  const [authToken, setAuthToken] = useState(getToken());
+  const [currentUsername, setCurrentUsername] = useState(getUsername());
+  const [showLogin, setShowLogin] = useState(false);
+
   // --- State and refs ---
-  const [page, setPage] = useState('home');
+  const [page, setPage] = useState('analysis');
   const [messages, setMessages] = useState([
     {
       type: 'bot',
@@ -48,56 +61,98 @@ function App() {
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // --- Effects ---
+  // --- Auth functions ---
+  const WELCOME_MESSAGE = {
+    type: 'bot',
+    content: 'Welcome to the Health Assistant. You can select a patient from the Patients tab or upload a medical file to begin.',
+    actions: []
+  };
+
+  function resetChatState() {
+    setMessages([WELCOME_MESSAGE]);
+    setCurrentSessionId(null);
+    setUploadedFiles([]);
+    setUploadedDirs([]);
+    setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null, selectedPatient: null, patientContext: null });
+    setSelectedPatient(null);
+    setPendingTool(null);
+    setRunningTool(null);
+    setRunningTaskCount(0);
+    setUnreadTaskCount(0);
+  }
+
+  function handleLogin(token, username) {
+    setAuth(token, username);
+    resetChatState();
+    setAuthToken(token);
+    setCurrentUsername(username);
+    setShowLogin(false);
+    setPage('analysis');
+  }
+
+  function handleLogout() {
+    clearAuth();
+    resetChatState();
+    setAuthToken(null);
+    setCurrentUsername(null);
+    setShowLogin(false);
+    setPage('analysis');
+  }
+
+  // --- Effects (all gated on authToken to avoid 401 loops) ---
   useEffect(() => {
+    if (!authToken) return;
     pageRef.current = page;
     if (page === 'results') setUnreadTaskCount(0);
 
     if (page === 'autonomous') {
-      fetch(getApiUrl('/api/change-agent-type'), {
+      apiFetch(getApiUrl('/api/change-agent-type'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify('autonomous')
-      }).catch(err => console.error('Failed to change agent type:', err));
+      }).catch(() => {});
     } else if (page === 'analysis') {
-      fetch(getApiUrl('/api/change-agent-type'), {
+      apiFetch(getApiUrl('/api/change-agent-type'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify('analysis')
-      }).catch(err => console.error('Failed to change agent type:', err));
+      }).catch(() => {});
     }
-  }, [page]);
+  }, [page, authToken]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch initial session ID on mount
+  // Fetch initial session ID on mount (auth required)
   useEffect(() => {
-    fetch(getApiUrl('/api/sessions'))
+    if (!authToken) return;
+    apiFetch(getApiUrl('/api/sessions'))
       .then(r => r.json())
       .then(d => setCurrentSessionId(d.current_session_id))
       .catch(() => {});
-  }, []);
+  }, [authToken]);
 
-  // Load app mode on mount
+  // Load app mode on mount (auth required)
   useEffect(() => {
-    fetch(getApiUrl('/api/mode'))
+    if (!authToken) return;
+    apiFetch(getApiUrl('/api/mode'))
       .then(r => r.json())
       .then(d => setAppMode(d.mode))
       .catch(() => {});
-  }, []);
+  }, [authToken]);
 
-  // Initialise running task count from DB on mount
+  // Initialise running task count from DB on mount (auth required)
   useEffect(() => {
-    fetch(getApiUrl('/api/tasks'))
+    if (!authToken) return;
+    apiFetch(getApiUrl('/api/tasks'))
       .then(r => r.json())
       .then(d => {
         const active = (d.tasks || []).filter(t => t.status === 'queued' || t.status === 'running').length;
         setRunningTaskCount(active);
       })
       .catch(() => {});
-  }, []);
+  }, [authToken]);
 
   // Persist messages to localStorage whenever they change (filter out transient states)
   useEffect(() => {
@@ -134,7 +189,7 @@ function App() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const response = await fetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD), {
+      const response = await apiFetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD), {
         method: 'POST',
         body: formData
       });
@@ -155,10 +210,10 @@ function App() {
       for (let i = 0; i < files.length; i++) {
         formData.append('files', files[i], files[i].webkitRelativePath || files[i].name);
       }
-      const res = await fetch(getApiUrl('/api/upload-directory'), { method: 'POST', body: formData });
+      const res = await apiFetch(getApiUrl('/api/upload-directory'), { method: 'POST', body: formData });
       const data = await res.json();
       if (data.dir_path) {
-        await fetch(getApiUrl('/api/set-directory'), {
+        await apiFetch(getApiUrl('/api/set-directory'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dir_path: data.dir_path }),
@@ -177,7 +232,7 @@ function App() {
   };
 
   const handleRemoveDir = async (dirPath) => {
-    await fetch(getApiUrl('/api/set-directory'), {
+    await apiFetch(getApiUrl('/api/set-directory'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dir_path: dirPath, remove: true }),
@@ -187,7 +242,7 @@ function App() {
 
   const handleRemoveFile = async (fileName) => {
     try {
-      await fetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD) + `?filename=${encodeURIComponent(fileName)}`, {
+      await apiFetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD) + `?filename=${encodeURIComponent(fileName)}`, {
         method: 'DELETE'
       });
     } catch {}
@@ -214,7 +269,7 @@ function App() {
   const handleAnalyze = async () => {
     addMessage({ type: 'bot', content: 'Analyzing image...', isLoading: true });
     const requestBody = { action: 'analyze', modality: sessionContext.modality, bodyPart: sessionContext.bodyPart };
-    const response = await fetch(getApiUrl(API_CONFIG.ENDPOINTS.PROCESS_WORKFLOW), {
+    const response = await apiFetch(getApiUrl(API_CONFIG.ENDPOINTS.PROCESS_WORKFLOW), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
@@ -239,7 +294,7 @@ function App() {
 
   const handleGenerateReport = async () => {
     addMessage({ type: 'bot', content: 'Generating report...', isLoading: true });
-    const response = await fetch(getApiUrl(API_CONFIG.ENDPOINTS.PROCESS_WORKFLOW), {
+    const response = await apiFetch(getApiUrl(API_CONFIG.ENDPOINTS.PROCESS_WORKFLOW), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'generate_report', analysis: sessionContext.lastAnalysis })
@@ -271,8 +326,8 @@ function App() {
     setRunningTool(toolName);
     setIsProcessing(true);
     try {
-      const response = await fetch(getApiUrl('/api/confirm-tool'), { method: 'POST' });
-      const data = await response.json();
+      const response = await apiFetch(getApiUrl('/api/confirm-tool'), { method: 'POST' });
+      const data = await safeJson(response);
       setRunningTool(null);
       if (data.result?.type === 'confirmation_required') {
         // Another tool needs confirmation
@@ -303,8 +358,8 @@ function App() {
     addMessage({ type: 'user', content: `Denied: ${pendingTool.tool_name}` });
     setPendingTool(null);
     try {
-      const response = await fetch(getApiUrl('/api/deny-tool'), { method: 'POST' });
-      const data = await response.json();
+      const response = await apiFetch(getApiUrl('/api/deny-tool'), { method: 'POST' });
+      const data = await safeJson(response);
       addMessage({ type: 'bot', content: data.result?.answer || 'Tool execution cancelled.' });
     } catch (err) {
       addMessage({ type: 'bot', content: 'Tool execution cancelled.' });
@@ -312,10 +367,28 @@ function App() {
   };
 
   // --- Render ---
+  // ── Unauthenticated views (no hooks after this point) ──────────────────────
+  if (!authToken) {
+    if (showLogin) return <Login onLogin={handleLogin} />;
+    return (
+      <HomePage
+        onNavigate={(p) => {
+          if (p === 'analysis' || p === 'autonomous' || p === 'results') {
+            setShowLogin(true);
+          }
+        }}
+        onSignIn={() => setShowLogin(true)}
+        currentSessionId={null}
+        runningTaskCount={0}
+        isPublic
+      />
+    );
+  }
+
   return (
     <div className="app">
       {/* Global SSE toast notifications - lives outside tab routing */}
-      <Toast onTaskUpdate={(event) => {
+      <Toast authToken={authToken} onTaskUpdate={(event) => {
         setTaskRefreshSignal(event);
         if (event.type === 'task_queued') setRunningTaskCount(n => n + 1);
         if (event.type === 'task_done' || event.type === 'task_failed') {
@@ -330,25 +403,30 @@ function App() {
           <span className="logo-text">HealthMCP</span>
         </div>
         <nav className="nav">
-          <a href="#" className={`nav-item${page === 'home' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('home'); }}>Home</a>
-          <a href="#" className={`nav-item${page === 'autonomous' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('autonomous'); }}>Autonomous</a>
-          <a href="#" className={`nav-item${page === 'analysis' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('analysis'); }}>Analysis</a>
-          <a href="#" className={`nav-item${page === 'results' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('results'); }}>
-            Results
-            {runningTaskCount > 0 && <span className="nav-task-badge">{runningTaskCount}</span>}
-            {unreadTaskCount > 0 && <span className="nav-unread-badge">!</span>}
-          </a>
-          {appMode === 'debug' && (
-            <>
-              <a href="#" className={`nav-item${page === 'history' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('history'); }}>Sessions</a>
-              <a href="#" className={`nav-item${page === 'test' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('test'); }}>Test</a>
-              <a href="#" className={`nav-item${page === 'report' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('report'); }}>Report</a>
-            </>
-          )}
-          <a href="#" className={`nav-item${page === 'workspaces' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('workspaces'); }}>Workspaces</a>
-          <a href="#" className={`nav-item${page === 'settings' ? ' active' : ''}`} onClick={e => { e.preventDefault(); setPage('settings'); }}>Settings</a>
+          <NavDock
+            activePage={page}
+            items={[
+              { page: 'home',       label: 'Home',       icon: <MdHome />,      onClick: () => setPage('home') },
+              { page: 'autonomous', label: 'Autonomous', icon: <MdSmartToy />,  onClick: () => setPage('autonomous') },
+              { page: 'analysis',   label: 'Analysis',   icon: <MdBiotech />,   onClick: () => setPage('analysis') },
+              { page: 'results',    label: 'Results',    icon: <MdBarChart />,  onClick: () => setPage('results'), badge: runningTaskCount, unread: unreadTaskCount > 0 },
+              { page: 'workspaces', label: 'Workspaces', icon: <MdFolder />,    onClick: () => setPage('workspaces') },
+              { page: 'settings',   label: 'Settings',   icon: <MdSettings />,  onClick: () => setPage('settings') },
+              ...(appMode === 'debug' ? [
+                { page: 'history', label: 'Sessions', icon: <MdHistory />,     onClick: () => setPage('history') },
+                { page: 'test',    label: 'Test',     icon: <MdScience />,     onClick: () => setPage('test') },
+                { page: 'report',  label: 'Report',   icon: <MdDescription />, onClick: () => setPage('report') },
+              ] : []),
+            ]}
+          />
         </nav>
         <div className="sidebar-footer">
+          {currentUsername && (
+            <div className="sidebar-user">
+              <span className="sidebar-username">{currentUsername}</span>
+              <button className="sidebar-logout" onClick={handleLogout}>Sign out</button>
+            </div>
+          )}
           {appMode === 'debug' && (
             <div className="sidebar-debug-badge">DEBUG</div>
           )}
@@ -542,12 +620,12 @@ function App() {
                 addMessage({ type: 'bot', content: '', isLoading: true });
                 setIsProcessing(true);
                 try {
-                  const response = await fetch(getApiUrl('/api/process-query'), {
+                  const response = await apiFetch(getApiUrl('/api/process-query'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain' },
                     body: currentQuery
                   });
-                  const data = await response.json();
+                  const data = await safeJson(response);
 
                   setMessages(prev => prev.filter(m => !m.isLoading));
 

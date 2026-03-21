@@ -1,3 +1,4 @@
+import { apiFetch, authEventSourceUrl } from '../apiFetch';
 import { useState, useEffect } from 'react';
 import { getApiUrl } from '../config.js';
 import './PatientSelection.css';
@@ -17,7 +18,7 @@ function PatientSelection({ onPatientSelect }) {
       setLoading(true);
       setError(null);
       
-      const response = await fetch(getApiUrl('/api/patients'));
+      const response = await apiFetch(getApiUrl('/api/patients'));
       const data = await response.json();
       
       if (data.error) {

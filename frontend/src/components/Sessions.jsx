@@ -1,3 +1,4 @@
+import { apiFetch, authEventSourceUrl } from '../apiFetch';
 import React, { useEffect, useState } from 'react';
 import './Sessions.css';
 
@@ -20,7 +21,7 @@ function Sessions({ onLoadSession }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/sessions`);
+      const res = await apiFetch(`${API_URL}/api/sessions`);
       const data = await res.json();
       setSessions(data.sessions || []);
       setCurrentSessionId(data.current_session_id);
@@ -41,7 +42,7 @@ function Sessions({ onLoadSession }) {
     if (!saveName.trim()) return;
     setSaving(true);
     try {
-      await fetch(`${API_URL}/api/save-session`, {
+      await apiFetch(`${API_URL}/api/save-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: saveName.trim() })
@@ -65,7 +66,7 @@ function Sessions({ onLoadSession }) {
 
   const doLoad = async (sessionId) => {
     try {
-      const res = await fetch(`${API_URL}/api/load-session`, {
+      const res = await apiFetch(`${API_URL}/api/load-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId })
@@ -92,7 +93,7 @@ function Sessions({ onLoadSession }) {
 
   const doNewSession = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/reset-session`, { method: 'POST' });
+      const res = await apiFetch(`${API_URL}/api/reset-session`, { method: 'POST' });
       const data = await res.json();
       await fetchSessions();
       if (onLoadSession) onLoadSession({ isNew: true, session_id: data.session_id });
@@ -103,7 +104,7 @@ function Sessions({ onLoadSession }) {
 
   const handleClearAll = async () => {
     try {
-      await fetch(`${API_URL}/api/delete-all-sessions`, { method: 'DELETE' });
+      await apiFetch(`${API_URL}/api/delete-all-sessions`, { method: 'DELETE' });
       setConfirmClearAll(false);
       setExpandedSession(null);
       setSessionFiles({});
@@ -118,7 +119,7 @@ function Sessions({ onLoadSession }) {
     const target = savePrompt.targetSessionId;
     const nameToSave = saveName.trim() || currentSession?.name || 'Untitled Session';
     try {
-      await fetch(`${API_URL}/api/save-session`, {
+      await apiFetch(`${API_URL}/api/save-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: nameToSave })
@@ -148,7 +149,7 @@ function Sessions({ onLoadSession }) {
     // Now delete the old unsaved session (it's no longer active)
     if (sessionToDelete) {
       try {
-        await fetch(`${API_URL}/api/delete-session`, {
+        await apiFetch(`${API_URL}/api/delete-session`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: sessionToDelete })
@@ -162,7 +163,7 @@ function Sessions({ onLoadSession }) {
 
   const handleDelete = async (sessionId) => {
     try {
-      const res = await fetch(`${API_URL}/api/delete-session`, {
+      const res = await apiFetch(`${API_URL}/api/delete-session`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId })
@@ -192,7 +193,7 @@ function Sessions({ onLoadSession }) {
     setExpandedSession(sessionId);
     if (!sessionFiles[sessionId]) {
       try {
-        const res = await fetch(`${API_URL}/api/session-files?session_id=${sessionId}`);
+        const res = await apiFetch(`${API_URL}/api/session-files?session_id=${sessionId}`);
         const data = await res.json();
         setSessionFiles(prev => ({ ...prev, [sessionId]: data.files || [] }));
       } catch (e) {

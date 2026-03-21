@@ -1,12 +1,43 @@
+import { apiFetch, authEventSourceUrl } from '../apiFetch';
 import { useState, useEffect, useRef } from 'react';
 import { getApiUrl } from '../config';
+import BorderGlow from './BorderGlow';
+import { Reorder, useDragControls } from 'motion/react';
+import {
+  MdDragIndicator,
+  MdFolderOpen,
+  MdFolder,
+  MdPlayArrow,
+  MdPause,
+  MdEdit,
+  MdTerminal,
+  MdDeleteOutline,
+  MdAdd,
+  MdArrowUpward,
+  MdClose,
+  MdChevronRight,
+  MdKeyboardArrowRight,
+  MdKeyboardArrowDown,
+  MdOutlineEditNote,
+  MdFolderSpecial,
+} from 'react-icons/md';
 import './Workspaces.css';
+
+const ORDER_KEY = 'workspaces_order';
 
 function classifyLine(msg) {
   if (msg.startsWith('[ERROR]')) return 'error';
   if (msg.startsWith('[FILE]')) return 'file';
   if (msg.startsWith('[AI]')) return 'ai';
   return 'info';
+}
+
+function applyOrder(apiDirs, savedOrder) {
+  if (!savedOrder.length) return apiDirs;
+  const map = Object.fromEntries(apiDirs.map(d => [d.id, d]));
+  const ordered = savedOrder.filter(id => map[id]).map(id => map[id]);
+  const extra = apiDirs.filter(d => !savedOrder.includes(d.id));
+  return [...ordered, ...extra];
 }
 
 // ─── Directory Browser ────────────────────────────────────────────────────────
@@ -20,7 +51,7 @@ function DirBrowser({ current, onSelect, onClose }) {
 
   function navigate(path) {
     setLoading(true);
-    fetch(getApiUrl(`/api/browse-directory?path=${encodeURIComponent(path)}`))
+    apiFetch(getApiUrl(`/api/browse-directory?path=${encodeURIComponent(path)}`))
       .then(r => r.json())
       .then(data => {
         setBrowsePath(data.path);
@@ -38,16 +69,16 @@ function DirBrowser({ current, onSelect, onClose }) {
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal browser-modal">
         <div className="browser-header">
-          <span className="browser-icon">📁</span>
+          <MdFolder className="browser-icon" />
           <span className="browser-title">Select Folder</span>
-          <button className="browser-close" onClick={onClose}>✕</button>
+          <button className="browser-close" onClick={onClose}><MdClose /></button>
         </div>
 
         <div className="browser-path-bar">
           <span className="browser-path-text">{browsePath}</span>
           {parent !== browsePath && (
-            <button className="browser-up" onClick={() => navigate(parent)} title="Go up">
-              ↑ Up
+            <button className="browser-up" onClick={() => navigate(parent)}>
+              <MdArrowUpward size={13} /> Up
             </button>
           )}
         </div>
@@ -60,9 +91,9 @@ function DirBrowser({ current, onSelect, onClose }) {
           )}
           {entries.map(e => (
             <div key={e.path} className="browser-entry" onClick={() => navigate(e.path)}>
-              <span className="browser-entry-icon">📁</span>
+              <MdFolder className="browser-entry-icon" />
               <span className="browser-entry-name">{e.name}</span>
-              <span className="browser-entry-arrow">›</span>
+              <MdChevronRight className="browser-entry-arrow" />
             </div>
           ))}
         </div>
@@ -86,14 +117,14 @@ function ConsolePanel({ dir, onClose }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
-    fetch(getApiUrl(`/api/watched-directories/${dir.id}/console`))
+    apiFetch(getApiUrl(`/api/watched-directories/${dir.id}/console`))
       .then(r => r.json())
       .then(setLines)
       .catch(() => {});
   }, [dir.id]);
 
   useEffect(() => {
-    const es = new EventSource(getApiUrl('/api/events'));
+    const es = new EventSource(authEventSourceUrl('/api/events'));
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -113,8 +144,9 @@ function ConsolePanel({ dir, onClose }) {
     <div className="console-panel">
       <div className="console-panel-header">
         <span className="console-dot" />
-        <span>Console &mdash; {dir.name}</span>
-        <button className="console-close" onClick={onClose}>✕</button>
+        <MdTerminal size={14} />
+        <span>Console — {dir.name}</span>
+        <button className="console-close" onClick={onClose}><MdClose /></button>
       </div>
       <div className="console-output">
         {lines.length === 0 ? (
@@ -147,8 +179,8 @@ function WorkspaceModal({ initial, onSave, onClose }) {
 
   useEffect(() => {
     Promise.all([
-      fetch(getApiUrl('/api/available-tools')).then(r => r.json()),
-      fetch(getApiUrl('/api/enabled-tools')).then(r => r.json()),
+      apiFetch(getApiUrl('/api/available-tools')).then(r => r.json()),
+      apiFetch(getApiUrl('/api/enabled-tools')).then(r => r.json()),
     ]).then(([toolsData, enabledTools]) => {
       const grouped = {};
       Object.entries(toolsData).forEach(([toolName, tool]) => {
@@ -203,7 +235,7 @@ function WorkspaceModal({ initial, onSave, onClose }) {
         <div className="modal">
           <div className="modal-header">
             <h3>{initial ? 'Edit Workspace' : 'Add Workspace'}</h3>
-            <button className="modal-close" onClick={onClose}>✕</button>
+            <button className="modal-close" onClick={onClose}><MdClose /></button>
           </div>
           <form onSubmit={handleSubmit}>
             <div className="form-group">
@@ -228,9 +260,8 @@ function WorkspaceModal({ initial, onSave, onClose }) {
                   type="button"
                   className="btn-browse"
                   onClick={() => setShowBrowser(true)}
-                  title="Browse filesystem"
                 >
-                  📁 Browse
+                  <MdFolder size={15} /> Browse
                 </button>
               </div>
             </div>
@@ -269,7 +300,7 @@ function WorkspaceModal({ initial, onSave, onClose }) {
                         >
                           <span className="tool-server-name">{server}</span>
                           <span className="tool-server-count">{tools.filter(t => selectedTools.has(t)).length}/{tools.length}</span>
-                          <span className={`tool-chevron ${expanded ? 'open' : ''}`}>›</span>
+                          {expanded ? <MdKeyboardArrowDown size={16} /> : <MdKeyboardArrowRight size={16} />}
                         </button>
                       </div>
                       {expanded && (
@@ -316,6 +347,105 @@ function StatusBadge({ dir }) {
   return <span className="badge badge-stopped">Stopped</span>;
 }
 
+// ─── Workspace Card (draggable) ───────────────────────────────────────────────
+
+function WorkspaceCard({ dir, onToggle, onEdit, onDelete, openConsoleId, setOpenConsole }) {
+  const controls = useDragControls();
+  const consoleOpen = openConsoleId === dir.id;
+
+  return (
+    <Reorder.Item
+      value={dir}
+      dragListener={false}
+      dragControls={controls}
+      as="div"
+      className="dir-item"
+      whileDrag={{ scale: 1.02, boxShadow: '0 16px 40px rgba(0,0,0,0.5)', zIndex: 10 }}
+      transition={{ duration: 0.15 }}
+    >
+      <BorderGlow
+        borderRadius={14}
+        backgroundColor="#0c0c14"
+        colors={dir.watching ? ['#06b6d4', '#6366f1', '#34d399'] : ['#6366f1', '#8b5cf6', '#38bdf8']}
+        glowRadius={28}
+        glowIntensity={0.8}
+        edgeSensitivity={22}
+        style={{ width: '100%' }}
+      >
+        <div className={`dir-card ${dir.watching ? 'active' : ''}`}>
+
+          {/* Drag handle */}
+          <div
+            className="dir-drag-handle"
+            onPointerDown={e => controls.start(e)}
+            title="Drag to reorder"
+          >
+            <MdDragIndicator size={18} />
+          </div>
+
+          {/* Folder icon */}
+          <div className="dir-card-icon-wrap">
+            {dir.watching
+              ? <MdFolderOpen size={26} className="dir-folder-icon active" />
+              : <MdFolder size={26} className="dir-folder-icon" />}
+          </div>
+
+          {/* Info */}
+          <div className="dir-card-info">
+            <div className="dir-card-top">
+              <span className="dir-card-title">{dir.name}</span>
+              <StatusBadge dir={dir} />
+            </div>
+            <span className="dir-card-path">{dir.path}</span>
+            {dir.custom_prompt && (
+              <div className="dir-card-prompt">
+                <MdOutlineEditNote size={13} className="prompt-icon" />
+                {dir.custom_prompt}
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="dir-card-actions">
+            <button
+              className={`btn-action ${dir.enabled ? 'btn-action-warn' : 'btn-action-success'}`}
+              onClick={() => onToggle(dir)}
+              title={dir.enabled ? 'Pause' : 'Start'}
+            >
+              {dir.enabled ? <MdPause size={15} /> : <MdPlayArrow size={15} />}
+              <span>{dir.enabled ? 'Pause' : 'Start'}</span>
+            </button>
+            <button
+              className="btn-action btn-action-neutral"
+              onClick={() => onEdit(dir)}
+              title="Edit"
+            >
+              <MdEdit size={14} />
+              <span>Edit</span>
+            </button>
+            <button
+              className={`btn-action btn-action-console ${consoleOpen ? 'active' : ''}`}
+              onClick={() => setOpenConsole(consoleOpen ? null : dir)}
+              title="Console"
+            >
+              <MdTerminal size={14} />
+              <span>Console</span>
+            </button>
+            <button
+              className="btn-action btn-action-danger btn-icon-only"
+              onClick={() => onDelete(dir)}
+              title="Remove"
+            >
+              <MdDeleteOutline size={16} />
+            </button>
+          </div>
+
+        </div>
+      </BorderGlow>
+    </Reorder.Item>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Workspaces() {
@@ -324,11 +454,25 @@ export default function Workspaces() {
   const [editTarget, setEditTarget] = useState(null);
   const [openConsole, setOpenConsole] = useState(null);
 
+  function applyStoredOrder(apiDirs) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(ORDER_KEY) || '[]');
+      return applyOrder(apiDirs, saved);
+    } catch {
+      return apiDirs;
+    }
+  }
+
   function load() {
-    fetch(getApiUrl('/api/watched-directories'))
+    apiFetch(getApiUrl('/api/watched-directories'))
       .then(r => r.json())
-      .then(setDirs)
+      .then(apiDirs => setDirs(applyStoredOrder(apiDirs)))
       .catch(() => {});
+  }
+
+  function handleReorder(newDirs) {
+    setDirs(newDirs);
+    localStorage.setItem(ORDER_KEY, JSON.stringify(newDirs.map(d => d.id)));
   }
 
   useEffect(() => {
@@ -338,7 +482,7 @@ export default function Workspaces() {
   }, []);
 
   async function handleAdd(data) {
-    await fetch(getApiUrl('/api/watched-directories'), {
+    await apiFetch(getApiUrl('/api/watched-directories'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -348,7 +492,7 @@ export default function Workspaces() {
   }
 
   async function handleEdit(data) {
-    await fetch(getApiUrl(`/api/watched-directories/${editTarget.id}`), {
+    await apiFetch(getApiUrl(`/api/watched-directories/${editTarget.id}`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -358,7 +502,7 @@ export default function Workspaces() {
   }
 
   async function handleToggle(dir) {
-    await fetch(getApiUrl(`/api/watched-directories/${dir.id}`), {
+    await apiFetch(getApiUrl(`/api/watched-directories/${dir.id}`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !dir.enabled })
@@ -368,13 +512,18 @@ export default function Workspaces() {
 
   async function handleDelete(dir) {
     if (!confirm(`Remove workspace "${dir.name}"?`)) return;
-    await fetch(getApiUrl(`/api/watched-directories/${dir.id}`), { method: 'DELETE' });
+    await apiFetch(getApiUrl(`/api/watched-directories/${dir.id}`), { method: 'DELETE' });
     if (openConsole?.id === dir.id) setOpenConsole(null);
     load();
   }
 
   return (
     <div className="directories-page">
+      {/* Subtle background */}
+      <div className="ws-bg-orb ws-bg-orb-1" />
+      <div className="ws-bg-orb ws-bg-orb-2" />
+      <div className="ws-bg-grid" />
+
       <div className="directories-header">
         <div>
           <h2>Workspaces</h2>
@@ -383,68 +532,40 @@ export default function Workspaces() {
           </p>
         </div>
         <button className="btn-primary btn-add" onClick={() => setShowModal(true)}>
-          + Add workspace
+          <MdAdd size={17} />
+          Add workspace
         </button>
       </div>
 
       {dirs.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon">📁</div>
+          <MdFolderSpecial size={48} className="empty-icon" />
           <strong>No workspaces yet</strong>
           <p>Add a workspace and the AI will process new files automatically.</p>
           <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => setShowModal(true)}>
-            + Add your first workspace
+            <MdAdd size={16} /> Add your first workspace
           </button>
         </div>
       ) : (
-        <div className="directories-grid">
+        <Reorder.Group
+          as="div"
+          axis="y"
+          values={dirs}
+          onReorder={handleReorder}
+          className="directories-list"
+        >
           {dirs.map(dir => (
-            <div key={dir.id} className={`dir-card ${dir.watching ? 'active' : ''}`}>
-              <div className="dir-card-header">
-                <div className="dir-card-icon">📁</div>
-                <div className="dir-card-info">
-                  <span className="dir-card-title">{dir.name}</span>
-                  <span className="dir-card-path">{dir.path}</span>
-                </div>
-                <StatusBadge dir={dir} />
-              </div>
-
-              {dir.custom_prompt && (
-                <div className="dir-card-prompt">
-                  <span className="prompt-icon">&#9998;</span>
-                  {dir.custom_prompt}
-                </div>
-              )}
-
-              <div className="dir-card-actions">
-                <button
-                  className={`btn-action ${dir.enabled ? 'btn-action-warn' : 'btn-action-success'}`}
-                  onClick={() => handleToggle(dir)}
-                >
-                  {dir.enabled ? '⏸ Pause' : '▶ Start'}
-                </button>
-                <button
-                  className="btn-action btn-action-neutral"
-                  onClick={() => setEditTarget(dir)}
-                >
-                  ✎ Edit
-                </button>
-                <button
-                  className={`btn-action btn-action-console ${openConsole?.id === dir.id ? 'active' : ''}`}
-                  onClick={() => setOpenConsole(openConsole?.id === dir.id ? null : dir)}
-                >
-                  {'>'}_  Console
-                </button>
-                <button
-                  className="btn-action btn-action-danger"
-                  onClick={() => handleDelete(dir)}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
+            <WorkspaceCard
+              key={dir.id}
+              dir={dir}
+              onToggle={handleToggle}
+              onEdit={setEditTarget}
+              onDelete={handleDelete}
+              openConsoleId={openConsole?.id}
+              setOpenConsole={setOpenConsole}
+            />
           ))}
-        </div>
+        </Reorder.Group>
       )}
 
       {openConsole && (

@@ -1,3 +1,4 @@
+import { apiFetch, authEventSourceUrl } from '../apiFetch';
 import { useEffect, useState } from 'react';
 import './Report.css';
 
@@ -16,7 +17,7 @@ function Report({ refreshSignal, currentSessionId }) {
       const url = currentSessionId
         ? `${API_URL}/api/tasks?session_id=${currentSessionId}`
         : `${API_URL}/api/tasks`;
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       const data = await res.json();
       const tasks = data.tasks || [];
       setInferenceTasks(tasks.filter(t => t.task_type === 'inference' && t.status === 'done'));
@@ -49,7 +50,7 @@ function Report({ refreshSignal, currentSessionId }) {
     setError(null);
     setReportTask(null);
     try {
-      const res = await fetch(`${API_URL}/api/generate-report`, {
+      const res = await apiFetch(`${API_URL}/api/generate-report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task_ids: Array.from(selected) }),
@@ -71,7 +72,7 @@ function Report({ refreshSignal, currentSessionId }) {
     if (!reportTask?.id || reportTask.status === 'done' || reportTask.status === 'failed') return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${API_URL}/api/tasks`);
+        const res = await apiFetch(`${API_URL}/api/tasks`);
         const data = await res.json();
         const t = (data.tasks || []).find(t => t.id === reportTask.id);
         if (t && (t.status === 'done' || t.status === 'failed')) {

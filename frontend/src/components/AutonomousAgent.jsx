@@ -1,3 +1,4 @@
+import { apiFetch, authEventSourceUrl } from '../apiFetch';
 import React, { useState, useRef, useEffect } from 'react';
 import { API_CONFIG, getApiUrl } from '../config';
 import './AutonomousAgent.css';
@@ -158,7 +159,7 @@ const AutonomousAgent = ({ currentSessionId }) => {
         
         try {
           // Reset session context exactly when picking from queue
-          await fetch(getApiUrl('/api/reset-session'), { method: 'POST' });
+          await apiFetch(getApiUrl('/api/reset-session'), { method: 'POST' });
 
           if (nextTask.type === 'file') {
             handleFileUpload(nextTask.file);
@@ -184,7 +185,7 @@ const AutonomousAgent = ({ currentSessionId }) => {
       const formData = new FormData();
       formData.append('file', file);
       
-      const uploadRes = await fetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD), {
+      const uploadRes = await apiFetch(getApiUrl(API_CONFIG.ENDPOINTS.UPLOAD), {
         method: 'POST',
         body: formData
       });
@@ -212,7 +213,7 @@ const AutonomousAgent = ({ currentSessionId }) => {
         formData.append('files', file, path || file.name);
       });
 
-      const res = await fetch(getApiUrl('/api/upload-directory'), {
+      const res = await apiFetch(getApiUrl('/api/upload-directory'), {
         method: 'POST',
         body: formData
       });
@@ -221,7 +222,7 @@ const AutonomousAgent = ({ currentSessionId }) => {
       if (!res.ok) throw new Error(data.detail || 'Directory upload failed');
 
       // Set the directory for analysis
-      await fetch(getApiUrl('/api/set-directory'), {
+      await apiFetch(getApiUrl('/api/set-directory'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dir_path: data.dir_path }),
@@ -245,7 +246,7 @@ const AutonomousAgent = ({ currentSessionId }) => {
         ? `A new directory named "${name}" containing medical data has been uploaded and set as the current working directory (Path: ${path}). Please analyze its contents and autonomously perform any necessary medical workflows, such as DICOM analysis or report extraction. Explain your findings.`
         : `A new file named "${name}" has been uploaded. Please analyze it and autonomously perform any necessary medical workflows or extraction you think is best. Explain your findings.`;
       
-      const response = await fetch(getApiUrl('/api/process-query'), {
+      const response = await apiFetch(getApiUrl('/api/process-query'), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: query
@@ -282,7 +283,7 @@ const AutonomousAgent = ({ currentSessionId }) => {
     setIsProcessing(true);
 
     try {
-      const response = await fetch(getApiUrl('/api/confirm-tool'), { method: 'POST' });
+      const response = await apiFetch(getApiUrl('/api/confirm-tool'), { method: 'POST' });
       const data = await response.json();
       
       if (data.result?.type === 'confirmation_required') {
@@ -310,7 +311,7 @@ const AutonomousAgent = ({ currentSessionId }) => {
     setIsProcessing(true);
 
     try {
-      const response = await fetch(getApiUrl('/api/deny-tool'), { method: 'POST' });
+      const response = await apiFetch(getApiUrl('/api/deny-tool'), { method: 'POST' });
       const data = await response.json();
       addActivity('info', `Agent response after denial:\n${data.result?.answer || 'Tool execution cancelled.'}`);
     } catch (err) {

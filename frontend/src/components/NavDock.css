@@ -1,0 +1,83 @@
+.nav-dock-outer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  overflow: visible;
+}
+
+.nav-dock-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.nav-dock-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 9px;
+  padding: 0 10px;
+  cursor: pointer;
+  outline: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  overflow: hidden;
+  min-height: 36px;
+}
+
+.nav-dock-item:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.nav-dock-item.active {
+  background: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+.nav-dock-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  font-size: 15px;
+}
+
+.nav-dock-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.nav-dock-label {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.nav-dock-badge {
+  margin-left: auto;
+  background: #6366f1;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.nav-dock-badge.unread {
+  background: #f59e0b;
+}

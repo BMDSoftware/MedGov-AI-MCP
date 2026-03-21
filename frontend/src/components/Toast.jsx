@@ -1,3 +1,4 @@
+import { apiFetch, authEventSourceUrl } from '../apiFetch';
 import { useEffect, useRef, useState } from 'react';
 import './Toast.css';
 
@@ -9,15 +10,16 @@ import { API_URL } from '../config.js';
  * a background task starts, finishes, or fails.
  * Mount once in App.jsx outside of any tab routing.
  */
-function Toast({ onTaskUpdate }) {
+function Toast({ onTaskUpdate, authToken }) {
   const [toasts, setToasts] = useState([]);
   // Keep a ref so the onmessage closure always calls the latest callback
-  // even though the effect only runs once (empty deps).
+  // even though the effect only runs once per token (deps: [authToken]).
   const onTaskUpdateRef = useRef(onTaskUpdate);
   useEffect(() => { onTaskUpdateRef.current = onTaskUpdate; }, [onTaskUpdate]);
 
   useEffect(() => {
-    const es = new EventSource(`${API_URL}/api/events`);
+    if (!authToken) return; // don't open SSE if not logged in
+    const es = new EventSource(authEventSourceUrl('/api/events'));
 
     es.onmessage = (e) => {
       try {
@@ -60,7 +62,7 @@ function Toast({ onTaskUpdate }) {
     };
 
     return () => es.close();
-  }, []);
+  }, [authToken]);
 
   const dismiss = (id) => setToasts(prev => prev.filter(t => t.id !== id));
 

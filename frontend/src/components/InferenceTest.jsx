@@ -1,3 +1,4 @@
+import { apiFetch, authEventSourceUrl } from '../apiFetch';
 import React, { useEffect, useState } from 'react';
 import { getApiUrl } from '../config';
 import './InferenceTest.css';
@@ -40,7 +41,7 @@ function InferenceTest() {
   const fetchSampleData = async () => {
     setLoadingSamples(true);
     try {
-      const res = await fetch(`${API_URL}/api/monai/sample-data`);
+      const res = await apiFetch(`${API_URL}/api/monai/sample-data`);
       const data = await res.json();
       setSampleFiles(data.files || []);
     } catch (e) {
@@ -84,7 +85,7 @@ function InferenceTest() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData });
+      const res = await apiFetch(`${API_URL}/api/upload`, { method: 'POST', body: formData });
       const data = await res.json();
       if (data.stored_path) {
         handleFileSelect({ name: file.name, path: data.stored_path, source: 'upload', type: file.name.endsWith('.dcm') ? 'dcm' : 'nii.gz' });
@@ -106,7 +107,7 @@ function InferenceTest() {
       for (let i = 0; i < files.length; i++) {
         formData.append('files', files[i], files[i].webkitRelativePath || files[i].name);
       }
-      const res = await fetch(`${API_URL}/api/upload-directory`, { method: 'POST', body: formData });
+      const res = await apiFetch(`${API_URL}/api/upload-directory`, { method: 'POST', body: formData });
       const data = await res.json();
       if (data.dir_path) {
         handleFileSelect({
@@ -130,7 +131,7 @@ function InferenceTest() {
     setValidating(true);
     setValidationResult(null);
     try {
-      const res = await fetch(`${API_URL}/api/monai/validate-series`, {
+      const res = await apiFetch(`${API_URL}/api/monai/validate-series`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: dirPath })
@@ -160,7 +161,7 @@ function InferenceTest() {
     setAnalyzing(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/monai/analyze`, {
+      const res = await apiFetch(`${API_URL}/api/monai/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: getAnalyzePath() })
@@ -186,7 +187,7 @@ function InferenceTest() {
     try {
       const body = {};
       if (modality) body.modality = modality;
-      const res = await fetch(`${API_URL}/api/monai/list-models`, {
+      const res = await apiFetch(`${API_URL}/api/monai/list-models`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -203,7 +204,7 @@ function InferenceTest() {
     setDownloading(modelName);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/monai/download-model`, {
+      const res = await apiFetch(`${API_URL}/api/monai/download-model`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model_name: modelName })
@@ -237,7 +238,7 @@ function InferenceTest() {
     setRunningInference(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/monai/run-inference`, {
+      const res = await apiFetch(`${API_URL}/api/monai/run-inference`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

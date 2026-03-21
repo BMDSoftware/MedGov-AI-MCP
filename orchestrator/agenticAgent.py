@@ -137,20 +137,12 @@ class AgenticAgent:
         return {name: info for name, info in self.available_tools.items() if name in self.agent_tools}
 
     def _load_disabled_tools(self) -> Set[str]:
-        try:
-            if self._DISABLED_TOOLS_FILE.exists():
-                return set(json.loads(self._DISABLED_TOOLS_FILE.read_text()))
-        except Exception:
-            pass
+        # Tool state is now stored per-user in the database.
         return set()
 
     def _save_disabled_tools(self):
-        disabled = set(self.available_tools.keys()) - self.agent_tools
-        try:
-            self._DISABLED_TOOLS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            self._DISABLED_TOOLS_FILE.write_text(json.dumps(list(disabled)))
-        except Exception as e:
-            print(f"Warning: could not save disabled tools: {e}")
+        # Tool state is now stored per-user in the database.
+        pass
 
     def enable_tool(self, tool_name: str):
         if tool_name in self.available_tools and tool_name not in self.agent_tools:

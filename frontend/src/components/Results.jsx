@@ -1,3 +1,4 @@
+import { apiFetch, authEventSourceUrl } from '../apiFetch';
 import { useEffect, useState } from 'react';
 import './Results.css';
 
@@ -21,7 +22,7 @@ function Results({ refreshSignal, currentSessionId }) {
       const url = currentSessionId
         ? `${API_URL}/api/tasks?session_id=${currentSessionId}`
         : `${API_URL}/api/tasks`;
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       const data = await res.json();
       setTasks(data.tasks || []);
     } catch {
@@ -43,6 +44,7 @@ function Results({ refreshSignal, currentSessionId }) {
 
   const filteredTasks = tasks.filter(t => {
     if (filter === 'all') return true;
+    if (filter === 'queued') return t.status === 'queued' || t.status === 'running';
     if (filter === 'done') return t.status === 'done';
     if (filter === 'failed') return t.status === 'failed';
     return t.task_type === filter;
@@ -68,7 +70,7 @@ function Results({ refreshSignal, currentSessionId }) {
       </div>
 
       <div className="results-filters">
-        {['all', 'inference', 'report', 'done', 'failed'].map(f => (
+        {['all', 'inference', 'report', 'queued', 'done', 'failed'].map(f => (
           <button
             key={f}
             className={`filter-btn ${filter === f ? 'active' : ''}`}

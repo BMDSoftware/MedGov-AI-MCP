@@ -34,6 +34,28 @@ BUNDLE_ROOT.mkdir(exist_ok=True)
 # Cache for loaded models
 _model_cache = {}
 
+
+def _resolve_model_name(name: str) -> str:
+    """Resolve a potentially abbreviated or differently-cased model name to the
+    canonical registry key. Falls back to the original name if no match found."""
+    if name in MODEL_REGISTRY:
+        return name
+    lower = name.lower().replace("-", "_").replace(" ", "_")
+    # 1. Case-insensitive exact match
+    for key in MODEL_REGISTRY:
+        if key.lower() == lower:
+            return key
+    # 2. Registry key starts with input (e.g. "wholebody_ct" -> "wholeBody_ct_segmentation")
+    for key in MODEL_REGISTRY:
+        if key.lower().startswith(lower):
+            return key
+    # 3. Input starts with registry key prefix (substring containment)
+    for key in MODEL_REGISTRY:
+        if lower in key.lower() or key.lower().replace("_", "") in lower.replace("_", ""):
+            return key
+    return name
+
+
 # Available models from MONAI Model Zoo
 MODEL_REGISTRY = {
     "spleen_ct_segmentation": {
@@ -670,6 +692,7 @@ def download_model(model_name: str) -> Dict[str, Any]:
 
     :param model_name: Name of the model from list_models()
     """
+    model_name = _resolve_model_name(model_name)
     if model_name not in MODEL_REGISTRY:
         return {
             "error": f"Unknown model: {model_name}",
@@ -745,6 +768,7 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
     if not os.path.exists(image_path) and not os.path.isdir(image_path):
         return {"error": f"Image not found: {image_path}"}
 
+    model_name = _resolve_model_name(model_name)
     if model_name not in MODEL_REGISTRY:
         return {
             "error": f"Unknown model: {model_name}",

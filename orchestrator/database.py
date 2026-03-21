@@ -19,8 +19,9 @@ UPLOADS_DIR = DB_DIR / "uploads"
 
 def _get_conn() -> sqlite3.Connection:
     """Get a database connection with row factory."""
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -89,23 +90,102 @@ def init_db():
             custom_prompt TEXT,
             allowed_tools TEXT,
             enabled INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            user_id TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS user_tool_settings (
+            user_id TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (user_id, tool_name)
+        );
     """)
-    # Migration: add allowed_tools to existing databases
-    try:
-        conn.execute("ALTER TABLE watched_directories ADD COLUMN allowed_tools TEXT")
-        conn.commit()
-    except Exception:
-        pass  # Column already exists
+    # Migrations: add columns to existing databases
+    for table, col_def in [
+        ("watched_directories", "allowed_tools TEXT"),
+        ("watched_directories", "user_id TEXT"),
+        ("sessions", "user_id TEXT"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
     conn.commit()
     conn.close()
     print(f"Database initialized at {DB_PATH}")
 
 
+# --- Users ---
+
+def create_user(username: str, email: str, password_hash: str) -> str:
+    user_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO users (id, username, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+        (user_id, username, email, password_hash, now)
+    )
+    conn.commit()
+    conn.close()
+    return user_id
+
+
+def get_user_by_username(username: str) -> Optional[Dict]:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_user_by_email(email: str) -> Optional[Dict]:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_user_by_id(user_id: str) -> Optional[Dict]:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# --- User Tool Settings ---
+
+def set_tool_enabled(user_id: str, tool_name: str, enabled: bool):
+    conn = _get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO user_tool_settings (user_id, tool_name, enabled) VALUES (?, ?, ?)",
+        (user_id, tool_name, 1 if enabled else 0)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_disabled_tools_for_user(user_id: str) -> List[str]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT tool_name FROM user_tool_settings WHERE user_id = ? AND enabled = 0",
+        (user_id,)
+    ).fetchall()
+    conn.close()
+    return [row["tool_name"] for row in rows]
+
+
 # --- Sessions ---
 
-def create_session(name: Optional[str] = None, patient_id: Optional[str] = None, patient_name: Optional[str] = None) -> str:
+def create_session(name: Optional[str] = None, patient_id: Optional[str] = None, patient_name: Optional[str] = None, user_id: Optional[str] = None) -> str:
     """Create a new session. Returns the session ID."""
     session_id = str(uuid.uuid4())
     now = datetime.now().isoformat()
@@ -114,8 +194,8 @@ def create_session(name: Optional[str] = None, patient_id: Optional[str] = None,
 
     conn = _get_conn()
     conn.execute(
-        "INSERT INTO sessions (id, name, patient_id, patient_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (session_id, name, patient_id, patient_name, now, now)
+        "INSERT INTO sessions (id, name, patient_id, patient_name, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (session_id, name, patient_id, patient_name, now, now, user_id)
     )
     conn.commit()
     conn.close()
@@ -123,10 +203,14 @@ def create_session(name: Optional[str] = None, patient_id: Optional[str] = None,
     return session_id
 
 
-def list_sessions(persisted_only: bool = False) -> List[Dict]:
-    """List all sessions, optionally only persisted ones."""
+def list_sessions(persisted_only: bool = False, user_id: Optional[str] = None) -> List[Dict]:
+    """List sessions, optionally filtered by user and/or persisted status."""
     conn = _get_conn()
-    if persisted_only:
+    if user_id and persisted_only:
+        rows = conn.execute("SELECT * FROM sessions WHERE user_id = ? AND persisted = 1 ORDER BY updated_at DESC", (user_id,)).fetchall()
+    elif user_id:
+        rows = conn.execute("SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC", (user_id,)).fetchall()
+    elif persisted_only:
         rows = conn.execute("SELECT * FROM sessions WHERE persisted = 1 ORDER BY updated_at DESC").fetchall()
     else:
         rows = conn.execute("SELECT * FROM sessions ORDER BY updated_at DESC").fetchall()
@@ -373,13 +457,29 @@ def get_task(task_id: str) -> Optional[Dict]:
     return d
 
 
-def list_tasks(session_id: Optional[str] = None) -> List[Dict]:
-    """List background tasks, optionally filtered by session. Newest first."""
+def list_tasks(session_id: Optional[str] = None, user_id: Optional[int] = None) -> List[Dict]:
+    """List background tasks, optionally filtered by session and/or user. Newest first."""
     conn = _get_conn()
-    if session_id:
+    if session_id and user_id is not None:
+        rows = conn.execute(
+            "SELECT background_tasks.* FROM background_tasks "
+            "JOIN sessions ON background_tasks.session_id = sessions.id "
+            "WHERE background_tasks.session_id = ? AND sessions.user_id = ? "
+            "ORDER BY background_tasks.created_at DESC",
+            (session_id, user_id)
+        ).fetchall()
+    elif session_id:
         rows = conn.execute(
             "SELECT * FROM background_tasks WHERE session_id = ? ORDER BY created_at DESC",
             (session_id,)
+        ).fetchall()
+    elif user_id is not None:
+        rows = conn.execute(
+            "SELECT background_tasks.* FROM background_tasks "
+            "JOIN sessions ON background_tasks.session_id = sessions.id "
+            "WHERE sessions.user_id = ? "
+            "ORDER BY background_tasks.created_at DESC",
+            (user_id,)
         ).fetchall()
     else:
         rows = conn.execute(
@@ -409,20 +509,33 @@ def _parse_watched_directory(row) -> Dict:
 
 
 def create_watched_directory(name: str, path: str, custom_prompt: Optional[str] = None,
-                              allowed_tools: Optional[List[str]] = None) -> str:
+                              allowed_tools: Optional[List[str]] = None,
+                              user_id: Optional[str] = None) -> str:
     dir_id = str(uuid.uuid4())
     now = datetime.now().isoformat()
     conn = _get_conn()
     conn.execute(
-        "INSERT INTO watched_directories (id, name, path, custom_prompt, allowed_tools, enabled, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)",
-        (dir_id, name, path, custom_prompt, json.dumps(allowed_tools) if allowed_tools is not None else None, now)
+        "INSERT INTO watched_directories (id, name, path, custom_prompt, allowed_tools, enabled, created_at, user_id) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+        (dir_id, name, path, custom_prompt, json.dumps(allowed_tools) if allowed_tools is not None else None, now, user_id)
     )
     conn.commit()
     conn.close()
     return dir_id
 
 
-def list_watched_directories() -> List[Dict]:
+def list_watched_directories(user_id: Optional[str] = None) -> List[Dict]:
+    """List watched directories, filtered by user_id when provided."""
+    conn = _get_conn()
+    if user_id:
+        rows = conn.execute("SELECT * FROM watched_directories WHERE user_id = ? ORDER BY created_at", (user_id,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM watched_directories ORDER BY created_at").fetchall()
+    conn.close()
+    return [_parse_watched_directory(row) for row in rows]
+
+
+def list_watched_directories_all() -> List[Dict]:
+    """List all watched directories regardless of owner. Used internally by watcher startup."""
     conn = _get_conn()
     rows = conn.execute("SELECT * FROM watched_directories ORDER BY created_at").fetchall()
     conn.close()

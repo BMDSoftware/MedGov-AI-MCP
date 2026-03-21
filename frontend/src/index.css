@@ -6,6 +6,20 @@
   box-sizing: border-box;
 }
 
+/* Prevent accidental text selection on interactive UI chrome */
+button, a, nav, label,
+.sidebar, .nav, .logo,
+.home-topnav, .home-feature-card, .home-status-pill,
+.dir-card, .dir-card-header, .dir-card-actions,
+.badge, .status-badge, .task-type-badge,
+.attachment-chip, .filter-btn,
+.sidebar-footer, .sidebar-user {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button { cursor: pointer; }
+
 html, body, #root {
   height: 100%;
   width: 100%;

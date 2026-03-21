@@ -1,3 +1,4 @@
+import { apiFetch, authEventSourceUrl } from '../apiFetch';
 import React, { useEffect, useState } from 'react';
 import './Settings.css';
 
@@ -36,12 +37,12 @@ function Settings({ onModeChange }) {
 
   // Load existing notifications on mount and listen for new ones via SSE
   useEffect(() => {
-    fetch(`${API_URL}/api/notifications`)
+    apiFetch(`${API_URL}/api/notifications`)
       .then(r => r.json())
       .then(d => setNotifications(d.notifications || []))
       .catch(() => {});
 
-    const es = new EventSource(`${API_URL}/api/events`);
+    const es = new EventSource(authEventSourceUrl('/api/events'));
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -54,11 +55,11 @@ function Settings({ onModeChange }) {
   }, []);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/available-models`)
+    apiFetch(`${API_URL}/api/available-models`)
       .then(r => r.json())
       .then(d => setAvailableModels(d.models || []))
       .catch(() => {});
-    fetch(`${API_URL}/api/current-model`)
+    apiFetch(`${API_URL}/api/current-model`)
       .then(r => r.json())
       .then(d => setSelectedModel(d.model_id || ''))
       .catch(() => {});
@@ -66,7 +67,7 @@ function Settings({ onModeChange }) {
 
   const handleModelChange = async (modelId) => {
     setSelectedModel(modelId);
-    await fetch(`${API_URL}/api/set-model`, {
+    await apiFetch(`${API_URL}/api/set-model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model_id: modelId })
@@ -84,7 +85,7 @@ function Settings({ onModeChange }) {
 
   // Load current mode on mount
   useEffect(() => {
-    fetch(`${API_URL}/api/mode`)
+    apiFetch(`${API_URL}/api/mode`)
       .then(r => r.json())
       .then(d => setMode(d.mode))
       .catch(() => {});
@@ -93,7 +94,7 @@ function Settings({ onModeChange }) {
   const handleSetMode = async (newMode) => {
     setModeLoading(true);
     try {
-      await fetch(`${API_URL}/api/mode`, {
+      await apiFetch(`${API_URL}/api/mode`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: newMode }),
@@ -113,8 +114,8 @@ function Settings({ onModeChange }) {
     try {
       // Fetch available tools and enabled tools
       const [toolsRes, enabledRes] = await Promise.all([
-        fetch(`${API_URL}/api/available-tools`),
-        fetch(`${API_URL}/api/enabled-tools`)
+        apiFetch(`${API_URL}/api/available-tools`),
+        apiFetch(`${API_URL}/api/enabled-tools`)
       ]);
       const toolsData = await toolsRes.json();
       const enabledData = await enabledRes.json();
@@ -151,7 +152,7 @@ function Settings({ onModeChange }) {
     }
     setAddLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/add-mcp-server`, {
+      const res = await apiFetch(`${API_URL}/api/add-mcp-server`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: addForm.name.trim(), config: cfg })
@@ -170,7 +171,7 @@ function Settings({ onModeChange }) {
 
   const handleRefreshServer = async (name) => {
     try {
-      await fetch(`${API_URL}/api/refresh-server-tools`, {
+      await apiFetch(`${API_URL}/api/refresh-server-tools`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name })
@@ -183,7 +184,7 @@ function Settings({ onModeChange }) {
 
   const handleRemoveServer = async (name) => {
     try {
-      await fetch(`${API_URL}/api/remove-mcp-server`, {
+      await apiFetch(`${API_URL}/api/remove-mcp-server`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name })
@@ -204,7 +205,7 @@ function Settings({ onModeChange }) {
     setRefreshing(true);
     setError(null);
     try {
-      await fetch(`${API_URL}/api/refresh-config`, { method: 'POST' });
+      await apiFetch(`${API_URL}/api/refresh-config`, { method: 'POST' });
       await fetchData();
     } catch (e) {
       setError('Failed to refresh config.');
@@ -221,7 +222,7 @@ function Settings({ onModeChange }) {
     }
     // Push a single server-level notification instead of one per tool
     const count = mcpTools.length;
-    await fetch(`${API_URL}/api/push-notification`, {
+    await apiFetch(`${API_URL}/api/push-notification`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -234,7 +235,7 @@ function Settings({ onModeChange }) {
   // Toggle a single tool
   const handleToolToggle = async (toolName, enable, silent = false, notify = true) => {
     try {
-      await fetch(`${API_URL}/api/${enable ? 'enable' : 'disable'}-tool`, {
+      await apiFetch(`${API_URL}/api/${enable ? 'enable' : 'disable'}-tool`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tool_name: toolName, notify })

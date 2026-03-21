@@ -5,7 +5,7 @@ import os
 import shutil
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 from pathlib import Path
 from dotenv import load_dotenv
 

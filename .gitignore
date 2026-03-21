@@ -60,3 +60,6 @@ test_data/CALGB50303/
 *.nii
 *.nii.gz
 mcp-monai/sample_data/
+
+# Test directory
+tests/

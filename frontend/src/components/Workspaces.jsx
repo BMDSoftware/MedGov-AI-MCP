@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { getApiUrl } from '../config';
-import './Directories.css';
+import './Workspaces.css';
 
 function classifyLine(msg) {
   if (msg.startsWith('[ERROR]')) return 'error';
@@ -140,11 +140,61 @@ function WorkspaceModal({ initial, onSave, onClose }) {
   const [path, setPath] = useState(initial?.path || '');
   const [prompt, setPrompt] = useState(initial?.custom_prompt || '');
   const [showBrowser, setShowBrowser] = useState(false);
+  const [mcpData, setMcpData] = useState({});
+  const [selectedTools, setSelectedTools] = useState(new Set(initial?.allowed_tools || []));
+  const [allTools, setAllTools] = useState(true);
+  const [expandedServers, setExpandedServers] = useState({});
+
+  useEffect(() => {
+    Promise.all([
+      fetch(getApiUrl('/api/available-tools')).then(r => r.json()),
+      fetch(getApiUrl('/api/enabled-tools')).then(r => r.json()),
+    ]).then(([toolsData, enabledTools]) => {
+      const grouped = {};
+      Object.entries(toolsData).forEach(([toolName, tool]) => {
+        const server = tool.server;
+        if (!grouped[server]) grouped[server] = [];
+        grouped[server].push(toolName);
+      });
+      setMcpData(grouped);
+      if (!initial?.allowed_tools) {
+        setSelectedTools(new Set(enabledTools));
+        setAllTools(true);
+      } else {
+        setSelectedTools(new Set(initial.allowed_tools));
+        setAllTools(false);
+      }
+    }).catch(() => {});
+  }, []);
+
+  function toggleServer(server, tools) {
+    setAllTools(false);
+    setSelectedTools(prev => {
+      const next = new Set(prev);
+      const allOn = tools.every(t => next.has(t));
+      tools.forEach(t => allOn ? next.delete(t) : next.add(t));
+      return next;
+    });
+  }
+
+  function toggleTool(toolName) {
+    setAllTools(false);
+    setSelectedTools(prev => {
+      const next = new Set(prev);
+      next.has(toolName) ? next.delete(toolName) : next.add(toolName);
+      return next;
+    });
+  }
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!name.trim() || !path.trim()) return;
-    onSave({ name: name.trim(), path: path.trim(), custom_prompt: prompt.trim() || null });
+    onSave({
+      name: name.trim(),
+      path: path.trim(),
+      custom_prompt: prompt.trim() || null,
+      allowed_tools: allTools ? null : [...selectedTools],
+    });
   }
 
   return (
@@ -191,6 +241,51 @@ function WorkspaceModal({ initial, onSave, onClose }) {
                 onChange={e => setPrompt(e.target.value)}
                 placeholder="e.g. These are chest CTs. Focus on lung nodules and generate a radlex report."
               />
+            </div>
+            <div className="form-group">
+              <label>Tools <span className="label-optional">(optional)</span></label>
+              <div className="tool-selector">
+                <label className="tool-all-toggle">
+                  <input type="checkbox" checked={allTools} onChange={e => setAllTools(e.target.checked)} />
+                  All tools (default)
+                </label>
+                {!allTools && Object.entries(mcpData).map(([server, tools]) => {
+                  const allOn = tools.every(t => selectedTools.has(t));
+                  const someOn = tools.some(t => selectedTools.has(t));
+                  const expanded = !!expandedServers[server];
+                  return (
+                    <div key={server} className="tool-server-group">
+                      <div className="tool-server-row">
+                        <input
+                          type="checkbox"
+                          checked={allOn}
+                          ref={el => { if (el) el.indeterminate = !allOn && someOn; }}
+                          onChange={() => toggleServer(server, tools)}
+                        />
+                        <button
+                          type="button"
+                          className="tool-server-toggle"
+                          onClick={() => setExpandedServers(prev => ({ ...prev, [server]: !prev[server] }))}
+                        >
+                          <span className="tool-server-name">{server}</span>
+                          <span className="tool-server-count">{tools.filter(t => selectedTools.has(t)).length}/{tools.length}</span>
+                          <span className={`tool-chevron ${expanded ? 'open' : ''}`}>›</span>
+                        </button>
+                      </div>
+                      {expanded && (
+                        <div className="tool-list">
+                          {tools.map(t => (
+                            <label key={t} className="tool-item">
+                              <input type="checkbox" checked={selectedTools.has(t)} onChange={() => toggleTool(t)} />
+                              {t.replace(`${server}.`, '').replace(/_/g, ' ').toLowerCase()}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
             <div className="modal-actions">
               <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>

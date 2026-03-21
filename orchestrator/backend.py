@@ -122,10 +122,23 @@ async def _watcher_execute(dir_id: str, files: list):
         )
     watcher_service.push_console(dir_id, "[AI] Starting autonomous analysis...")
     agent_decision.set_agent_type(True)
+    original_require_confirmation = agent_decision.require_confirmation
+    agent_decision.require_confirmation = False
+    allowed_tools = wd.get("allowed_tools")  # None = all tools, list = restricted set
+    original_agent_tools = None
+    if allowed_tools is not None:
+        original_agent_tools = set(agent_decision.agent_tools)
+        agent_decision.agent_tools = original_agent_tools & set(allowed_tools)
+        agent_decision._refresh_agent_components()
     try:
-        result = await agent_decision.execute_task(goal, session_id=current_session_id)
+        image_list = [(f, b"") for f in files]
+        result = await agent_decision.execute_task(goal, fileList=image_list, session_id=current_session_id)
     finally:
         agent_decision.set_agent_type(False)
+        agent_decision.require_confirmation = original_require_confirmation
+        if original_agent_tools is not None:
+            agent_decision.agent_tools = original_agent_tools
+            agent_decision._refresh_agent_components()
     if result and result.get("answer"):
         watcher_service.push_console(dir_id, f"[AI] {result['answer']}")
     watcher_service.push_console(dir_id, "[AI] Analysis complete.")
@@ -245,9 +258,10 @@ async def create_watched_directory(data: dict = Body(...)):
     name = data.get("name", "").strip()
     path = data.get("path", "").strip()
     custom_prompt = (data.get("custom_prompt") or "").strip() or None
+    allowed_tools = data.get("allowed_tools") or None
     if not name or not path:
         raise HTTPException(status_code=400, detail="name and path are required")
-    dir_id = db.create_watched_directory(name, path, custom_prompt)
+    dir_id = db.create_watched_directory(name, path, custom_prompt, allowed_tools)
     watcher_service.push_console(dir_id, f"[INFO] Directory '{name}' added.")
     wd = db.get_watched_directory(dir_id)
     watcher_service.start_watching(dir_id, wd["path"], wd["name"])
@@ -261,12 +275,15 @@ async def update_watched_directory(dir_id: str, data: dict = Body(...)):
     if not wd:
         raise HTTPException(status_code=404, detail="Not found")
     was_watching = watcher_service.is_watching(dir_id)
+    allowed_tools = data.get("allowed_tools")
     db.update_watched_directory(
         dir_id,
         name=data.get("name"),
         path=data.get("path"),
         custom_prompt=data.get("custom_prompt"),
-        enabled=data.get("enabled")
+        enabled=data.get("enabled"),
+        allowed_tools=allowed_tools if allowed_tools else None,
+        clear_allowed_tools=("allowed_tools" in data and not allowed_tools)
     )
     wd = db.get_watched_directory(dir_id)
     # Restart watcher if path changed while active
@@ -428,7 +445,7 @@ async def process_query(query: str = Body(..., media_type="text/plain")):
                         print(f"Using DB directory: {f['stored_path']}")
 
             if image_data:
-                result = await agent_decision.execute_task(query, imageList=image_data, session_id=current_session_id)
+                result = await agent_decision.execute_task(query, fileList=image_data, session_id=current_session_id)
             else:
                 result = await agent_decision.execute_task(query, session_id=current_session_id)
 

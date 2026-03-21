@@ -82,14 +82,14 @@ TOOL USAGE RULES:
         self.chat_history = history or []
         print("New Ollama chat session started.")
 
-    def generate_content(self, prompt: str, imageList: Any = None) -> Any:
+    def generate_content(self, prompt: str, fileList: Any = None) -> Any:
         """Send a message to Ollama with tool calling support."""
         if isinstance(prompt, list):
             prompt = " ".join(str(p) for p in prompt)
 
         # Add image context if available
-        if imageList:
-            image_paths = [fp for fp, _ in imageList]
+        if fileList:
+            image_paths = [fp for fp, _ in fileList]
             prompt += f"\n\nImage files available at: {', '.join(image_paths)}"
 
         # Add user message to history

@@ -25,11 +25,10 @@ class _Handler(FileSystemEventHandler):
         self.queue = queue
 
     def on_created(self, event):
-        if not event.is_directory:
-            asyncio.run_coroutine_threadsafe(
-                self.queue.put((self.dir_id, event.src_path)),
-                self.loop
-            )
+        asyncio.run_coroutine_threadsafe(
+            self.queue.put((self.dir_id, event.src_path)),
+            self.loop
+        )
 
 
 class WatcherService:

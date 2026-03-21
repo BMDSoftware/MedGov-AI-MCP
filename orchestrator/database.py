@@ -87,10 +87,17 @@ def init_db():
             name TEXT NOT NULL,
             path TEXT NOT NULL,
             custom_prompt TEXT,
+            allowed_tools TEXT,
             enabled INTEGER DEFAULT 1,
             created_at TEXT NOT NULL
         );
     """)
+    # Migration: add allowed_tools to existing databases
+    try:
+        conn.execute("ALTER TABLE watched_directories ADD COLUMN allowed_tools TEXT")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
     conn.commit()
     conn.close()
     print(f"Database initialized at {DB_PATH}")
@@ -392,13 +399,23 @@ def list_tasks(session_id: Optional[str] = None) -> List[Dict]:
 
 # --- Watched Directories ---
 
-def create_watched_directory(name: str, path: str, custom_prompt: Optional[str] = None) -> str:
+def _parse_watched_directory(row) -> Dict:
+    d = dict(row)
+    if d.get("allowed_tools"):
+        d["allowed_tools"] = json.loads(d["allowed_tools"])
+    else:
+        d["allowed_tools"] = None
+    return d
+
+
+def create_watched_directory(name: str, path: str, custom_prompt: Optional[str] = None,
+                              allowed_tools: Optional[List[str]] = None) -> str:
     dir_id = str(uuid.uuid4())
     now = datetime.now().isoformat()
     conn = _get_conn()
     conn.execute(
-        "INSERT INTO watched_directories (id, name, path, custom_prompt, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
-        (dir_id, name, path, custom_prompt, now)
+        "INSERT INTO watched_directories (id, name, path, custom_prompt, allowed_tools, enabled, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)",
+        (dir_id, name, path, custom_prompt, json.dumps(allowed_tools) if allowed_tools is not None else None, now)
     )
     conn.commit()
     conn.close()
@@ -409,18 +426,19 @@ def list_watched_directories() -> List[Dict]:
     conn = _get_conn()
     rows = conn.execute("SELECT * FROM watched_directories ORDER BY created_at").fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return [_parse_watched_directory(row) for row in rows]
 
 
 def get_watched_directory(dir_id: str) -> Optional[Dict]:
     conn = _get_conn()
     row = conn.execute("SELECT * FROM watched_directories WHERE id = ?", (dir_id,)).fetchone()
     conn.close()
-    return dict(row) if row else None
+    return _parse_watched_directory(row) if row else None
 
 
 def update_watched_directory(dir_id: str, name: Optional[str] = None, path: Optional[str] = None,
-                              custom_prompt: Optional[str] = None, enabled: Optional[bool] = None):
+                              custom_prompt: Optional[str] = None, enabled: Optional[bool] = None,
+                              allowed_tools: Optional[List[str]] = None, clear_allowed_tools: bool = False):
     conn = _get_conn()
     updates = []
     params = []
@@ -436,6 +454,12 @@ def update_watched_directory(dir_id: str, name: Optional[str] = None, path: Opti
     if enabled is not None:
         updates.append("enabled = ?")
         params.append(1 if enabled else 0)
+    if allowed_tools is not None:
+        updates.append("allowed_tools = ?")
+        params.append(json.dumps(allowed_tools))
+    elif clear_allowed_tools:
+        updates.append("allowed_tools = ?")
+        params.append(None)
     if not updates:
         conn.close()
         return

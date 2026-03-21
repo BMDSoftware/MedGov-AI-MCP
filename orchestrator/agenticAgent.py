@@ -208,12 +208,12 @@ CONVERSATION RULES:
 
 TOOL USAGE RULES:
 1. Only call a tool when the user requests an action that requires it AND the required parameters are available.
-2. NEVER invent file paths. If a tool needs a file path, use the one from "IMAGES AVAILABLE" in the context. If none is available, ask the user to upload or provide one.
+2. NEVER invent file paths. If a tool needs a file path, use the one from "FILES AVAILABLE" in the context. If none is available, ask the user to upload or provide one.
 3. For DICOM files (.dcm): parse the metadata first to extract modality and body part before selecting models or running inference.
 4. MONAI models require 3D volumes (.nii, .nii.gz). If the image is a single 2D slice, inform the user.
 5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
 6. After a tool returns results, summarize them clearly for the user.
-7. MULTI-FILE RULE: When multiple paths are listed in "IMAGES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
+7. MULTI-FILE RULE: When multiple paths are listed in "FILES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
 8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices that forms a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate or process individual files inside the directory."""
         
         if self.llm_client:
@@ -605,7 +605,7 @@ TOOL USAGE RULES:
                 "arguments": next_args,
                 "goal": pending["goal"],
                 "execution_history": execution_history,
-                "imageList": pending["imageList"],
+                "fileList": pending["fileList"],
                 "data": pending["data"],
                 "metadata": pending["metadata"],
                 "iterations_used": pending["iterations_used"],
@@ -642,7 +642,7 @@ TOOL USAGE RULES:
         return await self.execute_task(
             goal=pending["goal"],
             data=pending["data"],
-            imageList=pending["imageList"],
+            fileList=pending["fileList"],
             max_iterations=pending["max_iterations"] - pending["iterations_used"],
             metadata=pending["metadata"],
             session_id=pending.get("session_id"),
@@ -688,14 +688,14 @@ TOOL USAGE RULES:
         self.is_agent_autonomous = autonomous
         print(f"[agent] Autonomous execution set to {autonomous}")
 
-    async def execute_task(self, goal: str, data: Any = None, imageList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None) -> Optional[Dict]:
+    async def execute_task(self, goal: str, data: Any = None, fileList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 
         Args:
             goal: Natural language description of what to accomplish
             data: Optional data context (e.g., patient data to save)
-            imageList: Optional list of images for processing
+            fileList: Optional list of images for processing
             max_iterations: Maximum number of tool executions allowed
             metadata: Optional dict with modality, body_part for filtering models
             _resume_history: Optional execution history to resume from
@@ -712,8 +712,8 @@ TOOL USAGE RULES:
         self.logger.info(f"Max iterations: {max_iterations}")
         if metadata:
             self.logger.info(f"Metadata: {json.dumps(metadata, indent=2)}")
-        if imageList:
-            self.logger.info(f"Images provided: {len(imageList)} file(s)")
+        if fileList:
+            self.logger.info(f"Files provided: {len(fileList)} file(s)")
         if data:
             self.logger.info(f"Data provided: {len(str(data))} chars")
         
@@ -727,8 +727,8 @@ TOOL USAGE RULES:
 
         # Extract image path for workflow
         image_path = None
-        if imageList and isinstance(imageList, list) and imageList:
-            image_path = imageList[0][0]  # First image's temp file path
+        if fileList and isinstance(fileList, list) and fileList:
+            image_path = fileList[0][0]  # First image's temp file path
             print(f"Image path for workflow: {image_path}")
 
         # Both Ollama and Gemini now use true agentic approach
@@ -746,16 +746,16 @@ TOOL USAGE RULES:
                 if data:
                     data_context = f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)}" if len(json.dumps(data)) > 500 else f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)}"
                 
-                image_context = "\n\nIMAGES AVAILABLE: None. User has not uploaded any images."
+                image_context = "\n\nFILES AVAILABLE: None. User has not uploaded any images."
                 images_for_llm = None  # Only pass 2D images to LLM (if supported)
 
-                if imageList:
-                    # Handle imageList as (temp_filepath, content) tuples
-                    if isinstance(imageList, list) and imageList:
+                if fileList:
+                    # Handle fileList as (filepath, content) tuples
+                    if isinstance(fileList, list) and fileList:
                         # Separate files and directories so the LLM knows which is which
                         file_paths = []
                         dir_paths = []
-                        for temp_filepath, _ in imageList:
+                        for temp_filepath, _ in fileList:
                             if os.path.isdir(temp_filepath):
                                 dir_paths.append(temp_filepath)
                             else:
@@ -766,11 +766,11 @@ TOOL USAGE RULES:
                             parts.append("Files: " + ", ".join(file_paths))
                         if dir_paths:
                             parts.append("DICOM series directories (treat each as a single 3D volume — use the directory path directly): " + ", ".join(f"[DICOM SERIES DIR] {p}" for p in dir_paths))
-                        image_context = "\n\nIMAGES AVAILABLE: Yes\n" + "\n".join(parts)
+                        image_context = "\n\nFILES AVAILABLE: Yes\n" + "\n".join(parts)
 
                         # Only pass small 2D images to LLM, skip large 3D medical files and directories
                         images_for_llm = []
-                        for temp_filepath, content in imageList:
+                        for temp_filepath, content in fileList:
                             # Skip directories — cannot be sent to LLM as images
                             if os.path.isdir(temp_filepath):
                                 continue
@@ -784,7 +784,7 @@ TOOL USAGE RULES:
                         if not images_for_llm:
                             images_for_llm = None
                     else:
-                        image_context = "\n\nIMAGES AVAILABLE:\nImage data provided"
+                        image_context = "\n\nFILES AVAILABLE:\nImage data provided"
 
                 # Build session context from previous queries
                 session_ctx = self.session_context.build_context_string()
@@ -1074,7 +1074,7 @@ Your decision:"""
                             "arguments": arguments,
                             "goal": goal,
                             "execution_history": execution_history,
-                            "imageList": imageList,
+                            "fileList": fileList,
                             "data": data,
                             "metadata": metadata,
                             "iterations_used": iterations,

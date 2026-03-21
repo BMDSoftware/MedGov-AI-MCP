@@ -531,15 +531,16 @@ def get_monai_info() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def analyze_image(path: str) -> Dict[str, Any]:
+def analyze_image(image_path: str) -> Dict[str, Any]:
     """
     Analyze a medical image to detect its type, modality (CT/MRI/X-ray), and characteristics.
     This should be called FIRST to understand what kind of image you're working with.
 
     Returns image metadata, detected modality, and recommended models for analysis.
 
-    :param path: Path to the medical image file or DICOM series directory
+    :param image_path: Path to the medical image file or DICOM series directory
     """
+    path = image_path
     is_dir = os.path.isdir(path)
     if not os.path.exists(path) and not is_dir:
         return {"error": f"File not found: {path}", "path": path}

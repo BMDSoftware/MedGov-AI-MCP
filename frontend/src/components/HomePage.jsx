@@ -193,33 +193,6 @@ function HomePage({ onNavigate, currentSessionId, runningTaskCount }) {
         </div>
       </section>
 
-      {/* Recent sessions */}
-      {!loading && sessions.length > 0 && (
-        <section className="home-sessions-section">
-          <div className="home-sessions-inner">
-            <div className="home-sessions-header">
-              <p className="home-section-label">Recent Sessions</p>
-              <button className="home-sessions-viewall" onClick={() => onNavigate('history')}>
-                View all
-              </button>
-            </div>
-            <div className="home-sessions-list">
-              {sessions.map(s => (
-                <div
-                  key={s.id}
-                  className={`home-session-row${s.id === currentSessionId ? ' active' : ''}`}
-                >
-                  <span className="home-session-name">{s.name}</span>
-                  {s.id === currentSessionId && (
-                    <span className="home-session-active-badge">Active</span>
-                  )}
-                  <span className="home-session-time">{formatDate(s.updated_at)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
 
       {/* Footer */}
       <footer className="home-footer">

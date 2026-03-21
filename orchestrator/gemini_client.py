@@ -170,7 +170,7 @@ TOOL USAGE RULES:
 7. MULTI-FILE RULE: When multiple paths are listed in "IMAGES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
 8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices forming a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate individual files inside the directory."""
     
-    def generate_content(self, prompt: str, imageList: Any = None) -> Any:
+    def generate_content(self, prompt: str, fileList: Any = None) -> Any:
         """Send a message to the stateful chat session with optional image handling."""
         if isinstance(prompt, list):
             prompt = " ".join(map(str, prompt))
@@ -179,8 +179,8 @@ TOOL USAGE RULES:
         content_parts = [prompt]
         
         # Prepare content with actual images for Gemini
-        if imageList:
-            for temp_filepath, content in imageList:
+        if fileList:
+            for temp_filepath, content in fileList:
                 # Skip directories (DICOM series) and 3D medical formats
                 if os.path.isdir(temp_filepath):
                     print(f"Skipping DICOM series directory (not sendable to Gemini): {os.path.basename(temp_filepath)}")

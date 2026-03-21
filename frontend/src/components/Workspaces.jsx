@@ -115,12 +115,18 @@ function DirBrowser({ current, onSelect, onClose }) {
 function ConsolePanel({ dir, onClose }) {
   const [lines, setLines] = useState([]);
   const bottomRef = useRef(null);
+  const sseBaselineRef = useRef(null);
 
   useEffect(() => {
     apiFetch(getApiUrl(`/api/watched-directories/${dir.id}/console`))
       .then(r => r.json())
-      .then(setLines)
-      .catch(() => {});
+      .then(data => {
+        setLines(data);
+        sseBaselineRef.current = data.length > 0
+          ? data[data.length - 1].timestamp
+          : new Date().toISOString();
+      })
+      .catch(() => { sseBaselineRef.current = new Date().toISOString(); });
   }, [dir.id]);
 
   useEffect(() => {
@@ -129,6 +135,7 @@ function ConsolePanel({ dir, onClose }) {
       try {
         const data = JSON.parse(e.data);
         if (data.type === 'directory_console' && data.dir_id === dir.id) {
+          if (sseBaselineRef.current && data.timestamp <= sseBaselineRef.current) return;
           setLines(prev => [...prev, { message: data.message, timestamp: data.timestamp }]);
         }
       } catch {}
@@ -167,15 +174,144 @@ function ConsolePanel({ dir, onClose }) {
 
 // ─── Add / Edit Modal ─────────────────────────────────────────────────────────
 
-function WorkspaceModal({ initial, onSave, onClose }) {
+function WorkspaceModal({ initial, onSave, onClose, workspaces = [] }) {
   const [name, setName] = useState(initial?.name || '');
   const [path, setPath] = useState(initial?.path || '');
-  const [prompt, setPrompt] = useState(initial?.custom_prompt || '');
+  const initialPrompt = initial?.custom_prompt || '';
   const [showBrowser, setShowBrowser] = useState(false);
   const [mcpData, setMcpData] = useState({});
   const [selectedTools, setSelectedTools] = useState(new Set(initial?.allowed_tools || []));
   const [allTools, setAllTools] = useState(true);
   const [expandedServers, setExpandedServers] = useState({});
+  const [mention, setMention] = useState({ active: false, query: '' });
+  const [mentionIdx, setMentionIdx] = useState(0);
+  const editorRef = useRef(null);
+
+  const mentionCandidates = workspaces
+    .filter(w => (!initial || w.id !== initial.id) && w.name.toLowerCase().includes(mention.query.toLowerCase()));
+
+  // Read the contentEditable DOM and produce a resolved prompt string
+  function readEditorContent(resolve) {
+    const el = editorRef.current;
+    if (!el) return '';
+    let result = '';
+    for (const node of el.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        result += node.textContent;
+      } else if (node.dataset?.wsPath && resolve) {
+        result += node.dataset.wsPath;
+      } else if (node.dataset?.wsName) {
+        result += `#${node.dataset.wsName}`;
+      } else {
+        result += node.textContent;
+      }
+    }
+    return result;
+  }
+
+  // Detect # trigger from caret position in contentEditable
+  function detectMention() {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return setMention({ active: false, query: '' });
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return setMention({ active: false, query: '' });
+    const text = node.textContent.slice(0, range.startOffset);
+    const hashIdx = text.lastIndexOf('#');
+    if (hashIdx >= 0 && (hashIdx === 0 || /\s/.test(text[hashIdx - 1]))) {
+      const query = text.slice(hashIdx + 1);
+      if (!/\s/.test(query)) {
+        setMention({ active: true, query, node, hashIdx });
+        setMentionIdx(0);
+        return;
+      }
+    }
+    setMention({ active: false, query: '' });
+  }
+
+  function handleEditorInput() {
+    detectMention();
+  }
+
+  function handleEditorKeyDown(e) {
+    if (mention.active && mentionCandidates.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionIdx(i => (i + 1) % mentionCandidates.length);
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionIdx(i => (i - 1 + mentionCandidates.length) % mentionCandidates.length);
+        return;
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        insertMention(mentionCandidates[mentionIdx]);
+        return;
+      } else if (e.key === 'Escape') {
+        setMention({ active: false, query: '' });
+        return;
+      }
+    }
+  }
+
+  function insertMention(ws) {
+    const { node, hashIdx, query } = mention;
+    if (!node) return;
+
+    // Split the text node: before the #, and after the query
+    const textBefore = node.textContent.slice(0, hashIdx);
+    const textAfter = node.textContent.slice(hashIdx + 1 + query.length);
+
+    // Create the tag span
+    const tag = document.createElement('span');
+    tag.className = 'prompt-tag';
+    tag.contentEditable = 'false';
+    tag.dataset.wsName = ws.name;
+    tag.dataset.wsPath = ws.path;
+    tag.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg> ${ws.name}`;
+
+    const parent = node.parentNode;
+
+    // Replace: textBefore + tag + space + textAfter
+    const beforeNode = document.createTextNode(textBefore);
+    const afterNode = document.createTextNode('\u00A0' + textAfter);
+
+    parent.insertBefore(beforeNode, node);
+    parent.insertBefore(tag, node);
+    parent.insertBefore(afterNode, node);
+    parent.removeChild(node);
+
+    // Place caret after the tag
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.setStart(afterNode, 1);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    setMention({ active: false, query: '' });
+    editorRef.current?.focus();
+  }
+
+  // Initialize editor content from saved prompt (which has paths, need to convert back to tags)
+  useEffect(() => {
+    if (!editorRef.current || !initialPrompt) return;
+    // Build a map of path -> workspace for reverse lookup
+    const pathToWs = {};
+    workspaces.forEach(ws => { pathToWs[ws.path] = ws; });
+
+    let html = initialPrompt.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]);
+    // Replace known workspace paths with tag spans
+    for (const ws of workspaces) {
+      if (!initial || ws.id !== initial.id) {
+        const escaped = ws.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        html = html.replace(new RegExp(escaped, 'g'),
+          `<span class="prompt-tag" contenteditable="false" data-ws-name="${ws.name}" data-ws-path="${ws.path}"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg> ${ws.name}</span>`
+        );
+      }
+    }
+    editorRef.current.innerHTML = html;
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -221,10 +357,12 @@ function WorkspaceModal({ initial, onSave, onClose }) {
   function handleSubmit(e) {
     e.preventDefault();
     if (!name.trim() || !path.trim()) return;
+    const resolvedPrompt = readEditorContent(true).trim() || null;
+    console.log('[WorkspaceModal] custom_prompt:', resolvedPrompt);
     onSave({
       name: name.trim(),
       path: path.trim(),
-      custom_prompt: prompt.trim() || null,
+      custom_prompt: resolvedPrompt,
       allowed_tools: allTools ? null : [...selectedTools],
     });
   }
@@ -267,11 +405,31 @@ function WorkspaceModal({ initial, onSave, onClose }) {
             </div>
             <div className="form-group">
               <label>Custom prompt <span className="label-optional">(optional)</span></label>
-              <textarea
-                value={prompt}
-                onChange={e => setPrompt(e.target.value)}
-                placeholder="e.g. These are chest CTs. Focus on lung nodules and generate a radlex report."
-              />
+              <div className="prompt-mention-wrap">
+                <div
+                  ref={editorRef}
+                  className="prompt-editable"
+                  contentEditable
+                  suppressContentEditableWarning
+                  onInput={handleEditorInput}
+                  onKeyDown={handleEditorKeyDown}
+                  data-placeholder="e.g. These are chest CTs. Focus on lung nodules. Type # to reference another workspace."
+                />
+                {mention.active && mentionCandidates.length > 0 && (
+                  <div className="mention-dropdown">
+                    {mentionCandidates.map((ws, i) => (
+                      <div
+                        key={ws.id}
+                        className={`mention-item ${i === mentionIdx ? 'mention-item-active' : ''}`}
+                        onMouseDown={() => insertMention(ws)}
+                      >
+                        <span className="mention-name">{ws.name}</span>
+                        <span className="mention-path">{ws.path}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="form-group">
               <label>Tools <span className="label-optional">(optional)</span></label>
@@ -331,7 +489,7 @@ function WorkspaceModal({ initial, onSave, onClose }) {
       {showBrowser && (
         <DirBrowser
           current={path || '/'}
-          onSelect={p => { setPath(p); setShowBrowser(false); }}
+          onSelect={p => { setPath(p); if (!name.trim()) setName(p.split('/').filter(Boolean).pop() || ''); setShowBrowser(false); }}
           onClose={() => setShowBrowser(false)}
         />
       )}
@@ -573,11 +731,11 @@ export default function Workspaces() {
       )}
 
       {showModal && (
-        <WorkspaceModal onSave={handleAdd} onClose={() => setShowModal(false)} />
+        <WorkspaceModal onSave={handleAdd} onClose={() => setShowModal(false)} workspaces={dirs} />
       )}
 
       {editTarget && (
-        <WorkspaceModal initial={editTarget} onSave={handleEdit} onClose={() => setEditTarget(null)} />
+        <WorkspaceModal initial={editTarget} onSave={handleEdit} onClose={() => setEditTarget(null)} workspaces={dirs} />
       )}
     </div>
   );

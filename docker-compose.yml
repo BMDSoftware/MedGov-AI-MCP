@@ -8,11 +8,12 @@ services:
     volumes:
       - ./orchestrator/data:/app/orchestrator/data         # uploads + DB persist
       - ./mcp-monai/bundles:/app/mcp-monai/bundles         # model bundles persist
-      # Watched directories: mount the paths you want the AI to be able to monitor.
-      # The path inside the container must match what you enter in the Directories UI.
-      # Example: - /home:/home  (gives access to all home directories)
-      # Uncomment whichever you need, or add your own. You can have multiple.
-      - /home:/home
+      - ./orchestrator/workspaces:/app/workspaces            # analysis results (read-write)
+      # User filesystem: mounted read-only so the workspace directory picker
+      # can browse the user's files but the orchestrator cannot modify them.
+      # /Users for macOS, /home for Linux.
+      - /Users:/Users:ro
+      - /home:/home:ro
     env_file: ./orchestrator/.env
     environment:
       - APP_ROOT=/app

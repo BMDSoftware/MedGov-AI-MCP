@@ -32,12 +32,17 @@ Thumbs.db
 
 orchestrator/logs/
 
+
 # Database
 *.db
 *.sqlite
 
 # Persistent data (uploads, cache)
 orchestrator/data/
+
+# Analysis results (keep folder, ignore contents)
+orchestrator/workspaces/*
+!orchestrator/workspaces/.gitkeep
 
 # mem0 vector store data
 orchestrator/.mem0_data/
@@ -63,3 +68,5 @@ mcp-monai/sample_data/
 
 # Test directory
 tests/
+
+.claude/

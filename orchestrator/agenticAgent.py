@@ -525,13 +525,15 @@ TOOL USAGE RULES:
         # results confirmed so far (from before this call) + this call's result
         turn_accumulated_results = list(pending.get("turn_accumulated_results", [])) + [(tool_name, confirmed_result)]
         turn_remaining_calls = list(pending.get("turn_remaining_calls", []))
+        _pending_user_id = pending.get("user_id")
+        _pending_session_id = pending.get("session_id")
 
         # Process any built-in tools at the front of the remaining calls immediately
         while turn_remaining_calls:
             next_name, next_args = turn_remaining_calls[0]
             if next_name == "list_tasks":
                 turn_remaining_calls.pop(0)
-                tasks = db.list_tasks(user_id=user_id) if user_id else db.list_tasks(session_id=session_id)
+                tasks = db.list_tasks(user_id=_pending_user_id) if _pending_user_id else db.list_tasks(session_id=_pending_session_id)
                 _summary = [
                     {
                         "id": t["id"],

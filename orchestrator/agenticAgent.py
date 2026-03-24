@@ -531,10 +531,10 @@ TOOL USAGE RULES:
             next_name, next_args = turn_remaining_calls[0]
             if next_name == "list_tasks":
                 turn_remaining_calls.pop(0)
-                tasks = db.list_tasks(session_id=session_id)
+                tasks = db.list_tasks(user_id=user_id) if user_id else db.list_tasks(session_id=session_id)
                 _summary = [
                     {
-                        "id": t["id"][:8],
+                        "id": t["id"],
                         "type": t["task_type"],
                         "description": t["description"],
                         "status": t["status"],
@@ -640,6 +640,7 @@ TOOL USAGE RULES:
                 "iterations_used": pending["iterations_used"],
                 "max_iterations": pending["max_iterations"],
                 "session_id": pending.get("session_id"),
+                "user_id": pending.get("user_id"),
                 "turn_accumulated_results": turn_accumulated_results,
                 "turn_remaining_calls": turn_remaining_calls,
             }
@@ -675,6 +676,7 @@ TOOL USAGE RULES:
             max_iterations=pending["max_iterations"] - pending["iterations_used"],
             metadata=pending["metadata"],
             session_id=pending.get("session_id"),
+            user_id=pending.get("user_id"),
             _resume_history=execution_history,
             _resume_response=llm_response if is_gemini else None
         )
@@ -717,7 +719,7 @@ TOOL USAGE RULES:
         self.is_agent_autonomous = autonomous
         print(f"[agent] Autonomous execution set to {autonomous}")
 
-    async def execute_task(self, goal: str, data: Any = None, fileList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None) -> Optional[Dict]:
+    async def execute_task(self, goal: str, data: Any = None, fileList: Any = None, max_iterations: int = 20, metadata: Dict = None, _resume_history: List = None, _resume_response: Optional[Any] = None, session_id: str = None, user_id: str = None) -> Optional[Dict]:
         """
         Truly autonomous task execution - agent reasons about tools and executes
 
@@ -974,10 +976,10 @@ Your decision:"""
                     # --- Built-in tool intercept ---
                     # Handle built-in tools locally without going to MCP
                     if tool_name == "list_tasks":
-                        tasks = db.list_tasks(session_id=session_id)
+                        tasks = db.list_tasks(user_id=user_id) if user_id else db.list_tasks(session_id=session_id)
                         summary = [
                             {
-                                "id": t["id"][:8],
+                                "id": t["id"],
                                 "type": t["task_type"],
                                 "description": t["description"],
                                 "status": t["status"],
@@ -1141,6 +1143,7 @@ Your decision:"""
                             "iterations_used": iterations,
                             "max_iterations": max_iterations,
                             "session_id": session_id,
+                            "user_id": user_id,
                             "turn_accumulated_results": list(_turn_results),
                             "turn_remaining_calls": _remaining_calls,
                         }

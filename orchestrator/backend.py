@@ -485,60 +485,88 @@ async def change_agent_type(data: str = Body(...), current_user: dict = Depends(
 
 @app.post("/api/process-query", tags=["agent"], summary="Send a natural language query to the AI agent")
 async def process_query(query: str = Body(..., media_type="text/plain"), current_user: dict = Depends(get_current_user)):
+    """
+    Streams the response as newline-delimited JSON so proxies and load
+    balancers with short idle timeouts (e.g. 60 s on many cloud platforms)
+    don't 504 during long agentic loops.  The frontend reads the stream and
+    parses the final JSON line; intermediate lines are SSE-style keepalive
+    comments that keep the TCP connection alive.
+    """
     print(f"Processing ad-hoc query: {query}")
     uid = current_user["user_id"]
     agent = await get_or_create_agent(uid)
     state = _get_user_state(uid)
     if not state.current_session_id:
         state.current_session_id = db.create_session(user_id=uid)
-    try:
-        session_files = db.get_session_files(state.current_session_id)
 
-        if not state.uploaded_files and not session_files and not state.uploaded_dirs:
-            result = await agent.execute_task(query, session_id=state.current_session_id)
-        else:
-            image_data = []
-            if state.uploaded_files:
-                for filename, contents in state.uploaded_files:
-                    stored_path = state.temp_file_paths.get(filename)
-                    if stored_path and os.path.exists(stored_path):
-                        image_data.append((stored_path, contents))
-            elif session_files:
-                for f in session_files:
-                    if f.get("file_type") == "dicom_dir":
-                        continue
-                    path = f["stored_path"]
-                    if os.path.exists(path):
-                        with open(path, "rb") as fh:
-                            contents = fh.read()
-                        image_data.append((path, contents))
+    async def _run_and_stream():
+        try:
+            session_files = db.get_session_files(state.current_session_id)
 
-            for dir_path in state.uploaded_dirs:
-                if os.path.isdir(dir_path):
-                    image_data.append((dir_path, b""))
-
-            if not image_data or all(p == b"" for _, p in image_data):
-                session_dirs = [f for f in session_files if f.get("file_type") == "dicom_dir"]
-                for f in session_dirs:
-                    if os.path.isdir(f["stored_path"]) and f["stored_path"] not in state.uploaded_dirs:
-                        image_data.append((f["stored_path"], b""))
-
-            if image_data:
-                result = await agent.execute_task(query, fileList=image_data, session_id=state.current_session_id)
+            if not state.uploaded_files and not session_files and not state.uploaded_dirs:
+                execute_coro = agent.execute_task(query, session_id=state.current_session_id, user_id=uid)
             else:
-                result = await agent.execute_task(query, session_id=state.current_session_id)
+                image_data = []
+                if state.uploaded_files:
+                    for filename, contents in state.uploaded_files:
+                        stored_path = state.temp_file_paths.get(filename)
+                        if stored_path and os.path.exists(stored_path):
+                            image_data.append((stored_path, contents))
+                elif session_files:
+                    for f in session_files:
+                        if f.get("file_type") == "dicom_dir":
+                            continue
+                        path = f["stored_path"]
+                        if os.path.exists(path):
+                            with open(path, "rb") as fh:
+                                contents = fh.read()
+                            image_data.append((path, contents))
 
-        db.save_message(state.current_session_id, "user", query)
-        if isinstance(result, dict):
-            agent_text = result.get("answer") or result.get("response") or result.get("error") or ""
-        else:
-            agent_text = str(result)
-        if agent_text:
-            db.save_message(state.current_session_id, "assistant", agent_text)
-        return {"result": result}
-    except Exception as e:
-        print(f"Error processing query: {e}")
-        return {"result": {"error": str(e)}}
+                for dir_path in state.uploaded_dirs:
+                    if os.path.isdir(dir_path):
+                        image_data.append((dir_path, b""))
+
+                if not image_data or all(p == b"" for _, p in image_data):
+                    session_dirs = [f for f in session_files if f.get("file_type") == "dicom_dir"]
+                    for f in session_dirs:
+                        if os.path.isdir(f["stored_path"]) and f["stored_path"] not in state.uploaded_dirs:
+                            image_data.append((f["stored_path"], b""))
+
+                if image_data:
+                    execute_coro = agent.execute_task(query, fileList=image_data, session_id=state.current_session_id, user_id=uid)
+                else:
+                    execute_coro = agent.execute_task(query, session_id=state.current_session_id, user_id=uid)
+
+            # Run agent concurrently; emit a keepalive comment every 15 s so
+            # upstream proxies with short idle timeouts don't drop the connection.
+            task = asyncio.ensure_future(execute_coro)
+            while not task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+
+            result = task.result()
+
+            db.save_message(state.current_session_id, "user", query)
+            if isinstance(result, dict):
+                agent_text = result.get("answer") or result.get("response") or result.get("error") or ""
+            else:
+                agent_text = str(result)
+            if agent_text:
+                db.save_message(state.current_session_id, "assistant", agent_text)
+
+            yield json.dumps({"result": result}) + "\n"
+
+        except Exception as e:
+            print(f"Error processing query: {e}")
+            yield json.dumps({"result": {"error": str(e)}}) + "\n"
+
+    return StreamingResponse(
+        _run_and_stream(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no"},
+    )
 
 
 
@@ -765,16 +793,40 @@ async def get_pending_tool(current_user: dict = Depends(get_current_user)):
     return {"pending": False}
 
 
+def _stream_agent_coro(coro):
+    """Wrap an agent coroutine in a keepalive streaming generator.
+
+    Emits ': keepalive' comment lines every 15 s while the coroutine is
+    running, then yields the JSON result as the final line.  This prevents
+    cloud load-balancers with short idle timeouts from issuing 504s during
+    long agentic loops.
+    """
+    async def _gen():
+        try:
+            task = asyncio.ensure_future(coro)
+            while not task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+            result = task.result()
+            yield json.dumps({"result": result}) + "\n"
+        except Exception as e:
+            yield json.dumps({"result": {"error": str(e)}}) + "\n"
+
+    return StreamingResponse(
+        _gen(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/api/confirm-tool", tags=["agent"], summary="Confirm and execute the pending tool call")
 async def confirm_tool(current_user: dict = Depends(get_current_user)):
     uid = current_user["user_id"]
     agent = await get_or_create_agent(uid)
     state = _get_user_state(uid)
-    try:
-        result = await agent.confirm_tool_execution(session_id=state.current_session_id)
-        return {"result": result}
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Tool execution failed: {e}")
+    return _stream_agent_coro(agent.confirm_tool_execution(session_id=state.current_session_id))
 
 
 @app.post("/api/deny-tool", tags=["agent"], summary="Cancel the pending tool call")

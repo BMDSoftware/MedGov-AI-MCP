@@ -327,7 +327,9 @@ function App() {
     setIsProcessing(true);
     try {
       const response = await apiFetch(getApiUrl('/api/confirm-tool'), { method: 'POST' });
-      const data = await safeJson(response);
+      const text = await response.text();
+      const jsonLine = text.split('\n').filter(l => l.trim() && !l.startsWith(':')).pop();
+      const data = jsonLine ? JSON.parse(jsonLine) : { result: { error: 'Empty response' } };
       setRunningTool(null);
       if (data.result?.type === 'confirmation_required') {
         // Another tool needs confirmation
@@ -625,7 +627,13 @@ function App() {
                     headers: { 'Content-Type': 'text/plain' },
                     body: currentQuery
                   });
-                  const data = await safeJson(response);
+                  // Response is ndjson: keepalive comment lines followed by one JSON line.
+                  const text = await response.text();
+                  const jsonLine = text.split('\n').filter(l => l.trim() && !l.startsWith(':')).pop();
+                  if (!jsonLine) throw new Error('Empty response from server');
+                  let data;
+                  try { data = JSON.parse(jsonLine); }
+                  catch { throw new Error(`Unexpected response: ${jsonLine.slice(0, 120)}`); }
 
                   setMessages(prev => prev.filter(m => !m.isLoading));
 

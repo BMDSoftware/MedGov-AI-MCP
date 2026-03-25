@@ -501,7 +501,7 @@ function App() {
         ) : page === 'report' ? (
           <Report refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />
         ) : page === 'workspaces' ? (
-          <Workspaces />
+          <Workspaces appMode={appMode} />
         ) : page === 'history' ? (
           <Sessions onLoadSession={(data) => {
             if (!data) return;

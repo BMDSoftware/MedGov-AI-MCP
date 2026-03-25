@@ -401,6 +401,64 @@ async def get_directory_console(dir_id: str, current_user: dict = Depends(get_cu
     return watcher_service.get_console_log(dir_id)
 
 
+@app.post("/api/watched-directories/{dir_id}/import-files",
+          tags=["system"],
+          summary="Import files directly into a workspace directory (debug mode)")
+async def import_files_to_workspace(
+    dir_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload files directly into a watched directory's path. Preserves relative directory structure."""
+    wd = db.get_watched_directory(dir_id)
+    if not wd or wd.get("user_id") != current_user["user_id"]:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    target_path = Path(wd["path"])
+    if not target_path.exists():
+        try:
+            target_path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            raise HTTPException(status_code=403, detail="Cannot create workspace directory — path may be read-only.")
+
+    # Check writability
+    try:
+        test_file = target_path / ".write_test"
+        test_file.touch()
+        test_file.unlink()
+    except OSError:
+        raise HTTPException(
+            status_code=403,
+            detail="Workspace path is read-only. Use a workspace under /app/workspaces for import."
+        )
+
+    form = await request.form(max_files=10_000, max_fields=10_000)
+    files = [v for k, v in form.multi_items() if hasattr(v, 'read')]
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    saved_count = 0
+    total_size = 0
+    for f in files:
+        contents = await f.read()
+        rel_path = f.filename or f"file_{saved_count}"
+        dest = target_path / rel_path
+        # Skip hidden/junk files
+        if dest.name.startswith('.') or dest.name == 'DS_Store':
+            continue
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(dest, "wb") as out:
+            out.write(contents)
+        saved_count += 1
+        total_size += len(contents)
+
+    watcher_service.push_console(
+        dir_id, f"[INFO] Imported {saved_count} files ({total_size} bytes) via debug upload"
+    )
+    return {"status": "success", "file_count": saved_count, "total_size": total_size, "target_path": str(target_path)}
+
+
 @app.get("/api/browse-directory", tags=["system"], summary="Browse filesystem directories for the directory picker")
 async def browse_directory(path: str = "/", current_user: dict = Depends(get_current_user)):
     path = os.path.abspath(path)
@@ -414,6 +472,20 @@ async def browse_directory(path: str = "/", current_user: dict = Depends(get_cur
         return {"path": path, "parent": parent, "entries": entries}
     except PermissionError:
         return {"path": path, "parent": str(Path(path).parent), "entries": [], "error": "Permission denied"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/create-directory", tags=["system"], summary="Create a new directory on the filesystem")
+async def create_directory(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    path = (data.get("path") or "").strip()
+    if not path or not os.path.isabs(path):
+        raise HTTPException(status_code=400, detail="An absolute path is required")
+    try:
+        os.makedirs(path, exist_ok=True)
+        return {"path": os.path.abspath(path), "created": True}
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

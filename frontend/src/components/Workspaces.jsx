@@ -20,6 +20,9 @@ import {
   MdKeyboardArrowDown,
   MdOutlineEditNote,
   MdFolderSpecial,
+  MdCreateNewFolder,
+  MdCheck,
+  MdUploadFile,
 } from 'react-icons/md';
 import './Workspaces.css';
 
@@ -48,9 +51,12 @@ function DirBrowser({ current, onSelect, onClose }) {
   const [parent, setParent] = useState('/');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [newFolder, setNewFolder] = useState({ active: false, name: '', error: '' });
+  const newFolderRef = useRef(null);
 
   function navigate(path) {
     setLoading(true);
+    setNewFolder({ active: false, name: '', error: '' });
     apiFetch(getApiUrl(`/api/browse-directory?path=${encodeURIComponent(path)}`))
       .then(r => r.json())
       .then(data => {
@@ -63,7 +69,28 @@ function DirBrowser({ current, onSelect, onClose }) {
       .finally(() => setLoading(false));
   }
 
+  function handleCreateFolder() {
+    const folderName = newFolder.name.trim();
+    if (!folderName) return;
+    const fullPath = browsePath === '/' ? `/${folderName}` : `${browsePath}/${folderName}`;
+    apiFetch(getApiUrl('/api/create-directory'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: fullPath })
+    })
+      .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed'); });
+        return r.json();
+      })
+      .then(data => {
+        setNewFolder({ active: false, name: '', error: '' });
+        navigate(data.path);
+      })
+      .catch(err => setNewFolder(prev => ({ ...prev, error: err.message })));
+  }
+
   useEffect(() => { navigate(current || '/'); }, []);
+  useEffect(() => { if (newFolder.active && newFolderRef.current) newFolderRef.current.focus(); }, [newFolder.active]);
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -86,9 +113,32 @@ function DirBrowser({ current, onSelect, onClose }) {
         <div className="browser-entries">
           {loading && <div className="browser-loading">Loading...</div>}
           {error && <div className="browser-error">{error}</div>}
-          {!loading && entries.length === 0 && !error && (
+          {!loading && entries.length === 0 && !error && !newFolder.active && (
             <div className="browser-empty">No subdirectories</div>
           )}
+          {newFolder.active && (
+            <div className="browser-new-folder-row">
+              <MdCreateNewFolder className="browser-entry-icon new-folder-icon" />
+              <input
+                ref={newFolderRef}
+                className="new-folder-input"
+                value={newFolder.name}
+                onChange={e => setNewFolder(prev => ({ ...prev, name: e.target.value, error: '' }))}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleCreateFolder();
+                  if (e.key === 'Escape') setNewFolder({ active: false, name: '', error: '' });
+                }}
+                placeholder="Folder name"
+              />
+              <button className="btn-new-folder-confirm" onClick={handleCreateFolder} title="Create">
+                <MdCheck size={16} />
+              </button>
+              <button className="btn-new-folder-cancel" onClick={() => setNewFolder({ active: false, name: '', error: '' })} title="Cancel">
+                <MdClose size={16} />
+              </button>
+            </div>
+          )}
+          {newFolder.error && <div className="browser-error">{newFolder.error}</div>}
           {entries.map(e => (
             <div key={e.path} className="browser-entry" onClick={() => navigate(e.path)}>
               <MdFolder className="browser-entry-icon" />
@@ -99,8 +149,14 @@ function DirBrowser({ current, onSelect, onClose }) {
         </div>
 
         <div className="browser-footer">
-          <span className="browser-selected-label">Selected:</span>
-          <span className="browser-selected-path">{browsePath}</span>
+          <button
+            type="button"
+            className="btn-new-folder"
+            onClick={() => setNewFolder({ active: true, name: '', error: '' })}
+          >
+            <MdCreateNewFolder size={15} /> New Folder
+          </button>
+          <span className="browser-footer-spacer" />
           <button className="btn-primary" onClick={() => onSelect(browsePath)}>
             Select this folder
           </button>
@@ -507,9 +563,10 @@ function StatusBadge({ dir }) {
 
 // ─── Workspace Card (draggable) ───────────────────────────────────────────────
 
-function WorkspaceCard({ dir, onToggle, onEdit, onDelete, openConsoleId, setOpenConsole }) {
+function WorkspaceCard({ dir, onToggle, onEdit, onDelete, openConsoleId, setOpenConsole, appMode, onImportFiles }) {
   const controls = useDragControls();
   const consoleOpen = openConsoleId === dir.id;
+  const folderInputRef = useRef(null);
 
   return (
     <Reorder.Item
@@ -589,6 +646,32 @@ function WorkspaceCard({ dir, onToggle, onEdit, onDelete, openConsoleId, setOpen
               <MdTerminal size={14} />
               <span>Console</span>
             </button>
+            {appMode === 'debug' && (
+              <>
+                <button
+                  className="btn-action btn-action-debug"
+                  onClick={() => folderInputRef.current?.click()}
+                  title="Import folder into workspace"
+                >
+                  <MdUploadFile size={14} />
+                  <span>Import</span>
+                </button>
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  multiple
+                  webkitdirectory=""
+                  directory=""
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (e.target.files?.length) {
+                      onImportFiles(dir, Array.from(e.target.files));
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </>
+            )}
             <button
               className="btn-action btn-action-danger btn-icon-only"
               onClick={() => onDelete(dir)}
@@ -606,7 +689,7 @@ function WorkspaceCard({ dir, onToggle, onEdit, onDelete, openConsoleId, setOpen
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function Workspaces() {
+export default function Workspaces({ appMode }) {
   const [dirs, setDirs] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
@@ -675,6 +758,23 @@ export default function Workspaces() {
     load();
   }
 
+  async function handleImportFiles(dir, files) {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file, file.webkitRelativePath || file.name);
+    }
+    try {
+      const res = await apiFetch(getApiUrl(`/api/watched-directories/${dir.id}/import-files`), {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Import failed');
+    } catch (err) {
+      alert(`Import failed: ${err.message}`);
+    }
+  }
+
   return (
     <div className="directories-page">
       {/* Subtle background */}
@@ -716,9 +816,11 @@ export default function Workspaces() {
             <WorkspaceCard
               key={dir.id}
               dir={dir}
+              appMode={appMode}
               onToggle={handleToggle}
               onEdit={setEditTarget}
               onDelete={handleDelete}
+              onImportFiles={handleImportFiles}
               openConsoleId={openConsole?.id}
               setOpenConsole={setOpenConsole}
             />

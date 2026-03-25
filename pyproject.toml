@@ -21,7 +21,7 @@ description = "AI agent for healthcare automation"
 authors = [
 ]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12, <3.13"
 
 dependencies = [
     "fastapi>=0.100.0",

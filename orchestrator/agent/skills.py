@@ -1,0 +1,38 @@
+import yaml
+
+from .constants import SKILL_DIR_PATH
+
+
+class SkillsMixin:
+    """Loads skill metadata from the skills directory."""
+
+    def load_all_skills(self):
+        """
+        Scans the skills directory, finds SKILL.md files, and loads their metadata.
+        Returns formatted text listing available skills for the system prompt.
+        """
+        skills_text = []
+
+        if not SKILL_DIR_PATH.exists():
+            return "No skills directory found."
+
+        for skill_folder in SKILL_DIR_PATH.iterdir():
+            if not skill_folder.is_dir():
+                continue
+
+            skill_file = skill_folder / "SKILL.md"
+            if skill_file.exists():
+                try:
+                    content = skill_file.read_text()
+                    parts = content.split("---", 2)
+                    if len(parts) >= 3:
+                        frontmatter = parts[1]
+                        metadata = yaml.safe_load(frontmatter)
+
+                        skill_name = metadata.get("name", skill_folder.name)
+                        skill_description = metadata.get("description", "No description")
+                        skills_text.append(f"- **{skill_name}**: {skill_description}")
+                except Exception as e:
+                    print(f"Error loading skill {skill_folder.name}: {e}")
+
+        return "\n".join(skills_text) if skills_text else "No skills available"

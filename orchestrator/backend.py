@@ -9,14 +9,14 @@ from typing import Optional, Dict
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load env BEFORE importing agenticAgent so LLM_BACKEND is set
+# Load env BEFORE importing agent so LLM_BACKEND is set
 load_dotenv()
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Body, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
-from agenticAgent import AgenticAgent
+from agent import AgenticAgent
 import database as db
 import task_runner
 from watcher_service import watcher_service

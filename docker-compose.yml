@@ -17,6 +17,7 @@ services:
     env_file: ./orchestrator/.env
     environment:
       - APP_ROOT=/app
+      - WORKSPACES_ROOT=/app/workspaces
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

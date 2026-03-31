@@ -87,6 +87,7 @@ def init_db():
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             path TEXT NOT NULL,
+            workspace_path TEXT,
             custom_prompt TEXT,
             allowed_tools TEXT,
             enabled INTEGER DEFAULT 1,
@@ -113,6 +114,7 @@ def init_db():
     for table, col_def in [
         ("watched_directories", "allowed_tools TEXT"),
         ("watched_directories", "user_id TEXT"),
+        ("watched_directories", "workspace_path TEXT"),
         ("sessions", "user_id TEXT"),
     ]:
         try:
@@ -510,13 +512,14 @@ def _parse_watched_directory(row) -> Dict:
 
 def create_watched_directory(name: str, path: str, custom_prompt: Optional[str] = None,
                               allowed_tools: Optional[List[str]] = None,
-                              user_id: Optional[str] = None) -> str:
+                              user_id: Optional[str] = None,
+                              workspace_path: Optional[str] = None) -> str:
     dir_id = str(uuid.uuid4())
     now = datetime.now().isoformat()
     conn = _get_conn()
     conn.execute(
-        "INSERT INTO watched_directories (id, name, path, custom_prompt, allowed_tools, enabled, created_at, user_id) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
-        (dir_id, name, path, custom_prompt, json.dumps(allowed_tools) if allowed_tools is not None else None, now, user_id)
+        "INSERT INTO watched_directories (id, name, path, workspace_path, custom_prompt, allowed_tools, enabled, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        (dir_id, name, path, workspace_path, custom_prompt, json.dumps(allowed_tools) if allowed_tools is not None else None, now, user_id)
     )
     conn.commit()
     conn.close()
@@ -551,7 +554,8 @@ def get_watched_directory(dir_id: str) -> Optional[Dict]:
 
 def update_watched_directory(dir_id: str, name: Optional[str] = None, path: Optional[str] = None,
                               custom_prompt: Optional[str] = None, enabled: Optional[bool] = None,
-                              allowed_tools: Optional[List[str]] = None, clear_allowed_tools: bool = False):
+                              allowed_tools: Optional[List[str]] = None, clear_allowed_tools: bool = False,
+                              workspace_path: Optional[str] = None):
     conn = _get_conn()
     updates = []
     params = []
@@ -573,6 +577,9 @@ def update_watched_directory(dir_id: str, name: Optional[str] = None, path: Opti
     elif clear_allowed_tools:
         updates.append("allowed_tools = ?")
         params.append(None)
+    if workspace_path is not None:
+        updates.append("workspace_path = ?")
+        params.append(workspace_path)
     if not updates:
         conn.close()
         return

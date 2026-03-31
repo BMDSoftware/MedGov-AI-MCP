@@ -11,7 +11,7 @@ import os
 from datetime import datetime
 from typing import Dict, Optional, Callable, List, Set
 
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
 
@@ -33,7 +33,7 @@ class _Handler(FileSystemEventHandler):
 
 class WatcherService:
     def __init__(self):
-        self._observers: Dict[str, Observer] = {}
+        self._observers: Dict[str, PollingObserver] = {}
         self._debounce_tasks: Dict[str, asyncio.Task] = {}
         self._pending_files: Dict[str, Set[str]] = {}
         self._event_queue: asyncio.Queue = asyncio.Queue()
@@ -71,7 +71,7 @@ class WatcherService:
         try:
             loop = asyncio.get_event_loop()
             handler = _Handler(dir_id, loop, self._event_queue)
-            observer = Observer()
+            observer = PollingObserver()
             observer.schedule(handler, path, recursive=True)
             observer.start()
             self._observers[dir_id] = observer

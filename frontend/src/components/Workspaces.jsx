@@ -323,7 +323,7 @@ function WorkspaceModal({ initial, onSave, onClose, workspaces = [] }) {
     tag.className = 'prompt-tag';
     tag.contentEditable = 'false';
     tag.dataset.wsName = ws.name;
-    tag.dataset.wsPath = ws.path;
+    tag.dataset.wsPath = ws.workspace_path;
     tag.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg> ${ws.name}`;
 
     const parent = node.parentNode;
@@ -360,9 +360,10 @@ function WorkspaceModal({ initial, onSave, onClose, workspaces = [] }) {
     // Replace known workspace paths with tag spans
     for (const ws of workspaces) {
       if (!initial || ws.id !== initial.id) {
-        const escaped = ws.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const wsResolvedPath = ws.workspace_path || ws.path;
+        const escaped = wsResolvedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         html = html.replace(new RegExp(escaped, 'g'),
-          `<span class="prompt-tag" contenteditable="false" data-ws-name="${ws.name}" data-ws-path="${ws.path}"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg> ${ws.name}</span>`
+          `<span class="prompt-tag" contenteditable="false" data-ws-name="${ws.name}" data-ws-path="${wsResolvedPath}"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg> ${ws.name}</span>`
         );
       }
     }

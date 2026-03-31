@@ -484,35 +484,22 @@ async def import_files_to_workspace(
     if not wd or wd.get("user_id") != current_user["user_id"]:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    target_path = Path(wd["path"])
-    if not target_path.exists():
-        try:
-            target_path.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            raise HTTPException(status_code=403, detail="Cannot create workspace directory — path may be read-only.")
-
-    # Check writability
-    try:
-        test_file = target_path / ".write_test"
-        test_file.touch()
-        test_file.unlink()
-    except OSError:
-        raise HTTPException(
-            status_code=403,
-            detail="Watched folder is read-only. The watched folder must be writable for import."
-        )
+    workspace_path = Path(wd.get("workspace_path") or wd["path"])
+    incoming_dir = workspace_path / "incoming"
+    incoming_dir.mkdir(parents=True, exist_ok=True)
 
     form = await request.form(max_files=10_000, max_fields=10_000)
     files = [v for k, v in form.multi_items() if hasattr(v, 'read')]
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
+    saved_paths = []
     saved_count = 0
     total_size = 0
     for f in files:
         contents = await f.read()
         rel_path = f.filename or f"file_{saved_count}"
-        dest = target_path / rel_path
+        dest = incoming_dir / rel_path
         # Skip hidden/junk files
         if dest.name.startswith('.') or dest.name == 'DS_Store':
             continue
@@ -520,13 +507,18 @@ async def import_files_to_workspace(
         dest.parent.mkdir(parents=True, exist_ok=True)
         with open(dest, "wb") as out:
             out.write(contents)
+        saved_paths.append(str(dest))
         saved_count += 1
         total_size += len(contents)
 
     watcher_service.push_console(
         dir_id, f"[INFO] Imported {saved_count} files ({total_size} bytes) via debug upload"
     )
-    return {"status": "success", "file_count": saved_count, "total_size": total_size, "target_path": str(target_path)}
+
+    if saved_paths:
+        asyncio.create_task(_watcher_execute(dir_id, saved_paths))
+
+    return {"status": "success", "file_count": saved_count, "total_size": total_size, "target_path": str(incoming_dir)}
 
 
 @app.get("/api/browse-directory", tags=["system"], summary="Browse filesystem directories for the directory picker")

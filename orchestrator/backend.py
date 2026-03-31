@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -25,6 +26,10 @@ from auth import get_current_user
 
 _shutdown_event: Optional[asyncio.Event] = None
 _mcp_notifications: list = []  # in-memory MCP event log
+
+# Root directory for auto-generated workspace folders.
+# Defaults to /app/workspaces (the Docker mount); override via WORKSPACES_ROOT in .env for local dev.
+WORKSPACES_ROOT = os.environ.get("WORKSPACES_ROOT", "/workspaces")
 
 # --- Per-user state ---
 
@@ -148,29 +153,70 @@ async def _watcher_execute(dir_id: str, files: list):
     if not state.current_session_id:
         state.current_session_id = db.create_session(name="Watcher Session", user_id=user_id)
 
+    workspace_path = wd.get("workspace_path") or wd["path"]
+
+    # Copy files from the (possibly read-only) watched directory into the workspace
+    # before handing paths to the agent, which needs a writable location.
+    # Files already inside workspace_path (e.g. from cross-workspace triggers) are
+    # passed through unchanged — computing relpath against wd["path"] would be wrong.
+    incoming_dir = os.path.join(workspace_path, "incoming")
+    os.makedirs(incoming_dir, exist_ok=True)
+    copied_files = []
+    norm_ws = os.path.normpath(workspace_path) + os.sep
+    for src in files:
+        if os.path.normpath(src).startswith(norm_ws):
+            # Already inside this workspace — no copy needed
+            copied_files.append(src)
+            continue
+        try:
+            rel = os.path.relpath(src, wd["path"])
+            dst = os.path.join(incoming_dir, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+            copied_files.append(dst)
+        except Exception as e:
+            watcher_service.push_console(dir_id, f"[WARN] Could not copy {os.path.basename(src)} to workspace: {e}")
+    if not copied_files:
+        watcher_service.push_console(dir_id, "[ERROR] No files could be copied to workspace, aborting.")
+        return
+    files = copied_files
+
     file_list = "\n".join(f"  - {f}" for f in files)
     custom = (wd.get("custom_prompt") or "").strip()
 
     if custom:
         goal = (
-            f"New file(s) detected in watched directory '{wd['name']}' (path: {wd['path']}).\n\n"
-            f"Files detected:\n{file_list}\n\n"
+            f"New file(s) detected in watched folder '{wd['name']}'.\n\n"
+            f"Files (already copied to workspace):\n{file_list}\n\n"
+            f"Workspace directory: {workspace_path}\n\n"
             f"{custom}"
         )
     else:
         goal = (
-            f"New file(s) detected in watched directory '{wd['name']}' (path: {wd['path']}).\n\n"
-            f"Files detected:\n{file_list}\n\n"
+            f"New file(s) detected in watched folder '{wd['name']}'.\n\n"
+            f"Files (already copied to workspace inbox):\n{file_list}\n\n"
+            f"Workspace directory: {workspace_path}\n\n"
             "Your job is to CLASSIFY and ORGANIZE these files only. Do NOT run analysis or inference unless explicitly instructed.\n\n"
             "Steps:\n"
             "1. Check if each file is a DICOM, NIfTI, or other medical imaging format using the available parse tools.\n"
-            "2. Based on the file type, move it to an appropriate subdirectory:\n"
-            "   - DICOM → 'dicom/'\n"
-            "   - NIfTI (.nii, .nii.gz) → 'nifti/'\n"
-            "   - Unknown or unreadable → 'uncertain/'\n"
+            "2. Based on the file type, move it to the appropriate subdirectory inside the workspace directory:\n"
+            f"   - DICOM → '{workspace_path}/dicom/'\n"
+            f"   - NIfTI (.nii, .nii.gz) → '{workspace_path}/nifti/'\n"
+            f"   - Unknown or unreadable → '{workspace_path}/uncertain/'\n"
             "3. Write a brief one-line note alongside each file if helpful.\n"
             "Do NOT call analyze_image or run_inference. Classification and organization is the only goal."
         )
+
+    # Snapshot other workspaces so we can detect cross-workspace file moves after the AI runs
+    other_wds = [
+        w for w in db.list_watched_directories_all()
+        if w["id"] != dir_id and w.get("enabled") and w.get("workspace_path")
+        and os.path.isdir(w["workspace_path"])
+    ]
+    snapshots = {
+        w["id"]: {str(p) for p in Path(w["workspace_path"]).rglob("*") if p.is_file()}
+        for w in other_wds
+    }
 
     watcher_service.push_console(dir_id, "[AI] Starting autonomous analysis...")
     agent.set_agent_type(True)
@@ -194,6 +240,14 @@ async def _watcher_execute(dir_id: str, files: list):
     if result and result.get("answer"):
         watcher_service.push_console(dir_id, f"[AI] {result['answer']}")
     watcher_service.push_console(dir_id, "[AI] Analysis complete.")
+
+    # Trigger any workspace that received new files as a result of this task
+    for w in other_wds:
+        current = {str(p) for p in Path(w["workspace_path"]).rglob("*") if p.is_file()}
+        new_files = sorted(current - snapshots.get(w["id"], set()))
+        if new_files:
+            watcher_service.push_console(w["id"], f"[INFO] {len(new_files)} file(s) received from '{wd['name']}', triggering AI...")
+            asyncio.create_task(_watcher_execute(w["id"], new_files))
 
 
 @asynccontextmanager
@@ -344,8 +398,17 @@ async def create_watched_directory(data: dict = Body(...), current_user: dict = 
     allowed_tools = data.get("allowed_tools") or None
     if not name or not path:
         raise HTTPException(status_code=400, detail="name and path are required")
-    dir_id = db.create_watched_directory(name, path, custom_prompt, allowed_tools, user_id=current_user["user_id"])
-    watcher_service.push_console(dir_id, f"[INFO] Directory '{name}' added.")
+
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    workspace_path = os.path.join(WORKSPACES_ROOT, current_user["username"], slug)
+    try:
+        os.makedirs(workspace_path, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not create workspace directory: {e}. Set WORKSPACES_ROOT in .env for local development.")
+
+    dir_id = db.create_watched_directory(name, path, custom_prompt, allowed_tools,
+                                         user_id=current_user["user_id"], workspace_path=workspace_path)
+    watcher_service.push_console(dir_id, f"[INFO] Directory '{name}' added. Workspace: {workspace_path}")
     wd = db.get_watched_directory(dir_id)
     watcher_service.start_watching(dir_id, wd["path"], wd["name"])
     wd["watching"] = watcher_service.is_watching(dir_id)
@@ -359,6 +422,9 @@ async def update_watched_directory(dir_id: str, data: dict = Body(...), current_
         raise HTTPException(status_code=404, detail="Not found")
     was_watching = watcher_service.is_watching(dir_id)
     allowed_tools = data.get("allowed_tools")
+    workspace_path = (data.get("workspace_path") or "").strip() or None
+    if workspace_path:
+        os.makedirs(workspace_path, exist_ok=True)
     db.update_watched_directory(
         dir_id,
         name=data.get("name"),
@@ -366,7 +432,8 @@ async def update_watched_directory(dir_id: str, data: dict = Body(...), current_
         custom_prompt=data.get("custom_prompt"),
         enabled=data.get("enabled"),
         allowed_tools=allowed_tools if allowed_tools else None,
-        clear_allowed_tools=("allowed_tools" in data and not allowed_tools)
+        clear_allowed_tools=("allowed_tools" in data and not allowed_tools),
+        workspace_path=workspace_path,
     )
     wd = db.get_watched_directory(dir_id)
     # Restart watcher if path changed while active
@@ -389,7 +456,10 @@ async def delete_watched_directory(dir_id: str, current_user: dict = Depends(get
     if not wd or wd.get("user_id") != current_user["user_id"]:
         raise HTTPException(status_code=404, detail="Not found")
     watcher_service.stop_watching(dir_id)
+    workspace_path = wd.get("workspace_path")
     db.delete_watched_directory(dir_id)
+    if workspace_path and os.path.isdir(workspace_path):
+        shutil.rmtree(workspace_path, ignore_errors=True)
     return {"status": "deleted"}
 
 
@@ -429,7 +499,7 @@ async def import_files_to_workspace(
     except OSError:
         raise HTTPException(
             status_code=403,
-            detail="Workspace path is read-only. Use a workspace under /app/workspaces for import."
+            detail="Watched folder is read-only. The watched folder must be writable for import."
         )
 
     form = await request.form(max_files=10_000, max_fields=10_000)

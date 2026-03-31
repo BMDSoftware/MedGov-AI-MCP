@@ -114,6 +114,7 @@ def init_db():
     for table, col_def in [
         ("watched_directories", "allowed_tools TEXT"),
         ("watched_directories", "user_id TEXT"),
+        ("watched_directories", "workspace_path TEXT"),
         ("sessions", "user_id TEXT"),
     ]:
         try:

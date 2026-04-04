@@ -393,7 +393,7 @@ function App() {
       <Toast authToken={authToken} onTaskUpdate={(event) => {
         setTaskRefreshSignal(event);
         if (event.type === 'task_queued') setRunningTaskCount(n => n + 1);
-        if (event.type === 'task_done' || event.type === 'task_failed') {
+        if (event.type === 'task_done' || event.type === 'task_failed' || event.type === 'task_cancelled') {
           setRunningTaskCount(n => Math.max(0, n - 1));
           if (pageRef.current !== 'results') setUnreadTaskCount(n => n + 1);
         }

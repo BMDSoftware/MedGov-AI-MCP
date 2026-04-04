@@ -196,21 +196,47 @@ class ExecutionMixin:
 
         if fileList and isinstance(fileList, list) and fileList:
             file_paths = []
-            dir_paths = []
+            dicom_dir_paths = []
+            image_dir_paths = []  # directories whose contents appear to be regular 2D images
+
+            _DICOM_EXTS = {'.dcm', '.ima', '.img'}
+
             for temp_filepath, _ in fileList:
                 if os.path.isdir(temp_filepath):
-                    dir_paths.append(temp_filepath)
+                    # Check for explicit DICOM extensions — if found, treat as a DICOM series.
+                    # Otherwise label as an image directory and let the agent decide how to
+                    # process it (the user may have exported DICOM slices as PNG/TIFF, in
+                    # which case the agent should clarify intent before iterating files).
+                    try:
+                        entries = [f for f in os.listdir(temp_filepath) if not f.startswith('.')]
+                        exts = {os.path.splitext(f)[1].lower() for f in entries}
+                        if exts & _DICOM_EXTS:
+                            dicom_dir_paths.append(temp_filepath)
+                        else:
+                            image_dir_paths.append((temp_filepath, sorted(entries)))
+                    except OSError:
+                        dicom_dir_paths.append(temp_filepath)
                 else:
                     file_paths.append(temp_filepath)
 
             parts = []
             if file_paths:
                 parts.append("Files: " + ", ".join(file_paths))
-            if dir_paths:
+            if dicom_dir_paths:
                 parts.append(
-                    "DICOM series directories (treat each as a single 3D volume — use the directory path directly): "
-                    + ", ".join(f"[DICOM SERIES DIR] {p}" for p in dir_paths)
+                    "DICOM series directories (treat each as a single 3D volume — pass the directory path directly to MONAI tools): "
+                    + ", ".join(f"[DICOM SERIES DIR] {p}" for p in dicom_dir_paths)
                 )
+            if image_dir_paths:
+                for dir_path, entries in image_dir_paths:
+                    file_list_str = ", ".join(entries[:10])
+                    if len(entries) > 10:
+                        file_list_str += f" ... ({len(entries)} files total)"
+                    parts.append(
+                        f"[IMAGE DIR] {dir_path} — contains: {file_list_str}. "
+                        f"Ask the user whether these are independent 2D images (process each file separately) "
+                        f"or exported DICOM slices of a 3D volume (reconstruct before analysis)."
+                    )
             image_context = "\n\nFILES AVAILABLE: Yes\n" + "\n".join(parts)
 
             # Only pass small 2D images to LLM

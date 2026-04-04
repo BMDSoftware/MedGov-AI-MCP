@@ -69,3 +69,6 @@
 
 - https://cra.mr/mcp-skills-and-agents/#agents
 - https://www.ibm.com/think/topics/multiagent-system
+- https://lobehub.com/mcp/surajinacademia-cellpose_mcp
+- https://www.piwheels.org/project/cellpose-mcp/
+- https://www.cellpose.org/

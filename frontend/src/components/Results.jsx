@@ -1,4 +1,5 @@
 import { apiFetch, authEventSourceUrl } from '../apiFetch';
+import { getToken } from '../auth';
 import { useEffect, useState } from 'react';
 import './Results.css';
 
@@ -9,13 +10,15 @@ const STATUS_LABELS = {
   running: 'Running',
   done: 'Done',
   failed: 'Failed',
+  cancelled: 'Cancelled',
 };
 
 function Results({ refreshSignal, currentSessionId }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(null); // task id currently expanded
+  const [expanded, setExpanded] = useState(new Set()); // set of expanded task ids
   const [filter, setFilter] = useState('all'); // all | inference | report | done | failed
+  const [cancelling, setCancelling] = useState({}); // task id -> true while cancel request in flight
 
   const fetchTasks = async () => {
     try {
@@ -40,7 +43,23 @@ function Results({ refreshSignal, currentSessionId }) {
     if (refreshSignal) fetchTasks();
   }, [refreshSignal]);
 
-  const toggle = (id) => setExpanded(prev => (prev === id ? null : id));
+  const toggle = (id) => setExpanded(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const handleCancel = async (e, taskId) => {
+    e.stopPropagation();
+    setCancelling(prev => ({ ...prev, [taskId]: true }));
+    try {
+      await apiFetch(`${API_URL}/api/tasks/${taskId}/cancel`, { method: 'POST' });
+      await fetchTasks();
+    } catch {
+      // silently fail — task may have already finished
+    }
+    setCancelling(prev => ({ ...prev, [taskId]: false }));
+  };
 
   const filteredTasks = tasks.filter(t => {
     if (filter === 'all') return true;
@@ -70,7 +89,7 @@ function Results({ refreshSignal, currentSessionId }) {
       </div>
 
       <div className="results-filters">
-        {['all', 'inference', 'report', 'queued', 'done', 'failed'].map(f => (
+        {['all', 'inference', 'cellpose', 'report', 'queued', 'done', 'failed'].map(f => (
           <button
             key={f}
             className={`filter-btn ${filter === f ? 'active' : ''}`}
@@ -114,13 +133,23 @@ function Results({ refreshSignal, currentSessionId }) {
                   <span className="task-duration">{formatDuration(task)}</span>
                 )}
                 <span className="task-time">{formatTime(task.created_at)}</span>
-                <span className="task-chevron">{expanded === task.id ? '▲' : '▼'}</span>
+                {(task.status === 'queued' || task.status === 'running') && (
+                  <button
+                    className="task-cancel-btn"
+                    onClick={(e) => handleCancel(e, task.id)}
+                    disabled={cancelling[task.id]}
+                    title="Cancel task"
+                  >
+                    {cancelling[task.id] ? '...' : '✕'}
+                  </button>
+                )}
+                <span className="task-chevron">{expanded.has(task.id) ? '▲' : '▼'}</span>
               </div>
             </div>
 
-            {expanded === task.id && (
+            {expanded.has(task.id) && (
               <div className="task-card-body">
-                {/* Inference summary — always shown for inference tasks */}
+                {/* Inference summary */}
                 {task.task_type === 'inference' && (
                   <div className="task-inference-summary">
                     <div className="task-inference-summary-row">
@@ -150,6 +179,24 @@ function Results({ refreshSignal, currentSessionId }) {
                   </div>
                 )}
 
+                {/* Cellpose summary */}
+                {task.task_type === 'cellpose' && (
+                  <div className="task-inference-summary">
+                    <div className="task-inference-summary-row">
+                      <span className="task-summary-label">File</span>
+                      <span className="task-summary-value">
+                        {task.input_data?.image_path
+                          ? task.input_data.image_path.split('/').pop()
+                          : '—'}
+                      </span>
+                    </div>
+                    <div className="task-inference-summary-row">
+                      <span className="task-summary-label">Model</span>
+                      <span className="task-summary-value">{task.input_data?.model_type || '—'}</span>
+                    </div>
+                  </div>
+                )}
+
                 {task.status === 'failed' && task.error && (
                   <div className="task-error">{task.error}</div>
                 )}
@@ -160,7 +207,7 @@ function Results({ refreshSignal, currentSessionId }) {
 
                 {(task.status === 'queued' || task.status === 'running') && (
                   <p className="task-pending-msg">
-                    {task.status === 'queued' ? 'Waiting to start...' : 'Running in background...'}
+                    {task.status === 'queued' ? 'Waiting to start...' : (task.message || 'Running in background...')}
                   </p>
                 )}
 
@@ -225,6 +272,54 @@ function TaskResult({ task }) {
           </table>
         ) : (
           <p className="task-pending-msg">No structures detected.</p>
+        )}
+      </div>
+    );
+  }
+
+  if (task.task_type === 'cellpose') {
+    if (result?.error) {
+      return (
+        <div className="task-result-inference">
+          <div className="task-error">{result.error}</div>
+        </div>
+      );
+    }
+    const token = getToken();
+    const imageUrl = result?.output_path
+      ? `${API_URL}/api/files/image?path=${encodeURIComponent(result.output_path)}${token ? `&token=${encodeURIComponent(token)}` : ''}`
+      : null;
+    return (
+      <div className="task-result-inference">
+        <div className="result-meta-row">
+          <span>Cells detected: <strong>{result?.cells_detected ?? '—'}</strong></span>
+          <span>Model: <strong>{task.input_data?.model_type || '—'}</strong></span>
+          {result?.diameter != null && (
+            <span>Diameter: <strong>{result.diameter.toFixed(1)} px</strong></span>
+          )}
+        </div>
+        {result?.mask_shape && (
+          <div className="task-inference-summary-row">
+            <span className="task-summary-label">Mask shape</span>
+            <span className="task-summary-value">{result.mask_shape.join(' × ')}</span>
+          </div>
+        )}
+        {imageUrl && (
+          <div style={{ marginTop: '1rem' }}>
+            <img
+              src={imageUrl}
+              alt="Segmentation mask"
+              style={{ width: '30%', borderRadius: '6px', border: '1px solid var(--border)', display: 'block' }}
+            />
+          </div>
+        )}
+        {result?.output_path && (
+          <div className="task-inference-summary-row" style={{ marginTop: '0.5rem' }}>
+            <span className="task-summary-label">Mask saved</span>
+            <span className="task-summary-value" style={{ wordBreak: 'break-all' }}>
+              {result.output_path}
+            </span>
+          </div>
         )}
       </div>
     );

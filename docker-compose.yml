@@ -2,7 +2,7 @@ services:
   orchestrator:
     build:
       context: .
-      dockerfile: docker/orchestrator/Dockerfile.cpu
+      dockerfile: docker/orchestrator/Dockerfile.${ORCHESTRATOR_BUILD_TYPE:-cpu}
     ports:
       - "5001:5001"
     volumes:

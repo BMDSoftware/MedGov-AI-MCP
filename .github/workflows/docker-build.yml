@@ -11,6 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Determine build type from deployment env
+        run: |
+          if [ -f /opt/medgov-ai-mcp/orchestrator/.env ]; then
+            BUILD_TYPE=$(grep '^ORCHESTRATOR_BUILD_TYPE=' /opt/medgov-ai-mcp/orchestrator/.env | cut -d= -f2 | tr -d '"' | tr -d "'")
+          fi
+          echo "ORCHESTRATOR_BUILD_TYPE=${BUILD_TYPE:-cpu}" >> $GITHUB_ENV
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -18,7 +25,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: docker/orchestrator/Dockerfile.cpu
+          file: docker/orchestrator/Dockerfile.${{ env.ORCHESTRATOR_BUILD_TYPE }}
           push: false
           tags: agentichealthmcp-orchestrator:test
 

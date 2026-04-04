@@ -130,10 +130,7 @@ class WatcherService:
         if not files or not self._execute_callback:
             return
         self.push_console(dir_id, f"[INFO] Triggering AI for {len(files)} file(s)...")
-        try:
-            await self._execute_callback(dir_id, files)
-        except Exception as e:
-            self.push_console(dir_id, f"[ERROR] AI execution failed: {e}")
+        asyncio.create_task(self._execute_callback(dir_id, files))
 
     async def start(self):
         self._processor_task = asyncio.create_task(self._process_events())

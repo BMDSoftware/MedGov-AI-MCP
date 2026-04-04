@@ -23,6 +23,18 @@ sys.path.insert(0, str(Path(__file__).parent))
 import database as db
 
 # ── Module-level state ────────────────────────────────────────────────────────
+
+def _detect_gpu() -> bool:
+    """Return True if an NVIDIA GPU is available on this host."""
+    import subprocess
+    try:
+        return subprocess.run(["nvidia-smi"], capture_output=True, timeout=5).returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+_GPU_AVAILABLE = _detect_gpu()
+_DEVICE_LABEL = "GPU" if _GPU_AVAILABLE else "CPU"
+
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="task_worker")
 
 # Inference tasks are CPU/memory heavy (loads a multi-GB model + sliding window).
@@ -30,10 +42,39 @@ _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="task_worker")
 # This semaphore serialises inference so they queue and run one at a time.
 _inference_semaphore = threading.Semaphore(1)
 
+# Cellpose tasks load a neural network model per run and can be memory-intensive,
+# especially on GPU. Serialise them to avoid OOM when multiple users submit at once.
+_cellpose_semaphore = threading.Semaphore(1)
+
+# Task IDs that have been requested to cancel.
+_cancelled_tasks: set = set()
+
+# Maps task_id -> (event_loop, asyncio.Task) for tasks currently executing async work.
+# Used to cancel the subprocess by cancelling the asyncio task from another thread.
+_running_async_tasks: Dict[str, tuple] = {}
+
+
+def cancel_task(task_id: str):
+    """Cancel a task. Queued tasks will not start. Running tasks have their
+    asyncio task cancelled, which closes the MCP subprocess immediately."""
+    _cancelled_tasks.add(task_id)
+    db.update_task(task_id, "cancelled", error="Cancelled by user")
+    entry = _running_async_tasks.get(task_id)
+    if entry:
+        loop, async_task = entry
+        loop.call_soon_threadsafe(async_task.cancel)
+
 
 def init():
-    """Called once at backend startup."""
-    pass  # nothing to initialise — SSE reads task status directly from the DB
+    """Called once at backend startup. Mark any tasks left in queued/running state
+    (from a previous process) as failed — they will never complete now."""
+    conn = db._get_conn()
+    conn.execute(
+        "UPDATE background_tasks SET status = 'failed', error = 'Server restarted while task was in progress' "
+        "WHERE status IN ('queued', 'running')"
+    )
+    conn.commit()
+    conn.close()
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -68,17 +109,31 @@ def _run_task(task_id: str, task_type: str, description: str, input_data: Dict, 
     """Entry point for each worker thread."""
     print(f"[task_runner] Starting {task_id[:8]} ({task_type})")
     # Inference tasks delay the 'running' status until the semaphore is acquired
-    if task_type != "inference":
+    if task_type not in ("inference", "cellpose"):
         db.update_task(task_id, "running")
 
     try:
+        if task_id in _cancelled_tasks:
+            _cancelled_tasks.discard(task_id)
+            return
+
         handler = _HANDLERS.get(task_type)
         if not handler:
             raise ValueError(f"No handler registered for task type '{task_type}'")
 
         result = handler(input_data, session_id)
+        # Handler may return {} when task was cancelled mid-run
+        if task_id in _cancelled_tasks:
+            _cancelled_tasks.discard(task_id)
+            print(f"[task_runner] Cancelled {task_id[:8]}")
+            return
         db.update_task(task_id, "done", result=result)
         print(f"[task_runner] Done {task_id[:8]}")
+
+    except asyncio.CancelledError:
+        # Asyncio task cancelled by cancel_task() — status already set to 'cancelled'
+        _cancelled_tasks.discard(task_id)
+        print(f"[task_runner] Cancelled (CancelledError) {task_id[:8]}")
 
     except Exception as e:
         # anyio wraps exceptions raised inside async task groups into ExceptionGroup;
@@ -114,15 +169,24 @@ def _handle_inference(input_data: Dict, session_id: str) -> Dict:
 
     # Wait for exclusive access — stay in 'queued' until we actually start
     _inference_semaphore.acquire()
+    if task_id in _cancelled_tasks:
+        _inference_semaphore.release()
+        return {}
     if task_id:
         db.update_task(task_id, "running")
         print(f"[task_runner] Semaphore acquired, running inference {task_id[:8]}")
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        coro_task = loop.create_task(_async_run_inference(image_path, model_name))
+        if task_id:
+            _running_async_tasks[task_id] = (loop, coro_task)
         try:
-            return loop.run_until_complete(_async_run_inference(image_path, model_name))
+            return loop.run_until_complete(coro_task)
+        except asyncio.CancelledError:
+            raise
         finally:
+            _running_async_tasks.pop(task_id, None)
             loop.close()
     finally:
         _inference_semaphore.release()
@@ -424,9 +488,109 @@ Respond with valid JSON only, with exactly these keys: "findings_narrative", "im
     }
 
 
+# ── Handler: cellpose ─────────────────────────────────────────────────────────
+
+def _handle_cellpose(input_data: Dict, session_id: str) -> Dict:
+    """
+    Run Cellpose cell segmentation via a fresh MCP session in this thread's event loop.
+    input_data: {image_path, model_type, ...any other segment_cells_2d params}
+
+    Serialised by _cellpose_semaphore — only one run at a time to prevent OOM
+    when multiple users submit concurrent segmentation tasks.
+    """
+    image_path = input_data["image_path"]
+    model_type = input_data.get("model_type", "cyto3")
+    task_id = input_data.get("_task_id")
+
+    _cellpose_semaphore.acquire()
+    if task_id in _cancelled_tasks:
+        _cellpose_semaphore.release()
+        return {}
+    if task_id:
+        db.update_task(task_id, "running", message=f"Loading model ({_DEVICE_LABEL})...")
+        print(f"[task_runner] Cellpose semaphore acquired, running {task_id[:8]} ({_DEVICE_LABEL})")
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def _run():
+            if task_id:
+                db.update_task(task_id, "running", message=f"Running model ({_DEVICE_LABEL})...")
+            return await _async_run_cellpose(image_path, model_type, input_data)
+
+        coro_task = loop.create_task(_run())
+        if task_id:
+            _running_async_tasks[task_id] = (loop, coro_task)
+        try:
+            return loop.run_until_complete(coro_task)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            _running_async_tasks.pop(task_id, None)
+            loop.close()
+    finally:
+        _cellpose_semaphore.release()
+
+
+async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict) -> Dict:
+    """Open a fresh MCP session to the Cellpose server and run segmentation."""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    from contextlib import AsyncExitStack
+
+    config_path = Path(__file__).parent / "mcp-config.json"
+    with open(config_path) as f:
+        config = json.load(f)
+
+    cellpose_cfg = config["mcpServers"]["cellpose"]
+    params = StdioServerParameters(
+        command=os.path.expandvars(cellpose_cfg["command"]),
+        args=[os.path.expandvars(a) for a in cellpose_cfg.get("args", [])],
+        env={**os.environ, **cellpose_cfg.get("env", {})},
+    )
+
+    async with AsyncExitStack() as stack:
+        read, write = await stack.enter_async_context(stdio_client(params))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+
+        # Build a unique output path that includes the model name so concurrent
+        # runs on the same image with different models don't overwrite each other.
+        p = Path(image_path)
+        unique_output = str(p.parent / f"{p.stem}_{model_type}_masks{p.suffix}")
+
+        arguments = {
+            "image_path": image_path,
+            "model_type": model_type,
+            "output_path": unique_output,
+            # gpu is intentionally omitted — server.py auto-detects GPU at startup
+            # and sets CUDA_VISIBLE_DEVICES accordingly; cellpose will use GPU if available.
+        }
+        # Agent-provided params override the defaults above
+        for key in ("diameter", "channels", "flow_threshold", "cellprob_threshold", "min_size", "output_path"):
+            if key in input_data:
+                arguments[key] = input_data[key]
+
+        mcp_result = await session.call_tool("segment_cells_2d", arguments=arguments)
+
+        combined = "".join(
+            block.text for block in mcp_result.content if hasattr(block, "text")
+        )
+        try:
+            result = json.loads(combined)
+        except (json.JSONDecodeError, TypeError):
+            return {"text": combined}
+
+        if isinstance(result, dict) and "error" in result:
+            raise RuntimeError(result["error"])
+
+        return result
+
+
 # ── Handler registry ──────────────────────────────────────────────────────────
 
 _HANDLERS: Dict[str, Callable] = {
     "inference": _handle_inference,
+    "cellpose": _handle_cellpose,
     "report": _handle_report,
 }

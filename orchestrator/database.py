@@ -79,6 +79,7 @@ def init_db():
             status TEXT DEFAULT 'queued',
             result TEXT,
             error TEXT,
+            message TEXT,
             created_at TEXT NOT NULL,
             completed_at TEXT
         );
@@ -116,6 +117,7 @@ def init_db():
         ("watched_directories", "user_id TEXT"),
         ("watched_directories", "workspace_path TEXT"),
         ("sessions", "user_id TEXT"),
+        ("background_tasks", "message TEXT"),
     ]:
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
@@ -431,14 +433,14 @@ def create_task(session_id: str, task_type: str, description: str, input_data: D
     return task_id
 
 
-def update_task(task_id: str, status: str, result: Optional[Dict] = None, error: Optional[str] = None):
-    """Update a background task's status, result, and completion time."""
+def update_task(task_id: str, status: str, result: Optional[Dict] = None, error: Optional[str] = None, message: Optional[str] = None):
+    """Update a background task's status, result, completion time, and optional progress message."""
     conn = _get_conn()
     now = datetime.now().isoformat()
     completed = now if status in ("done", "failed") else None
     conn.execute(
-        "UPDATE background_tasks SET status = ?, result = ?, error = ?, completed_at = ? WHERE id = ?",
-        (status, json.dumps(result) if result is not None else None, error, completed, task_id)
+        "UPDATE background_tasks SET status = ?, result = ?, error = ?, message = ?, completed_at = ? WHERE id = ?",
+        (status, json.dumps(result) if result is not None else None, error, message, completed, task_id)
     )
     conn.commit()
     conn.close()

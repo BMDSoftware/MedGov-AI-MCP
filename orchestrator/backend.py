@@ -15,7 +15,7 @@ load_dotenv()
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Body, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from contextlib import asynccontextmanager
 from agent import AgenticAgent
 import database as db
@@ -229,8 +229,14 @@ async def _watcher_execute(dir_id: str, files: list):
         agent.agent_tools = original_agent_tools & set(allowed_tools)
         agent._refresh_agent_components()
     try:
-        file_list_data = [(f, b"") for f in files]
-        result = await agent.execute_task(goal, fileList=file_list_data, session_id=state.current_session_id)
+        # Do NOT pass fileList — workspace files are text/DICOM, not vision inputs.
+        # The agent must use read_file / parse_dicom tools via the paths in the goal prompt.
+        # Passing fileList with b"" contents causes Gemini to say it can't access the file
+        # and hallucinate the original watched-directory path from session context.
+        result = await agent.execute_task(goal, session_id=state.current_session_id, user_id=user_id)
+    except Exception as e:
+        watcher_service.push_console(dir_id, f"[ERROR] AI execution failed: {e}")
+        return
     finally:
         agent.set_agent_type(False)
         agent.require_confirmation = original_require_confirmation
@@ -1581,10 +1587,10 @@ async def sse_events(request: Request, token: Optional[str] = Query(None), curre
                         yield f"data: {json.dumps(payload)}\n\n"
                         started.add(tid)
 
-                    if tid in notified or status not in ("done", "failed"):
+                    if tid in notified or status not in ("done", "failed", "cancelled"):
                         continue
 
-                    event_type = "task_done" if status == "done" else "task_failed"
+                    event_type = "task_done" if status == "done" else ("task_cancelled" if status == "cancelled" else "task_failed")
                     payload = {
                         "type": event_type,
                         "task_id": tid,
@@ -1619,6 +1625,32 @@ async def sse_events(request: Request, token: Optional[str] = Query(None), curre
 async def list_tasks(session_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     tasks = db.list_tasks(session_id=session_id, user_id=current_user["user_id"])
     return {"tasks": tasks}
+
+
+@app.post("/api/tasks/{task_id}/cancel", tags=["events"], summary="Cancel a queued or running background task")
+async def cancel_task(task_id: str, current_user: dict = Depends(get_current_user)):
+    task = db.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] not in ("queued", "running"):
+        raise HTTPException(status_code=400, detail=f"Task is already {task['status']}")
+    task_runner.cancel_task(task_id)
+    return {"status": "cancelled", "task_id": task_id}
+
+
+@app.get("/api/files/image", tags=["files"], summary="Serve an image file by absolute path (uploads and workspaces only)")
+async def serve_image(path: str, current_user: dict = Depends(get_current_user)):
+    """Serve an image from the uploads or workspaces directory for display in the UI."""
+    abs_path = os.path.realpath(path)
+    allowed_roots = [
+        os.path.realpath(str(db.UPLOADS_DIR)),
+        os.path.realpath(WORKSPACES_ROOT),
+    ]
+    if not any(abs_path.startswith(root) for root in allowed_roots):
+        raise HTTPException(status_code=403, detail="Access to this path is not allowed")
+    if not os.path.isfile(abs_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(abs_path)
 
 
 @app.post("/api/generate-report", tags=["events"], summary="Queue a radiology report generation task from selected inference results")

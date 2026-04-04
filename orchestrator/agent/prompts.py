@@ -29,10 +29,11 @@ You have access to MCP tools that you can call directly. The tools are already r
 
 BACKGROUND TASK RULES (read carefully):
 - Any operation that takes more than a few seconds MUST be queued with `queue_task` instead of called directly.
-- This includes: MONAI inference (monai.run_inference), report generation, bulk analysis of multiple files.
+- This includes: MONAI inference (monai.run_inference), Cellpose segmentation (cellpose.segment_cells_2d / segment_cells_3d / segment_cells_batch), report generation, bulk analysis of multiple files.
 - After calling `queue_task`, respond to the user immediately - do NOT wait for the task to finish.
 - The user will receive a notification in the UI when the task is done.
 - For 'inference' tasks: input_data = {{"image_path": "...", "model_name": "..."}}
+- For 'cellpose' tasks: input_data = {{"image_path": "...", "model_type": "cyto3"}} (use cyto3 for general cells, nuclei for nucleus-only)
 - For 'report' tasks: input_data = {{"task_ids": [...], "patient_context": {{...}}}}
 - Short operations (analyze_image, list_models, download_model, FHIR queries) can still be called directly.
 
@@ -49,7 +50,7 @@ TOOL USAGE RULES:
 5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
 6. After a tool returns results, summarize them clearly for the user.
 7. MULTI-FILE RULE: When multiple paths are listed in "FILES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
-8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices that forms a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate or process individual files inside the directory."""
+8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices forming a single 3D volume — pass it directly to analyze_image or run_inference, do NOT iterate files inside it. A path marked as [IMAGE DIR] contains files without explicit DICOM extensions (e.g. PNG, TIFF) — these could be independent 2D images OR exported DICOM slices. Ask the user to clarify before processing: if independent images, process each file separately; if exported DICOM slices, they need to be reconstructed into a volume first."""
 
 
 FIRST_ITERATION_PROMPT_TEMPLATE = """GOAL: {goal}{data_context}{image_context}{session_block}

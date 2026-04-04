@@ -45,6 +45,35 @@ RUN python3.11 -m venv mcp-skills/venv \
     && mcp-skills/venv/bin/pip install -r mcp-skills/requirements.txt
 COPY mcp-skills/ mcp-skills/
 
+# ── mcp-cellpose ───────────────────────────────────────────────────────────────
+COPY mcp-cellpose/requirements.txt mcp-cellpose/requirements.txt
+# Install torch with CUDA support FIRST so cellpose-mcp sees it pre-installed
+# and does not pull a newer incompatible build from PyPI.
+# CUDA_VERSION is set by the nvidia/cuda base image (e.g. "12.1.0").
+# cu124 wheels are forward-compatible with host drivers up to CUDA 12.x.
+RUN python3.11 -m venv mcp-cellpose/venv \
+    && mcp-cellpose/venv/bin/pip install --upgrade pip \
+    # Map CUDA major version → PyTorch wheel tag.
+    # CUDA_VERSION is set by the nvidia/cuda base image (e.g. "12.1.0").
+    # We map all CUDA 12.x to cu124: it has the most recent torch builds and is
+    # forward-compatible with host drivers supporting CUDA 12.4+.
+    # cu121 is intentionally skipped — it tops out at torch 2.5.1, which cellpose-mcp
+    # may override with a newer incompatible build from PyPI.
+    && MAJOR=$(echo ${CUDA_VERSION} | cut -d. -f1) \
+    && if   [ "$MAJOR" -ge 13 ]; then TORCH_CUDA=cu126; \
+       elif [ "$MAJOR" -eq 12 ]; then TORCH_CUDA=cu124; \
+       else TORCH_CUDA=cu118; fi \
+    && echo "CUDA ${CUDA_VERSION} detected → pre-installing PyTorch ${TORCH_CUDA}" \
+    && mcp-cellpose/venv/bin/pip install \
+       torch torchvision \
+       --index-url https://download.pytorch.org/whl/${TORCH_CUDA} \
+    && mcp-cellpose/venv/bin/pip install -r mcp-cellpose/requirements.txt
+# Pre-download main segmentation models so first inference isn't slow
+RUN mcp-cellpose/venv/bin/python -c "\
+from cellpose import models; \
+[models.CellposeModel(gpu=True, model_type=m) for m in ['cyto3', 'cyto2', 'cyto', 'nuclei']]"
+COPY mcp-cellpose/ mcp-cellpose/
+
 # ── orchestrator ───────────────────────────────────────────────────────────────
 COPY orchestrator/requirements.txt orchestrator/requirements.txt
 RUN python3.11 -m venv orchestrator/venv \
@@ -53,8 +82,6 @@ RUN python3.11 -m venv orchestrator/venv \
 COPY orchestrator/ orchestrator/
 
 # Use the example config — inside the container APP_ROOT=/app so ${APP_ROOT} resolves correctly
-COPY orchestrator/mcp-config.json.example orchestrator/mcp-config.json
-
 ENV APP_ROOT=/app
 
 EXPOSE 5001

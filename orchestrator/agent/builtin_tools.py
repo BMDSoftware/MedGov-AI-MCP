@@ -22,7 +22,7 @@ BUILTIN_TOOLS: Dict[str, Dict] = {
             "properties": {
                 "task_type": {
                     "type": "string",
-                    "description": "Category of the task. Use 'inference' for MONAI model runs, 'report' for report generation, or any descriptive string for other tasks.",
+                    "description": "Category of the task. Use 'inference' for MONAI model runs, 'cellpose' for Cellpose cell segmentation, 'report' for report generation, or any descriptive string for other tasks.",
                 },
                 "description": {
                     "type": "string",

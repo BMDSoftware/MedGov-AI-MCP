@@ -53,6 +53,9 @@ node_modules/
 orchestrator/mcp-config.json
 
 # Test data - large medical imaging files
+test_data/*.jpeg
+test_data/*.jpg
+test_data/*.png
 test_data/*.deb
 test_data/*.tcia
 test_data/*.zip

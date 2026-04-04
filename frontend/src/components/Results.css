@@ -114,6 +114,33 @@
   color: var(--text-secondary, #a1a1aa);
 }
 
+.task-cancel-btn {
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: var(--text-secondary, #71717a);
+  cursor: pointer;
+  font-size: 13px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.task-cancel-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.task-cancel-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .task-chevron {
   font-size: 10px;
   color: var(--text-secondary, #a1a1aa);

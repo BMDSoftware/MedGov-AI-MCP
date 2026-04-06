@@ -6,7 +6,7 @@ from pathlib import Path
 import database as db
 
 from .constants import LLM_BACKEND
-from .prompts import FIRST_ITERATION_PROMPT_TEMPLATE, EVAL_PROMPT_TEMPLATE
+from .prompts import FIRST_ITERATION_PROMPT_TEMPLATE, EVAL_PROMPT_TEMPLATE, EVAL_PROMPT_TEMPLATE_STM
 from .builtin_tools import (
     handle_list_tasks,
     handle_queue_task,
@@ -64,19 +64,19 @@ class ExecutionMixin:
         iterations = 0
         final_result = None
         _inference_queued: set = set()
+        is_gemini = LLM_BACKEND.lower() != "ollama"
+        is_stateless = is_gemini and getattr(self.llm_client, "is_stateless_mode", False)
 
         # STM: init state only on first call (not on recursive resume)
-        if _resume_history is None and hasattr(self, "stm_manager"):
+        if is_stateless and _resume_history is None and hasattr(self, "stm_manager"):
             image_paths = [fp for fp, _ in fileList] if fileList and isinstance(fileList, list) and fileList and isinstance(fileList[0], tuple) else []
             self.stm_manager.init_state(goal, data, image_paths)
-
-        is_gemini = LLM_BACKEND.lower() != "ollama"
 
         while iterations < max_iterations:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
             # STM: expire outdated skill references
-            if hasattr(self, "stm_manager"):
+            if is_stateless and hasattr(self, "stm_manager"):
                 self.stm_manager.tick_skill_ttls()
             try:
                 # Build prompt and get LLM response
@@ -105,7 +105,7 @@ class ExecutionMixin:
                         self.logger.info(f"Images attached: {len(images_for_llm)} file(s)")
 
                     composed_prompt = prompt
-                    if hasattr(self, "stm_manager"):
+                    if is_stateless and hasattr(self, "stm_manager"):
                         stm_text = self.stm_manager.render_state_text()
                         if stm_text:
                             composed_prompt = "\n\n---\n\n".join([stm_text, prompt])
@@ -141,7 +141,6 @@ class ExecutionMixin:
 
                 # Stateful only: send tool results in the same chat turn.
                 # Stateless mode rebuilds a fresh prompt on next loop iteration.
-                is_stateless = is_gemini and getattr(self.llm_client, "is_stateless_mode", False)
                 if is_gemini and turn_results and not is_stateless:
                     _resume_response = self._send_turn_results_to_llm(turn_results)
 
@@ -304,9 +303,8 @@ class ExecutionMixin:
                             error_msg = 'Tool execution failed'
                         history_text += f"Failed: {error_msg}\n"
 
-            # Always include compact context for the most recent two tool calls.
-            # In stateless Gemini mode this provides critical continuity between turns.
-            if execution_history:
+            # Include compact context for the most recent two calls in stateless mode.
+            if is_gemini and getattr(self.llm_client, "is_stateless_mode", False) and execution_history:
                 recent_events = execution_history[-2:]
                 recent_text = "\n\nRecent tool results (last 2):\n"
                 start_index = max(1, len(execution_history) - len(recent_events) + 1)
@@ -329,7 +327,8 @@ class ExecutionMixin:
 
                 history_text += recent_text
 
-            prompt = EVAL_PROMPT_TEMPLATE.format(history_text=history_text)
+            eval_template = EVAL_PROMPT_TEMPLATE_STM if (is_gemini and getattr(self.llm_client, "is_stateless_mode", False)) else EVAL_PROMPT_TEMPLATE
+            prompt = eval_template.format(history_text=history_text)
 
         return prompt, images_for_llm
 
@@ -480,6 +479,9 @@ class ExecutionMixin:
 
             # --- STM built-in handlers ---
             if tool_name == "update_agent_notes":
+                if not (LLM_BACKEND.lower() != "ollama" and getattr(self.llm_client, "is_stateless_mode", False)):
+                    turn_results.append((tool_name, {"error": "Tool unavailable in stateful mode", "is_error": True}))
+                    continue
                 key = arguments.get("key", "")
                 value = arguments.get("value", "")
                 if hasattr(self, "stm_manager"):
@@ -492,6 +494,9 @@ class ExecutionMixin:
                 continue
 
             if tool_name == "set_next_objective":
+                if not (LLM_BACKEND.lower() != "ollama" and getattr(self.llm_client, "is_stateless_mode", False)):
+                    turn_results.append((tool_name, {"error": "Tool unavailable in stateful mode", "is_error": True}))
+                    continue
                 objective = arguments.get("objective", "")
                 if hasattr(self, "stm_manager"):
                     self.stm_manager.set_next_objective(objective)
@@ -572,7 +577,7 @@ class ExecutionMixin:
                 key_data = self._extract_key_data(tool_name, result)
                 self._record_and_persist(tool_name, result_summary, key_data, session_id)
                 # STM: record completed step and extract artifacts
-                if hasattr(self, "stm_manager"):
+                if LLM_BACKEND.lower() != "ollama" and getattr(self.llm_client, "is_stateless_mode", False) and hasattr(self, "stm_manager"):
                     self.stm_manager.update_after_tool(tool_name, result, success=True, summary=result_summary)
                 print(f"Tool succeeded: {result_summary}")
                 self.logger.info("  Status: SUCCESS")
@@ -590,7 +595,7 @@ class ExecutionMixin:
                     "error": str(error_msg), "result": result,
                 })
                 # STM: record failed step
-                if hasattr(self, "stm_manager"):
+                if LLM_BACKEND.lower() != "ollama" and getattr(self.llm_client, "is_stateless_mode", False) and hasattr(self, "stm_manager"):
                     self.stm_manager.update_after_tool(tool_name, result, success=False, summary=str(error_msg)[:200])
 
                 # Persist a failed task record so the Results tab shows it

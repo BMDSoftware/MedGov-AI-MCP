@@ -22,10 +22,7 @@ TOOL USAGE RULES:
 6. After a tool returns results, summarize them clearly for the user.
 7. MULTI-FILE RULE: When multiple paths are listed in "IMAGES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
 8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices forming a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate individual files inside the directory.
-9. NOTE-TAKING: After EVERY clinically meaningful tool result, call update_agent_notes to record ONLY durable findings needed for downstream reasoning — modality, anatomy, key measurements, abnormalities, selected model rationale, and report-ready facts. NEVER store workflow/progress/status markers (for example: running, queued, completed, in_progress) as notes. NEVER paste raw JSON or full tool responses.
-10. OBJECTIVE TRACKING: After each tool result, call set_next_objective to declare what you will do next to progress toward the goal. Base your decision on completed steps, artifacts, and agent notes in the current task state.
-11. CADENCE DISCIPLINE: Treat notes and objective as live state, not optional bookkeeping. Before any new action, ensure current_objective describes the immediate next step. After any meaningful result, ensure agent_notes contains what changed and why it matters. Do not let more than one meaningful step happen without refreshing both."""
-
+"""
 
 NORMAL_MODE_COMMUNICATION_RULES = """COMMUNICATION STYLE — NORMAL MODE:
 
@@ -79,10 +76,7 @@ TOOL USAGE RULES:
 5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
 6. After a tool returns results, summarize them clearly for the user.
 7. MULTI-FILE RULE: When multiple paths are listed in "FILES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
-8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices forming a single 3D volume — pass it directly to analyze_image or run_inference, do NOT iterate files inside it. A path marked as [IMAGE DIR] contains files without explicit DICOM extensions (e.g. PNG, TIFF) — these could be independent 2D images OR exported DICOM slices. Ask the user to clarify before processing: if independent images, process each file separately; if exported DICOM slices, they need to be reconstructed into a volume first.
-9. NOTE-TAKING: After EVERY clinically meaningful tool result, call update_agent_notes to record ONLY durable findings needed for downstream reasoning — modality, anatomy, key measurements, abnormalities, selected model rationale, and report-ready facts. NEVER store workflow/progress/status markers (for example: running, queued, completed, in_progress) as notes. NEVER paste raw JSON or full tool responses.
-10. OBJECTIVE TRACKING: After each tool result, call set_next_objective to declare what you will do next to progress toward the goal. Base your decision on completed steps, artifacts, and agent notes in the current task state.
-11. CADENCE DISCIPLINE: Treat notes and objective as live state, not optional bookkeeping. Before any new action, ensure current_objective describes the immediate next step. After any meaningful result, ensure agent_notes contains what changed and why it matters. Do not let more than one meaningful step happen without refreshing both."""
+8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices forming a single 3D volume — pass it directly to analyze_image or run_inference, do NOT iterate files inside it. A path marked as [IMAGE DIR] contains files without explicit DICOM extensions (e.g. PNG, TIFF) — these could be independent 2D images OR exported DICOM slices. Ask the user to clarify before processing: if independent images, process each file separately; if exported DICOM slices, they need to be reconstructed into a volume first."""
 
 
 FIRST_ITERATION_PROMPT_TEMPLATE = """GOAL: {goal}{data_context}{image_context}{session_block}
@@ -91,6 +85,18 @@ Analyze the goal and decide your next action."""
 
 
 EVAL_PROMPT_TEMPLATE = """{history_text}
+Decide the next step using this completion contract:
+
+1. You may call goal_achieved only if all required deliverables are complete.
+2. Required deliverables are the concrete outputs implied by the goal and prior decisions.
+3. If a deliverable is applicable and tooling is available, either produce it or explicitly state why it is not feasible.
+4. If any required deliverable is missing, do NOT call goal_achieved. Call the next tool.
+5. Keep your text and function call consistent. Do not state pending work and then call goal_achieved.
+
+Your decision:"""
+
+
+EVAL_PROMPT_TEMPLATE_STM = """{history_text}
 Decide the next step using this completion contract:
 
 1. You may call goal_achieved only if all required deliverables are complete.

@@ -46,6 +46,7 @@ class ConfirmationMixin:
 
         execution_history = pending["execution_history"]
         is_gemini = LLM_BACKEND.lower() != "ollama"
+        is_stateless = is_gemini and getattr(self.llm_client, "is_stateless_mode", False)
 
         if result and not is_error:
             result_summary = self._create_result_summary(tool_name, result)
@@ -58,7 +59,7 @@ class ConfirmationMixin:
             key_data = self._extract_key_data(tool_name, result)
             self._record_and_persist(tool_name, result_summary, key_data, session_id)
             # STM: symmetric update for confirmed tools
-            if hasattr(self, "stm_manager"):
+            if is_stateless and hasattr(self, "stm_manager"):
                 self.stm_manager.update_after_tool(tool_name, result, success=True, summary=result_summary)
             print(f"Tool succeeded: {result_summary}")
 
@@ -124,7 +125,6 @@ class ConfirmationMixin:
         # All calls in the turn are resolved — send accumulated results to LLM
         # Stateless mode: skip — next execute_task iteration calls generate_content fresh
         llm_response = None
-        is_stateless = is_gemini and getattr(self.llm_client, "is_stateless_mode", False)
         if is_gemini and turn_accumulated_results and not is_stateless:
             self.logger.info(f"\nSENDING {len(turn_accumulated_results)} RESULT(S) TO LLM after confirmation")
             try:
@@ -173,6 +173,8 @@ class ConfirmationMixin:
                     session_id, next_args, self.session_context.entries, set()
                 )
             elif next_name == "update_agent_notes":
+                if not (LLM_BACKEND.lower() != "ollama" and getattr(self.llm_client, "is_stateless_mode", False)):
+                    break
                 remaining_calls.pop(0)
                 key = next_args.get("key", "")
                 value = next_args.get("value", "")
@@ -182,6 +184,8 @@ class ConfirmationMixin:
                 result_summary = f"Noted: {key} = {str(value)[:50]}"
 
             elif next_name == "set_next_objective":
+                if not (LLM_BACKEND.lower() != "ollama" and getattr(self.llm_client, "is_stateless_mode", False)):
+                    break
                 remaining_calls.pop(0)
                 objective = next_args.get("objective", "")
                 if hasattr(self, "stm_manager"):

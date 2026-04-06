@@ -23,6 +23,10 @@ function Settings({ onModeChange }) {
   const [mode, setMode] = useState('debug');
   const [modeLoading, setModeLoading] = useState(false);
 
+  // LLM mode
+  const [llmMode, setLlmMode] = useState('stateful');
+  const [llmModeLoading, setLlmModeLoading] = useState(false);
+
   // Notifications
   const [notifications, setNotifications] = useState([]);
 
@@ -83,13 +87,30 @@ function Settings({ onModeChange }) {
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Load current mode on mount
+  // Load current mode and llm mode on mount
   useEffect(() => {
     apiFetch(`${API_URL}/api/mode`)
       .then(r => r.json())
       .then(d => setMode(d.mode))
       .catch(() => {});
+    apiFetch(`${API_URL}/api/llm-mode`)
+      .then(r => r.json())
+      .then(d => setLlmMode(d.llm_mode))
+      .catch(() => {});
   }, []);
+
+  const handleSetLlmMode = async (newMode) => {
+    setLlmModeLoading(true);
+    try {
+      await apiFetch(`${API_URL}/api/llm-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ llm_mode: newMode }),
+      });
+      setLlmMode(newMode);
+    } catch (e) {}
+    setLlmModeLoading(false);
+  };
 
   const handleSetMode = async (newMode) => {
     setModeLoading(true);
@@ -319,6 +340,36 @@ function Settings({ onModeChange }) {
             disabled={modeLoading}
           >
             Debug
+          </button>
+        </div>
+      </div>
+
+      {/* LLM mode toggle */}
+      <div className="settings-mode-section">
+        <div className="settings-mode-header">
+          <div>
+            <h3 className="settings-mode-title">LLM Memory</h3>
+            <p className="settings-mode-desc">
+              {llmMode === 'stateful'
+                ? 'Stateful — the LLM remembers previous messages in the conversation.'
+                : 'Stateless — each query is sent fresh with no conversation history.'}
+            </p>
+          </div>
+        </div>
+        <div className="settings-mode-buttons">
+          <button
+            className={`settings-mode-btn${llmMode === 'stateful' ? ' active' : ''}`}
+            onClick={() => handleSetLlmMode('stateful')}
+            disabled={llmModeLoading}
+          >
+            Stateful
+          </button>
+          <button
+            className={`settings-mode-btn${llmMode === 'stateless' ? ' active debug' : ''}`}
+            onClick={() => handleSetLlmMode('stateless')}
+            disabled={llmModeLoading}
+          >
+            Stateless
           </button>
         </div>
       </div>

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import os
+import json
 from typing import Dict, List, Any
 from google import genai
 from google.genai import types
 from PIL import Image
 from dotenv import load_dotenv
+from agent.prompts import AUTONOMOUS_PROMPT, BASE_SYSTEM_PROMPT
 
 load_dotenv()
 
@@ -26,6 +28,8 @@ class GeminiClient:
         self._initialize_gemini()
         self.start_chat() # Initialize the chat session immediately
 
+    
+
     def set_mode_extension(self, ext: str):
         """Set an extra block appended to the system prompt, then restart the chat."""
         self.mode_extension = ext
@@ -43,6 +47,21 @@ class GeminiClient:
         # Restart chat session with new config
         self.start_chat()
         print("System prompt updated for patient conversation")
+
+    def _get_llm_mode(self) -> str:
+        """Read llm_mode from app_settings.json dynamically (supports runtime changes via frontend)."""
+        import json
+        from pathlib import Path
+        try:
+            settings_path = Path(__file__).parent / "app_settings.json"
+            with open(settings_path) as f:
+                return json.load(f).get("llm_mode", "stateful")
+        except Exception:
+            return "stateful"
+
+    @property
+    def is_stateless_mode(self) -> bool:
+        return self._get_llm_mode() == "stateless"
 
     def set_model(self, model_id: str):
         """Switch to a different model, preserving the current chat history."""
@@ -145,30 +164,9 @@ class GeminiClient:
 
     def _base_system_prompt(self) -> str:
         """Default system prompt when no custom prompt is set"""
-        return """You are a healthcare AI assistant. You help medical professionals by analyzing medical images, parsing DICOM files, generating radiology reports, and retrieving patient data.
-
-You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
-
-BACKGROUND TASK RULES:
-- Any operation that takes more than a few seconds MUST be queued via run_inference (which auto-queues) rather than a direct blocking call.
-- This includes: MONAI inference, report generation, bulk analysis of multiple files.
-- After queuing a task, respond to the user immediately — do NOT wait for the task to finish.
-- The user will receive a notification in the UI when the task is done.
-
-CONVERSATION RULES:
-1. Be conversational. If the user greets you, greet them back. If they ask a question you can answer from context, answer it directly without calling any tool.
-2. You have memory of previous interactions in this session. If the user asks about something that was already retrieved (e.g. modality, body part), answer from what you already know - do not re-call the tool.
-3. Respond concisely and directly. Do not over-explain your reasoning.
-
-TOOL USAGE RULES:
-1. Only call a tool when the user requests an action that requires it AND the required parameters are available.
-2. NEVER invent file paths. If a tool needs a file path, use the one from "IMAGES AVAILABLE" in the context. If none is available, ask the user to upload or provide one.
-3. For DICOM files (.dcm): parse the metadata first to extract modality and body part before selecting models or running inference.
-4. MONAI models require 3D volumes (.nii, .nii.gz). If the image is a single 2D slice, inform the user.
-5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
-6. After a tool returns results, summarize them clearly for the user.
-7. MULTI-FILE RULE: When multiple paths are listed in "IMAGES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
-8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices forming a single 3D volume. Pass the directory path directly to analyze_image or run_inference — MONAI handles it natively. Do NOT iterate individual files inside the directory."""
+        if self.is_stateless_mode:
+            return AUTONOMOUS_PROMPT
+        return BASE_SYSTEM_PROMPT
     
     def generate_content(self, prompt: str, fileList: Any = None) -> Any:
         """Send a message to the stateful chat session with optional image handling."""
@@ -176,9 +174,10 @@ TOOL USAGE RULES:
             prompt = " ".join(map(str, prompt))
 
         # Start with the text part
-        content_parts = [prompt]
+        content_parts: List[Any] = [prompt]
         
         # Prepare content with actual images for Gemini
+        image_paths = []
         if fileList:
             for temp_filepath, content in fileList:
                 # Skip directories (DICOM series) and 3D medical formats
@@ -196,19 +195,30 @@ TOOL USAGE RULES:
                     if img.mode != 'RGB':
                         img = img.convert('RGB')
                     content_parts.append(img)
+                    image_paths.append(temp_filepath)
                     print(f"Added image to chat from: {os.path.basename(temp_filepath)}")
                 except Exception as e:
                     print(f"Error loading image from {temp_filepath}: {e}")
 
         # Send the message using the CHAT SESSION, passing the most recent config
         # This automatically appends user input and model output to history.
+        # Stateless: direct API call (no history); Stateful: chat session (history preserved)
+        if self.is_stateless_mode:
+            return self.genai_client.models.generate_content(
+                model=self.model_id,
+                contents=content_parts,
+                config=self.agent_config,
+            )
         return self.chat_session.send_message(
             message=content_parts,
             config=self.agent_config
         )
-    
+
     def send_function_response(self, function_name: str, response_data: Any) -> Any:
-        """Send a single function/tool result back to Gemini."""
+        """Send a single function/tool result back to Gemini (stateful chat only)."""
+        if self.is_stateless_mode:
+            print(f"[stateless] send_function_response skipped for {function_name}")
+            return None
         function_response = types.Part.from_function_response(
             name=function_name,
             response={"result": response_data}
@@ -219,9 +229,10 @@ TOOL USAGE RULES:
         )
 
     def send_multiple_function_responses(self, results: list) -> Any:
-        """Send multiple function/tool results back to Gemini in a single message.
-        Required when Gemini issued multiple function calls in the same turn.
-        results: list of (function_name, response_data) tuples, one per call."""
+        """Send multiple function/tool results back to Gemini (stateful chat only)."""
+        if self.is_stateless_mode:
+            print(f"[stateless] send_multiple_function_responses skipped ({len(results)} results)")
+            return None
         parts = [
             types.Part.from_function_response(
                 name=name,

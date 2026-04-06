@@ -29,6 +29,25 @@ const AutonomousAgent = ({ currentSessionId }) => {
     }]);
   };
 
+  const parseNdjsonResult = async (response) => {
+    const text = await response.text();
+    const jsonLine = text
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith(':'))
+      .pop();
+
+    if (!jsonLine) {
+      throw new Error('Empty response from server');
+    }
+
+    try {
+      return JSON.parse(jsonLine);
+    } catch {
+      throw new Error(`Unexpected response: ${jsonLine.slice(0, 120)}`);
+    }
+  };
+
   const isMedicalImage = (fileName) => {
     const allowedExtensions = ['.jpg', '.jpeg', '.png', '.dcm', '.nii', '.nii.gz'];
     const name = fileName.toLowerCase();
@@ -243,16 +262,16 @@ const AutonomousAgent = ({ currentSessionId }) => {
     
     try {
       const query = type === 'directory' 
-        ? `A new directory named "${name}" containing medical data has been uploaded and set as the current working directory (Path: ${path}). Please analyze its contents and autonomously perform any necessary medical workflows, such as DICOM analysis or report extraction. Explain your findings.`
-        : `A new file named "${name}" has been uploaded. Please analyze it and autonomously perform any necessary medical workflows or extraction you think is best. Explain your findings.`;
+        ? `A new directory named "${name}" containing medical data has been uploaded and set as the current working directory (Path: ${path}). Analyze it autonomously and drive the work with a clear evolving objective: first orient on what data is available, then execute the most relevant clinical workflow, and continuously adapt based on intermediate findings. Prefer a coherent end-to-end path over scattered actions. Treat completion as delivery of both key clinical findings and a concise structured radiology report when reporting information is sufficient. Keep progress updates concise with clinical rationale at major steps. Use spleen_ct_segmentation model.`
+        : `A new file named "${name}" has been uploaded. Analyze it autonomously with an objective-driven approach: establish the most relevant clinical objective from the data, execute the best workflow to completion, and refine your next actions based on results. Treat completion as delivering key findings and, when reporting details are sufficient, a concise structured radiology report. Keep progress focused and concise with clinical rationale.`;
       
       const response = await apiFetch(getApiUrl('/api/process-query'), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: query
       });
-      
-      const data = await response.json();
+
+      const data = await parseNdjsonResult(response);
 
       if (data.result?.type === 'confirmation_required') {
         setPendingTool({
@@ -284,7 +303,7 @@ const AutonomousAgent = ({ currentSessionId }) => {
 
     try {
       const response = await apiFetch(getApiUrl('/api/confirm-tool'), { method: 'POST' });
-      const data = await response.json();
+      const data = await parseNdjsonResult(response);
       
       if (data.result?.type === 'confirmation_required') {
         setPendingTool({

@@ -65,11 +65,19 @@ class ExecutionMixin:
         final_result = None
         _inference_queued: set = set()
 
+        # STM: init state only on first call (not on recursive resume)
+        if _resume_history is None and hasattr(self, "stm_manager"):
+            image_paths = [fp for fp, _ in fileList] if fileList and isinstance(fileList, list) and fileList and isinstance(fileList[0], tuple) else []
+            self.stm_manager.init_state(goal, data, image_paths)
+
         is_gemini = LLM_BACKEND.lower() != "ollama"
 
         while iterations < max_iterations:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
+            # STM: expire outdated skill references
+            if hasattr(self, "stm_manager"):
+                self.stm_manager.tick_skill_ttls()
             try:
                 # Build prompt and get LLM response
                 if is_gemini and _resume_response is not None:
@@ -96,7 +104,15 @@ class ExecutionMixin:
                     if images_for_llm:
                         self.logger.info(f"Images attached: {len(images_for_llm)} file(s)")
 
-                    content_parts = [prompt]
+                    composed_prompt = prompt
+                    if hasattr(self, "stm_manager"):
+                        stm_text = self.stm_manager.render_state_text()
+                        if stm_text:
+                            composed_prompt = "\n\n---\n\n".join([stm_text, prompt])
+
+                    self.logger.info(f"\nCOMPOSED PROMPT SENT TO LLM:\n{composed_prompt}\n")
+
+                    content_parts = [composed_prompt]
                     response = self.llm_client.generate_content(content_parts, images_for_llm)
                     self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
 
@@ -123,8 +139,10 @@ class ExecutionMixin:
                     if isinstance(_tr, dict) and not _tr.get("is_error"):
                         final_result = _tr
 
-                # Send accumulated results to LLM
-                if is_gemini and turn_results:
+                # Stateful only: send tool results in the same chat turn.
+                # Stateless mode rebuilds a fresh prompt on next loop iteration.
+                is_stateless = is_gemini and getattr(self.llm_client, "is_stateless_mode", False)
+                if is_gemini and turn_results and not is_stateless:
                     _resume_response = self._send_turn_results_to_llm(turn_results)
 
                 # If agent responded with text but no tool call (and not caught above)
@@ -286,6 +304,31 @@ class ExecutionMixin:
                             error_msg = 'Tool execution failed'
                         history_text += f"Failed: {error_msg}\n"
 
+            # Always include compact context for the most recent two tool calls.
+            # In stateless Gemini mode this provides critical continuity between turns.
+            if execution_history:
+                recent_events = execution_history[-2:]
+                recent_text = "\n\nRecent tool results (last 2):\n"
+                start_index = max(1, len(execution_history) - len(recent_events) + 1)
+                for idx, event in enumerate(recent_events, start=start_index):
+                    tool_name = event.get('tool', 'unknown_tool')
+                    if event.get('success'):
+                        result_summary = event.get('result_summary') or 'Success'
+                        recent_text += f"{idx}. {tool_name} -> Success. Summary: {result_summary}\n"
+                        result_data = event.get('result')
+                        if result_data:
+                            result_str = json.dumps(result_data, default=str)
+                            if len(result_str) > 400:
+                                result_str = result_str[:400] + "..."
+                            recent_text += f"   Data: {result_str}\n"
+                    else:
+                        error_msg = event.get('error') or 'Tool execution failed'
+                        if error_msg is None or (isinstance(error_msg, str) and not error_msg.strip()):
+                            error_msg = 'Tool execution failed'
+                        recent_text += f"{idx}. {tool_name} -> Failed: {error_msg}\n"
+
+                history_text += recent_text
+
             prompt = EVAL_PROMPT_TEMPLATE.format(history_text=history_text)
 
         return prompt, images_for_llm
@@ -435,6 +478,30 @@ class ExecutionMixin:
                     "success": False,
                 }
 
+            # --- STM built-in handlers ---
+            if tool_name == "update_agent_notes":
+                key = arguments.get("key", "")
+                value = arguments.get("value", "")
+                if hasattr(self, "stm_manager"):
+                    self.stm_manager.update_agent_notes(key, value)
+                result = {"status": "ok", "key": key}
+                result_summary = f"Noted: {key} = {str(value)[:50]}"
+                self.logger.info(f"\nSTM update_agent_notes: [{key}] = {value}")
+                execution_history.append({"tool": tool_name, "success": True, "result_summary": result_summary, "result": result})
+                turn_results.append((tool_name, result))
+                continue
+
+            if tool_name == "set_next_objective":
+                objective = arguments.get("objective", "")
+                if hasattr(self, "stm_manager"):
+                    self.stm_manager.set_next_objective(objective)
+                result = {"status": "ok", "objective": objective}
+                result_summary = f"Objective set: {objective[:80]}"
+                self.logger.info(f"\nSTM set_next_objective: {objective}")
+                execution_history.append({"tool": tool_name, "success": True, "result_summary": result_summary, "result": result})
+                turn_results.append((tool_name, result))
+                continue
+
             # Inference always runs in background (non-autonomous mode)
             if tool_name == "monai.run_inference" and not self.is_agent_autonomous:
                 result, result_summary = handle_inference_as_task(
@@ -504,6 +571,9 @@ class ExecutionMixin:
                 })
                 key_data = self._extract_key_data(tool_name, result)
                 self._record_and_persist(tool_name, result_summary, key_data, session_id)
+                # STM: record completed step and extract artifacts
+                if hasattr(self, "stm_manager"):
+                    self.stm_manager.update_after_tool(tool_name, result, success=True, summary=result_summary)
                 print(f"Tool succeeded: {result_summary}")
                 self.logger.info("  Status: SUCCESS")
                 self.logger.info(f"  Summary: {result_summary}")
@@ -519,6 +589,9 @@ class ExecutionMixin:
                     "tool": tool_name, "success": False,
                     "error": str(error_msg), "result": result,
                 })
+                # STM: record failed step
+                if hasattr(self, "stm_manager"):
+                    self.stm_manager.update_after_tool(tool_name, result, success=False, summary=str(error_msg)[:200])
 
                 # Persist a failed task record so the Results tab shows it
                 _RESULT_TOOLS = {"monai.analyze_image", "monai.run_inference", "monai.download_model"}

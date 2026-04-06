@@ -57,6 +57,9 @@ class ConfirmationMixin:
             })
             key_data = self._extract_key_data(tool_name, result)
             self._record_and_persist(tool_name, result_summary, key_data, session_id)
+            # STM: symmetric update for confirmed tools
+            if hasattr(self, "stm_manager"):
+                self.stm_manager.update_after_tool(tool_name, result, success=True, summary=result_summary)
             print(f"Tool succeeded: {result_summary}")
 
             self.logger.info("  Status: SUCCESS")
@@ -119,8 +122,10 @@ class ConfirmationMixin:
             }
 
         # All calls in the turn are resolved — send accumulated results to LLM
+        # Stateless mode: skip — next execute_task iteration calls generate_content fresh
         llm_response = None
-        if is_gemini and turn_accumulated_results:
+        is_stateless = is_gemini and getattr(self.llm_client, "is_stateless_mode", False)
+        if is_gemini and turn_accumulated_results and not is_stateless:
             self.logger.info(f"\nSENDING {len(turn_accumulated_results)} RESULT(S) TO LLM after confirmation")
             try:
                 if len(turn_accumulated_results) > 1:
@@ -167,6 +172,23 @@ class ConfirmationMixin:
                 result, result_summary = handle_inference_as_task(
                     session_id, next_args, self.session_context.entries, set()
                 )
+            elif next_name == "update_agent_notes":
+                remaining_calls.pop(0)
+                key = next_args.get("key", "")
+                value = next_args.get("value", "")
+                if hasattr(self, "stm_manager"):
+                    self.stm_manager.update_agent_notes(key, value)
+                result = {"status": "ok", "key": key}
+                result_summary = f"Noted: {key} = {str(value)[:50]}"
+
+            elif next_name == "set_next_objective":
+                remaining_calls.pop(0)
+                objective = next_args.get("objective", "")
+                if hasattr(self, "stm_manager"):
+                    self.stm_manager.set_next_objective(objective)
+                result = {"status": "ok", "objective": objective}
+                result_summary = f"Objective set: {objective[:80]}"
+
             else:
                 # Not a built-in tool — stop draining; this needs confirmation
                 break

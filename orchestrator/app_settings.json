@@ -1,4 +1,4 @@
 {
   "mode": "debug",
-  "llm_mode": "stateless"
+  "llm_mode": "stateful"
 }

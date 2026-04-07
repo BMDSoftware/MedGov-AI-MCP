@@ -74,7 +74,7 @@ def fetch_thumbnail(
             r.raise_for_status()
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(r.content)
-        return {"success": True, "path": output_path, "width": width, "height": height}
+        return {"success": True, "path": output_path, "width": width, "height": height, "image_for_llm": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -213,6 +213,7 @@ def fetch_roi(
             "width": width,
             "height": height,
             "clamped": clamped,
+            "image_for_llm": True,
         }
     except Exception as e:
         return {"success": False, "error": str(e)}

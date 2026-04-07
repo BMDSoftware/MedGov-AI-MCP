@@ -208,7 +208,7 @@ class ExecutionMixin:
         if data:
             data_context = f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)}"
 
-        image_context = "\n\nFILES AVAILABLE: None. User has not uploaded any images."
+        image_context = ""
         images_for_llm = None
 
         if fileList and isinstance(fileList, list) and fileList:
@@ -626,12 +626,25 @@ class ExecutionMixin:
 
     def _send_turn_results_to_llm(self, turn_results):
         """Send all accumulated results to the LLM in one message. Returns LLM response."""
+        # Collect images from tool results that signal image_for_llm
+        images = []
+        for _name, result in turn_results:
+            if isinstance(result, dict) and result.get("image_for_llm") and result.get("path"):
+                try:
+                    from PIL import Image
+                    img = Image.open(result["path"]).convert("RGB")
+                    images.append(img)
+                    print(f"Injecting tool image into LLM vision context: {result['path']}")
+                except Exception as e:
+                    print(f"Could not load tool image for LLM: {e}")
+        images = images or None
+
         if len(turn_results) > 1:
             self.logger.info(f"\nSENDING {len(turn_results)} RESULTS TO LLM via send_multiple_function_responses")
-            return self.llm_client.send_multiple_function_responses(turn_results)
+            return self.llm_client.send_multiple_function_responses(turn_results, images=images)
         else:
             single_name, single_data = turn_results[0]
             self.logger.info("\nSENDING FULL RESULT TO LLM via send_function_response")
-            response = self.llm_client.send_function_response(single_name, single_data)
+            response = self.llm_client.send_function_response(single_name, single_data, images=images)
             self.logger.info("Captured response from function_response(s) - will use on next iteration")
             return response

@@ -214,21 +214,23 @@ class GeminiClient:
             config=self.agent_config
         )
 
-    def send_function_response(self, function_name: str, response_data: Any) -> Any:
+    def send_function_response(self, function_name: str, response_data: Any, images: list = None) -> Any:
         """Send a single function/tool result back to Gemini (stateful chat only)."""
         if self.is_stateless_mode:
             print(f"[stateless] send_function_response skipped for {function_name}")
             return None
-        function_response = types.Part.from_function_response(
+        parts = [types.Part.from_function_response(
             name=function_name,
             response={"result": response_data}
-        )
+        )]
+        if images:
+            parts.extend(images)
         return self.chat_session.send_message(
-            message=[function_response],
+            message=parts,
             config=self.agent_config
         )
 
-    def send_multiple_function_responses(self, results: list) -> Any:
+    def send_multiple_function_responses(self, results: list, images: list = None) -> Any:
         """Send multiple function/tool results back to Gemini (stateful chat only)."""
         if self.is_stateless_mode:
             print(f"[stateless] send_multiple_function_responses skipped ({len(results)} results)")
@@ -240,6 +242,8 @@ class GeminiClient:
             )
             for name, data in results
         ]
+        if images:
+            parts.extend(images)
         return self.chat_session.send_message(
             message=parts,
             config=self.agent_config

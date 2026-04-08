@@ -55,6 +55,8 @@ RUN python -m venv orchestrator/venv \
     && orchestrator/venv/bin/pip install --upgrade pip \
     && orchestrator/venv/bin/pip install -r orchestrator/requirements.txt
 COPY orchestrator/ orchestrator/
+# mcp-config.json is gitignored (machine-specific); use the example as the in-image default
+RUN cp orchestrator/mcp-config.json.example orchestrator/mcp-config.json
 
 ENV APP_ROOT=/app
 

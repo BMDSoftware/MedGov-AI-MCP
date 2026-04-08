@@ -19,17 +19,28 @@ _startup_log_path = Path(__file__).parent / "logs" / "startup.log"
 _startup_log_path.parent.mkdir(exist_ok=True)
 
 class _Tee:
-    def __init__(self, *streams): self._streams = streams
+    def __init__(self, *streams):
+        self._streams = streams
+
     def write(self, data):
         for s in self._streams:
-            try: s.write(data)
-            except Exception: pass
+            try:
+                s.write(data)
+            except Exception:
+                pass
+
     def flush(self):
         for s in self._streams:
-            try: s.flush()
-            except Exception: pass
-    def fileno(self): return self._streams[0].fileno()
-    def isatty(self): return False
+            try:
+                s.flush()
+            except Exception:
+                pass
+
+    def fileno(self):
+        return self._streams[0].fileno()
+
+    def isatty(self):
+        return False
 
 _startup_log_file = open(_startup_log_path, "w", buffering=1, encoding="utf-8")
 sys.stdout = _Tee(sys.__stdout__, _startup_log_file)

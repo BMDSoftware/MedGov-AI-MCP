@@ -165,8 +165,8 @@ class GeminiClient:
     def _base_system_prompt(self) -> str:
         """Default system prompt when no custom prompt is set"""
         if self.is_stateless_mode:
-            return AUTONOMOUS_PROMPT
-        return BASE_SYSTEM_PROMPT
+            return AUTONOMOUS_PROMPT.format(available_skills=self.skills)
+        return BASE_SYSTEM_PROMPT.format(available_skills=self.skills)
     
     def generate_content(self, prompt: str, fileList: Any = None) -> Any:
         """Send a message to the stateful chat session with optional image handling."""

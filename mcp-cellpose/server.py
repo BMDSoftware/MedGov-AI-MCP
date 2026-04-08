@@ -136,20 +136,34 @@ def save_overlay(image_path: str, mask_path: str, output_path: str | None = None
             else:
                 img_rgb = img_rgb.astype(np.uint8)
 
-        # Draw outlines
-        outlines = utils.outlines_list(masks)
+        # Draw outlines using cellpose's built-in boundary detection
+        from cellpose import utils
+        boundary = utils.masks_to_outlines(masks)
+        # Thicken by 2px via two rounds of dilation
+        for _ in range(2):
+            boundary = (
+                boundary
+                | np.pad(boundary, ((1,0),(0,0)), mode='constant')[:-1,:]
+                | np.pad(boundary, ((0,1),(0,0)), mode='constant')[1:,:]
+                | np.pad(boundary, ((0,0),(1,0)), mode='constant')[:,:-1]
+                | np.pad(boundary, ((0,0),(0,1)), mode='constant')[:,1:]
+            )
         overlay = img_rgb.copy()
-        for outline in outlines:
-            ys = np.clip(outline[:, 0], 0, overlay.shape[0] - 1)
-            xs = np.clip(outline[:, 1], 0, overlay.shape[1] - 1)
-            overlay[ys, xs] = [0, 255, 255]
+        overlay[boundary] = [57, 255, 20]  # neon green
 
         if output_path is None:
             p = Path(mask_path)
             output_path = str(p.parent / f"{p.stem}_overlay.png")
 
         imageio.imwrite(output_path, overlay)
-        return {"overlay_path": output_path}
+
+        # Save a display-friendly binary mask: cells white, background black
+        p = Path(mask_path)
+        display_mask_path = str(p.parent / f"{p.stem}_display.png")
+        binary = ((masks > 0) * 255).astype(np.uint8)
+        imageio.imwrite(display_mask_path, binary)
+
+        return {"overlay_path": output_path, "display_mask_path": display_mask_path}
     except Exception as e:
         return {"error": str(e)}
 

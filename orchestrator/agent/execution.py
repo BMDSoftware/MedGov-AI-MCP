@@ -99,9 +99,22 @@ class ExecutionMixin:
 
                     content_parts = [prompt]
                     loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(
-                        None, self.llm_client.generate_content, content_parts, images_for_llm
-                    )
+                    try:
+                        response = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                None, self.llm_client.generate_content, content_parts, images_for_llm
+                            ),
+                            timeout=120,
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.error("LLM call timed out after 120s")
+                        return {
+                            "type": "agent_response",
+                            "answer": "The AI model took too long to respond. Please try again.",
+                            "tools_used": [],
+                            "execution_history": execution_history,
+                            "success": False,
+                        }
                     self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
 
                 # Parse the LLM response
@@ -549,14 +562,20 @@ class ExecutionMixin:
         loop = asyncio.get_event_loop()
         if len(turn_results) > 1:
             self.logger.info(f"\nSENDING {len(turn_results)} RESULTS TO LLM via send_multiple_function_responses")
-            return await loop.run_in_executor(
-                None, self.llm_client.send_multiple_function_responses, turn_results
+            return await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, self.llm_client.send_multiple_function_responses, turn_results
+                ),
+                timeout=120,
             )
         else:
             single_name, single_data = turn_results[0]
             self.logger.info("\nSENDING FULL RESULT TO LLM via send_function_response")
-            response = await loop.run_in_executor(
-                None, self.llm_client.send_function_response, single_name, single_data
+            response = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, self.llm_client.send_function_response, single_name, single_data
+                ),
+                timeout=120,
             )
             self.logger.info("Captured response from function_response(s) - will use on next iteration")
             return response

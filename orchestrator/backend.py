@@ -296,7 +296,7 @@ async def lifespan(app: FastAPI):
     # Startup
     db.init_db()
     task_runner.init()
-    asyncio.create_task(_poll_mcp_tools(30))
+    asyncio.create_task(_poll_mcp_tools(120))
 
     # Start watcher service and resume all enabled watched directories
     watcher_service.set_execute_callback(_watcher_execute)

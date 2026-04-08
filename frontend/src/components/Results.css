@@ -360,3 +360,30 @@
   overflow-x: auto;
   margin-top: 12px;
 }
+
+.image-view-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.image-view-btn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border, #3f3f46);
+  background: transparent;
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.image-view-btn:hover {
+  background: rgba(255,255,255,0.05);
+  color: var(--text, #fff);
+}
+
+.image-view-btn.active {
+  background: var(--accent, #6366f1);
+  color: #fff;
+  border-color: var(--accent, #6366f1);
+}

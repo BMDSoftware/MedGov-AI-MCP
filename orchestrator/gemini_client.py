@@ -150,8 +150,11 @@ class GeminiClient:
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
 
 BACKGROUND TASK RULES:
-- Any operation that takes more than a few seconds MUST be queued via run_inference (which auto-queues) rather than a direct blocking call.
-- This includes: MONAI inference, report generation, bulk analysis of multiple files.
+- Any operation that takes more than a few seconds MUST be queued with queue_task instead of called directly.
+- This includes: MONAI inference (monai.run_inference), Cellpose segmentation (cellpose.segment_cells_2d), report generation, bulk analysis.
+- For 'inference' tasks: input_data = {"image_path": "...", "model_name": "..."}
+- For 'cellpose' tasks: input_data = {"image_path": "...", "model_type": "cpsam"}
+- When the user asks to count cells, segment cells, or analyse a microscopy image, ALWAYS queue a 'cellpose' task — do NOT attempt to count visually.
 - After queuing a task, respond to the user immediately — do NOT wait for the task to finish.
 - The user will receive a notification in the UI when the task is done.
 

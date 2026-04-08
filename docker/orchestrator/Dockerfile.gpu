@@ -68,10 +68,8 @@ RUN python3.11 -m venv mcp-cellpose/venv \
        torch torchvision \
        --index-url https://download.pytorch.org/whl/${TORCH_CUDA} \
     && mcp-cellpose/venv/bin/pip install -r mcp-cellpose/requirements.txt
-# Pre-download main segmentation models so first inference isn't slow
-RUN mcp-cellpose/venv/bin/python -c "\
-from cellpose import models; \
-[models.CellposeModel(gpu=True, model_type=m) for m in ['cyto3', 'cyto2', 'cyto', 'nuclei']]"
+# Pre-download cpsam (the only model in cellpose v4) so first inference isn't slow
+RUN mcp-cellpose/venv/bin/python -c "from cellpose import models; models.CellposeModel(gpu=True)"
 COPY mcp-cellpose/ mcp-cellpose/
 
 # ── orchestrator ───────────────────────────────────────────────────────────────

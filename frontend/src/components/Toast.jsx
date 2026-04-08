@@ -19,9 +19,22 @@ function Toast({ onTaskUpdate, authToken }) {
 
   useEffect(() => {
     if (!authToken) return; // don't open SSE if not logged in
-    const es = new EventSource(authEventSourceUrl('/api/events'));
 
-    es.onmessage = (e) => {
+    let es;
+    let retryTimeout;
+    let cancelled = false;
+
+    const connect = () => {
+      if (cancelled) return;
+      es = new EventSource(authEventSourceUrl('/api/events'));
+      es.onmessage = handleMessage;
+      es.onerror = () => {
+        es.close();
+        if (!cancelled) retryTimeout = setTimeout(connect, 3000);
+      };
+    };
+
+    const handleMessage = (e) => {
       try {
         const event = JSON.parse(e.data);
         if (event.type === 'connected') return;
@@ -57,11 +70,13 @@ function Toast({ onTaskUpdate, authToken }) {
       }
     };
 
-    es.onerror = () => {
-      // SSE auto-reconnects; nothing to do
-    };
+    connect();
 
-    return () => es.close();
+    return () => {
+      cancelled = true;
+      clearTimeout(retryTimeout);
+      if (es) es.close();
+    };
   }, [authToken]);
 
   const dismiss = (id) => setToasts(prev => prev.filter(t => t.id !== id));

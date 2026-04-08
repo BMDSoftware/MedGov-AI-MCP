@@ -45,11 +45,8 @@ COPY mcp-cellpose/requirements.txt mcp-cellpose/requirements.txt
 RUN python -m venv mcp-cellpose/venv \
     && mcp-cellpose/venv/bin/pip install --upgrade pip \
     && mcp-cellpose/venv/bin/pip install -r mcp-cellpose/requirements.txt
-# Pre-download all main cellpose models so first inference isn't slow
-# Skipping cpsam (SAM-based, ~2.5GB) — too large for CPU deployment
-RUN mcp-cellpose/venv/bin/python -c "\
-from cellpose import models; \
-[models.CellposeModel(gpu=False, model_type=m) for m in ['cyto3', 'cyto2', 'cyto', 'nuclei']]"
+# Pre-download cpsam (the only model in cellpose v4) so first inference isn't slow
+RUN mcp-cellpose/venv/bin/python -c "from cellpose import models; models.CellposeModel(gpu=False)"
 COPY mcp-cellpose/ mcp-cellpose/
 
 # ── orchestrator ───────────────────────────────────────────────────────────────

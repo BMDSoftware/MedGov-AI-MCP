@@ -285,44 +285,7 @@ function TaskResult({ task }) {
         </div>
       );
     }
-    const token = getToken();
-    const imageUrl = result?.output_path
-      ? `${API_URL}/api/files/image?path=${encodeURIComponent(result.output_path)}${token ? `&token=${encodeURIComponent(token)}` : ''}`
-      : null;
-    return (
-      <div className="task-result-inference">
-        <div className="result-meta-row">
-          <span>Cells detected: <strong>{result?.cells_detected ?? '—'}</strong></span>
-          <span>Model: <strong>{task.input_data?.model_type || '—'}</strong></span>
-          {result?.diameter != null && (
-            <span>Diameter: <strong>{result.diameter.toFixed(1)} px</strong></span>
-          )}
-        </div>
-        {result?.mask_shape && (
-          <div className="task-inference-summary-row">
-            <span className="task-summary-label">Mask shape</span>
-            <span className="task-summary-value">{result.mask_shape.join(' × ')}</span>
-          </div>
-        )}
-        {imageUrl && (
-          <div style={{ marginTop: '1rem' }}>
-            <img
-              src={imageUrl}
-              alt="Segmentation mask"
-              style={{ width: '30%', borderRadius: '6px', border: '1px solid var(--border)', display: 'block' }}
-            />
-          </div>
-        )}
-        {result?.output_path && (
-          <div className="task-inference-summary-row" style={{ marginTop: '0.5rem' }}>
-            <span className="task-summary-label">Mask saved</span>
-            <span className="task-summary-value" style={{ wordBreak: 'break-all' }}>
-              {result.output_path}
-            </span>
-          </div>
-        )}
-      </div>
-    );
+    return <CellposeResult task={task} result={result} />;
   }
 
   if (task.task_type === 'report') {
@@ -376,6 +339,66 @@ function TaskResult({ task }) {
   // Generic fallback
   return (
     <pre className="task-result-raw">{JSON.stringify(result, null, 2)}</pre>
+  );
+}
+
+function CellposeResult({ task, result }) {
+  const [view, setView] = useState('overlay'); // 'original' | 'mask' | 'overlay'
+  const token = getToken();
+
+  const makeUrl = (path) =>
+    path
+      ? `${API_URL}/api/files/image?path=${encodeURIComponent(path)}${token ? `&token=${encodeURIComponent(token)}` : ''}`
+      : null;
+
+  const originalUrl = makeUrl(task.input_data?.image_path);
+  const maskUrl = makeUrl(result?.mask_path);
+  const overlayUrl = makeUrl(result?.output_path);
+
+  const views = [
+    { key: 'original', label: 'Original', url: originalUrl },
+    { key: 'mask', label: 'Mask', url: maskUrl },
+    { key: 'overlay', label: 'Overlay', url: overlayUrl },
+  ].filter(v => v.url);
+
+  const activeUrl = views.find(v => v.key === view)?.url || views[0]?.url;
+
+  return (
+    <div className="task-result-inference">
+      <div className="result-meta-row">
+        <span>Cells detected: <strong>{result?.cells_detected ?? '—'}</strong></span>
+        <span>Model: <strong>{task.input_data?.model_type || '—'}</strong></span>
+        {result?.diameter != null && (
+          <span>Diameter: <strong>{result.diameter.toFixed(1)} px</strong></span>
+        )}
+      </div>
+      {result?.mask_shape && (
+        <div className="task-inference-summary-row">
+          <span className="task-summary-label">Mask shape</span>
+          <span className="task-summary-value">{result.mask_shape.join(' × ')}</span>
+        </div>
+      )}
+      {views.length > 0 && (
+        <div style={{ marginTop: '1rem' }}>
+          <div className="image-view-toggle">
+            {views.map(v => (
+              <button
+                key={v.key}
+                className={`image-view-btn ${view === v.key ? 'active' : ''}`}
+                onClick={() => setView(v.key)}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <img
+            src={activeUrl}
+            alt={view}
+            style={{ width: '100%', maxWidth: '500px', borderRadius: '6px', border: '1px solid var(--border)', display: 'block', marginTop: '0.5rem' }}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 

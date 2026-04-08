@@ -556,8 +556,9 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
 
         # Build a unique output path that includes the model name so concurrent
         # runs on the same image with different models don't overwrite each other.
+        # Always use .png for masks — JPEG is lossy and corrupts integer cell labels.
         p = Path(image_path)
-        unique_output = str(p.parent / f"{p.stem}_{model_type}_masks{p.suffix}")
+        unique_output = str(p.parent / f"{p.stem}_{model_type}_masks.png")
 
         arguments = {
             "image_path": image_path,
@@ -583,6 +584,23 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
 
         if isinstance(result, dict) and "error" in result:
             raise RuntimeError(result["error"])
+
+        # Generate overlay image (outlines drawn on original) for display in the Results tab
+        if isinstance(result, dict) and "output_path" in result:
+            try:
+                overlay_result = await session.call_tool(
+                    "save_overlay",
+                    arguments={"image_path": image_path, "mask_path": result["output_path"]},
+                )
+                overlay_combined = "".join(
+                    block.text for block in overlay_result.content if hasattr(block, "text")
+                )
+                overlay_data = json.loads(overlay_combined)
+                if "overlay_path" in overlay_data:
+                    result["mask_path"] = result["output_path"]
+                    result["output_path"] = overlay_data["overlay_path"]
+            except Exception as overlay_err:
+                print(f"[task_runner] Overlay generation failed (non-fatal): {overlay_err}")
 
         return result
 

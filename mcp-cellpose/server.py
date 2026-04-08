@@ -56,7 +56,7 @@ _MODEL_DESCRIPTIONS = {
 }
 
 
-@mcp.tool()
+# @mcp.tool()  # only cpsam is used in v4 — no need to expose model listing
 def list_models_with_descriptions() -> dict:
     """List all available Cellpose models with a short description of each.
 
@@ -78,7 +78,7 @@ def list_models_with_descriptions() -> dict:
     }
 
 
-@mcp.tool()
+# @mcp.tool()  # only cpsam is used in v4 — no need to expose model listing
 def describe_models(model_names: list[str]) -> dict:
     """Get detailed descriptions for a specific subset of Cellpose models.
 
@@ -95,6 +95,63 @@ def describe_models(model_names: list[str]) -> dict:
         name: _MODEL_DESCRIPTIONS.get(name, f"No description available for '{name}'.")
         for name in model_names
     }
+
+
+@mcp.tool()
+def save_overlay(image_path: str, mask_path: str, output_path: str | None = None) -> dict:
+    """Draw segmentation outlines on the original image and save as PNG.
+
+    Creates a visualization where cell boundaries are drawn in red on top of the
+    original image. Use this after segment_cells_2d to inspect where cells were detected.
+
+    Args:
+        image_path: Path to the original image
+        mask_path: Path to the mask file produced by segment_cells_2d
+        output_path: Optional path for the overlay PNG (default: mask_path with _overlay.png suffix)
+
+    Returns:
+        Dictionary with overlay_path, or error key on failure
+    """
+    import numpy as np
+    import imageio.v2 as imageio
+    from pathlib import Path
+    from cellpose import utils, io
+
+    try:
+        img = io.imread(image_path)
+        masks = io.imread(mask_path)
+
+        # Convert to uint8 RGB
+        if img.ndim == 2:
+            img_rgb = np.stack([img, img, img], axis=-1)
+        elif img.ndim == 3 and img.shape[-1] >= 3:
+            img_rgb = img[:, :, :3].copy()
+        else:
+            img_rgb = np.stack([img[..., 0]] * 3, axis=-1)
+
+        if img_rgb.dtype != np.uint8:
+            vmax = img_rgb.max()
+            if vmax > 0:
+                img_rgb = (img_rgb / vmax * 255).astype(np.uint8)
+            else:
+                img_rgb = img_rgb.astype(np.uint8)
+
+        # Draw outlines
+        outlines = utils.outlines_list(masks)
+        overlay = img_rgb.copy()
+        for outline in outlines:
+            ys = np.clip(outline[:, 0], 0, overlay.shape[0] - 1)
+            xs = np.clip(outline[:, 1], 0, overlay.shape[1] - 1)
+            overlay[ys, xs] = [0, 255, 255]
+
+        if output_path is None:
+            p = Path(mask_path)
+            output_path = str(p.parent / f"{p.stem}_overlay.png")
+
+        imageio.imwrite(output_path, overlay)
+        return {"overlay_path": output_path}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 if __name__ == "__main__":

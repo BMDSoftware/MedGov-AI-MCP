@@ -24,21 +24,27 @@ jobs:
             echo "COMPOSE_FILE=docker-compose.yml" >> $GITHUB_ENV
           fi
 
+      - name: Build Docker images
+        env:
+          ORCHESTRATOR_BUILD_TYPE: ${{ env.ORCHESTRATOR_BUILD_TYPE }}
+          COMPOSE_FILE: ${{ env.COMPOSE_FILE }}
+        run: docker compose build
+
       - name: Prepare deploy directory
         run: |
           mkdir -p /opt/medgov-ai-mcp
-          rsync -a --delete \
-            --exclude 'orchestrator/.env' \
-            --exclude 'orchestrator/data/' \
-            --exclude 'mcp-monai/bundles/' \
-            --exclude 'orchestrator/workspaces/' \
-            . /opt/medgov-ai-mcp/
+          cp docker-compose.yml /opt/medgov-ai-mcp/docker-compose.yml
+          cp docker-compose.gpu.yml /opt/medgov-ai-mcp/docker-compose.gpu.yml
+          cp -r docker /opt/medgov-ai-mcp/docker
+          if [ ! -f /opt/medgov-ai-mcp/orchestrator/.env ]; then
+            mkdir -p /opt/medgov-ai-mcp/orchestrator
+            cp orchestrator/.env.example /opt/medgov-ai-mcp/orchestrator/.env
+            echo "WARNING: .env was created from example - update it with real values"
+          fi
 
-      - name: Build and start services
+      - name: Start services
         working-directory: /opt/medgov-ai-mcp
         env:
           ORCHESTRATOR_BUILD_TYPE: ${{ env.ORCHESTRATOR_BUILD_TYPE }}
           COMPOSE_FILE: ${{ env.COMPOSE_FILE }}
-        run: |
-          docker compose build
-          docker compose up -d
+        run: docker compose up -d

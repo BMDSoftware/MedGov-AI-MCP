@@ -10,6 +10,7 @@ function AgentLog() {
   const [lines, setLines] = useState([]);
   const [collapsed, setCollapsed] = useState(false);
   const [filename, setFilename] = useState('');
+  const [source, setSource] = useState('agent'); // 'agent' | 'startup'
   const bottomRef = useRef(null);
   const containerRef = useRef(null);
   const userScrolledUp = useRef(false);
@@ -18,7 +19,7 @@ function AgentLog() {
     let active = true;
     const poll = async () => {
       try {
-        const res = await apiFetch(`${API_URL}/api/logs?lines=200`);
+        const res = await apiFetch(`${API_URL}/api/logs?lines=200&source=${source}`);
         const data = await res.json();
         if (active) {
           setLines(data.lines || []);
@@ -31,7 +32,7 @@ function AgentLog() {
     poll();
     const interval = setInterval(poll, 2000);
     return () => { active = false; clearInterval(interval); };
-  }, []);
+  }, [source]);
 
   // Auto-scroll to bottom unless user scrolled up
   useEffect(() => {
@@ -83,9 +84,23 @@ function AgentLog() {
         }}
       >
         <span style={{ color: '#6366f1', fontWeight: 700, fontSize: '11px' }}>
-          AGENT LOG {filename ? `— ${filename}` : ''}
+          {source === 'startup' ? 'STARTUP LOG' : 'AGENT LOG'} {filename ? `— ${filename}` : ''}
         </span>
-        <span style={{ color: '#6366f1' }}>{collapsed ? '▲' : '▼'}</span>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          {!collapsed && (
+            <>
+              <span
+                onClick={(e) => { e.stopPropagation(); setSource('agent'); setLines([]); }}
+                style={{ cursor: 'pointer', color: source === 'agent' ? '#fff' : '#6366f1', fontSize: '10px', padding: '1px 5px', border: '1px solid #6366f1', borderRadius: '3px' }}
+              >Agent</span>
+              <span
+                onClick={(e) => { e.stopPropagation(); setSource('startup'); setLines([]); }}
+                style={{ cursor: 'pointer', color: source === 'startup' ? '#fff' : '#6366f1', fontSize: '10px', padding: '1px 5px', border: '1px solid #6366f1', borderRadius: '3px' }}
+              >Startup</span>
+            </>
+          )}
+          <span style={{ color: '#6366f1' }}>{collapsed ? '▲' : '▼'}</span>
+        </div>
       </div>
 
       {/* Log body */}

@@ -69,8 +69,7 @@ RUN python3.11 -m venv mcp-cellpose/venv \
        --index-url https://download.pytorch.org/whl/${TORCH_CUDA} \
     && mcp-cellpose/venv/bin/pip install -r mcp-cellpose/requirements.txt
 # Pre-download cpsam (the only model in cellpose v4) so first inference isn't slow
-# Pre-download model weights (gpu=False so this works on CPU-only build machines)
-RUN mcp-cellpose/venv/bin/python -c "from cellpose import models; models.CellposeModel(gpu=False)"
+RUN mcp-cellpose/venv/bin/python -c "from cellpose import models; models.CellposeModel(gpu=True)"
 COPY mcp-cellpose/ mcp-cellpose/
 
 # ── orchestrator ───────────────────────────────────────────────────────────────

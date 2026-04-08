@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional, Dict
@@ -12,6 +13,27 @@ from dotenv import load_dotenv
 
 # Load env BEFORE importing agent so LLM_BACKEND is set
 load_dotenv()
+
+# Tee stdout to a startup log so MCP server errors are visible via /api/logs/startup
+_startup_log_path = Path(__file__).parent / "logs" / "startup.log"
+_startup_log_path.parent.mkdir(exist_ok=True)
+
+class _Tee:
+    def __init__(self, *streams): self._streams = streams
+    def write(self, data):
+        for s in self._streams:
+            try: s.write(data)
+            except Exception: pass
+    def flush(self):
+        for s in self._streams:
+            try: s.flush()
+            except Exception: pass
+    def fileno(self): return self._streams[0].fileno()
+    def isatty(self): return False
+
+_startup_log_file = open(_startup_log_path, "w", buffering=1, encoding="utf-8")
+sys.stdout = _Tee(sys.__stdout__, _startup_log_file)
+sys.stderr = _Tee(sys.__stderr__, _startup_log_file)
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Body, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -386,10 +408,22 @@ async def set_mode(data: dict = Body(...), current_user: dict = Depends(get_curr
     return {"mode": mode}
 
 
-@app.get("/api/logs", tags=["system"], summary="Tail the latest agent debug log file")
-async def get_agent_logs(lines: int = 200, current_user: dict = Depends(get_current_user)):
+@app.get("/api/logs", tags=["system"], summary="Tail the latest agent debug log or startup log")
+async def get_agent_logs(lines: int = 200, source: str = "agent", current_user: dict = Depends(get_current_user)):
     import glob as _glob
     log_dir = Path(__file__).parent / "logs"
+
+    if source == "startup":
+        log_file = log_dir / "startup.log"
+        if not log_file.exists():
+            return {"lines": [], "file": None}
+        try:
+            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                all_lines = f.readlines()
+            return {"lines": all_lines[-lines:], "file": "startup.log"}
+        except Exception as e:
+            return {"lines": [str(e)], "file": None}
+
     files = sorted(_glob.glob(str(log_dir / "agenticagent_debug_*.txt")))
     if not files:
         return {"lines": [], "file": None}

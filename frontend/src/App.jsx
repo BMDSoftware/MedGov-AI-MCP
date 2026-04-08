@@ -14,6 +14,7 @@ import HomePage from './components/HomePage';
 import AutonomousAgent from './components/AutonomousAgent';
 import Workspaces from './components/Workspaces';
 import NavDock from './components/NavDock';
+import AgentLog from './components/AgentLog';
 import { MdHome, MdSmartToy, MdBiotech, MdBarChart, MdDescription, MdFolder, MdSettings, MdHistory, MdScience } from 'react-icons/md';
 
 function App() {
@@ -398,6 +399,8 @@ function App() {
           if (pageRef.current !== 'results') setUnreadTaskCount(n => n + 1);
         }
       }} />
+
+      {appMode === 'debug' && <AgentLog />}
 
       {page !== 'home' && <aside className="sidebar">
         <div className="logo" style={{ cursor: 'pointer' }} onClick={() => setPage('home')}>

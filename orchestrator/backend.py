@@ -386,6 +386,22 @@ async def set_mode(data: dict = Body(...), current_user: dict = Depends(get_curr
     return {"mode": mode}
 
 
+@app.get("/api/logs", tags=["system"], summary="Tail the latest agent debug log file")
+async def get_agent_logs(lines: int = 200, current_user: dict = Depends(get_current_user)):
+    import glob as _glob
+    log_dir = Path(__file__).parent / "logs"
+    files = sorted(_glob.glob(str(log_dir / "agenticagent_debug_*.txt")))
+    if not files:
+        return {"lines": [], "file": None}
+    latest = files[-1]
+    try:
+        with open(latest, "r", encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+        return {"lines": all_lines[-lines:], "file": Path(latest).name}
+    except Exception as e:
+        return {"lines": [str(e)], "file": None}
+
+
 # --- Watched Directories ---
 
 @app.get("/api/watched-directories", tags=["system"], summary="List all watched directories")

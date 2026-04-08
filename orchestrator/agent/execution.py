@@ -24,7 +24,7 @@ class ExecutionMixin:
         goal: str,
         data: Any = None,
         fileList: Any = None,
-        max_iterations: int = 20,
+        max_iterations: int = 10,
         metadata: Dict = None,
         _resume_history: List = None,
         _resume_response: Optional[Any] = None,

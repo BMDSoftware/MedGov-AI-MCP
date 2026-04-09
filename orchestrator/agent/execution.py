@@ -244,18 +244,20 @@ class ExecutionMixin:
                 )
             image_context = "\n\nFILES AVAILABLE: Yes\n" + "\n".join(parts)
 
-            # Only pass small 2D images to LLM
-            images_for_llm = []
-            for temp_filepath, content in fileList:
-                if os.path.isdir(temp_filepath):
-                    continue
-                ext = temp_filepath.lower()
-                if not ext.endswith(('.nii', '.nii.gz', '.dcm', '.mha', '.mhd', '.nrrd')):
-                    if len(content) < 5 * 1024 * 1024:
-                        images_for_llm.append((temp_filepath, content))
-
-            if not images_for_llm:
-                images_for_llm = None
+            # Do not send image data to the LLM - file paths in the prompt are sufficient
+            # for the agent to call the right tools. Sending large images to flash-lite
+            # models causes timeouts and is not needed for tool dispatch decisions.
+            # images_for_llm = []
+            # for temp_filepath, content in fileList:
+            #     if os.path.isdir(temp_filepath):
+            #         continue
+            #     ext = temp_filepath.lower()
+            #     if not ext.endswith(('.nii', '.nii.gz', '.dcm', '.mha', '.mhd', '.nrrd')):
+            #         if len(content) < 5 * 1024 * 1024:
+            #             images_for_llm.append((temp_filepath, content))
+            # if not images_for_llm:
+            #     images_for_llm = None
+            images_for_llm = None
         elif fileList:
             image_context = "\n\nFILES AVAILABLE:\nImage data provided"
 

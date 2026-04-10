@@ -21,6 +21,15 @@ from mcp.server.fastmcp import FastMCP
 
 IPATH_BASE = "https://ipath.bmd-software.com/dicoogle"
 MAX_ROI_DIM = 2700
+UID_SUFFIX = ".1.1.1.1.1.1.1"
+
+
+def normalize_uid(uid: str) -> str:
+    """Append the standard iPath UID suffix if not already present."""
+    uid = uid.strip()
+    if not uid.endswith(UID_SUFFIX):
+        uid += UID_SUFFIX
+    return uid
 
 
 def log(msg: str):
@@ -43,27 +52,16 @@ def fetch_thumbnail(
     height: int = 588,
 ) -> Dict[str, Any]:
     """
-    Download a scaled overview of a whole-slide image from iPath.
-
-    Calls the ROI endpoint with x=0, y=0 to get a full-slide overview image
-    downsampled to the requested dimensions. The server scales the entire slide
-    to fit — this is NOT a crop. Default size is 844x588. Both dimensions are
-    clamped to 2700 max.
-
-    Use the returned width and height as thumb_img_w / thumb_img_h in
-    scale_roi_to_slide.
+    Download a scaled overview of a whole-slide iPath image to a local file.
+    Returns width/height to use as thumb_img_w/thumb_img_h in scale_roi_to_slide.
 
     Args:
-        slide_uid: The DICOM UID of the slide
-                   (e.g. 2.25.338247016696998394111485786182386609869)
-        output_path: Absolute path where the thumbnail image will be saved
-        width: Requested thumbnail width in pixels (default 844, max 2700)
-        height: Requested thumbnail height in pixels (default 588, max 2700)
-
-    Returns:
-        {success: true, path, width, height} on success,
-        {success: false, error} on failure.
+        slide_uid: DICOM UID of the slide (e.g. 2.25.338...)
+        output_path: Absolute path where the image will be saved
+        width: Thumbnail width in pixels (default 844, max 2700)
+        height: Thumbnail height in pixels (default 588, max 2700)
     """
+    slide_uid = normalize_uid(slide_uid)
     width = min(width, MAX_ROI_DIM)
     height = min(height, MAX_ROI_DIM)
     url = f"{IPATH_BASE}/roi?x=0&y=0&width={width}&height={height}&uid={slide_uid}"
@@ -82,19 +80,12 @@ def fetch_thumbnail(
 @mcp.tool()
 def get_slide_dimensions(slide_uid: str) -> Dict[str, Any]:
     """
-    Retrieve the full pixel dimensions of a whole-slide image from iPath.
-
-    Uses Dicoogle's /dump endpoint to read TotalPixelMatrixColumns and
-    TotalPixelMatrixRows directly from the indexed DICOM tags. Call this before
-    scale_roi_to_slide to get the slide_w and slide_h values needed for scaling.
+    Get the full pixel dimensions of a whole-slide iPath image.
 
     Args:
-        slide_uid: The DICOM UID of the slide (SOPInstanceUID)
-
-    Returns:
-        {success: true, width, height} on success,
-        {success: false, error} on failure.
+        slide_uid: DICOM UID of the slide
     """
+    slide_uid = normalize_uid(slide_uid)
     url = f"{IPATH_BASE}/dump?uid={slide_uid}"
     log(f"get_slide_dimensions: {url}")
     try:
@@ -128,24 +119,13 @@ def scale_roi_to_slide(
     slide_h: int,
 ) -> Dict[str, Any]:
     """
-    Scale a bounding box from thumbnail pixel coordinates to full slide coordinates.
-
-    Use this after visually identifying the tumor region in the thumbnail image.
-    thumb_img_w and thumb_img_h should match the width/height returned by
-    fetch_thumbnail. Slide dimensions come from get_slide_dimensions.
+    Scale a bounding box from thumbnail coordinates to full slide coordinates.
 
     Args:
-        thumb_x: Left edge of bounding box in thumbnail pixels
-        thumb_y: Top edge of bounding box in thumbnail pixels
-        thumb_w: Width of bounding box in thumbnail pixels
-        thumb_h: Height of bounding box in thumbnail pixels
-        thumb_img_w: Total width of the thumbnail image (from fetch_thumbnail)
-        thumb_img_h: Total height of the thumbnail image (from fetch_thumbnail)
-        slide_w: Full slide width in pixels (from get_slide_dimensions)
-        slide_h: Full slide height in pixels (from get_slide_dimensions)
-
-    Returns:
-        {x, y, width, height} in full slide pixel coordinates, ready for fetch_roi.
+        thumb_x, thumb_y: Top-left of bbox in thumbnail pixels
+        thumb_w, thumb_h: Size of bbox in thumbnail pixels
+        thumb_img_w, thumb_img_h: Thumbnail dimensions (from fetch_thumbnail)
+        slide_w, slide_h: Full slide dimensions (from get_slide_dimensions)
     """
     scale_x = slide_w / thumb_img_w
     scale_y = slide_h / thumb_img_h
@@ -167,32 +147,17 @@ def fetch_roi(
     output_path: str,
 ) -> Dict[str, Any]:
     """
-    Fetch a high-resolution region of interest from a whole-slide iPath image.
+    Fetch a high-res ROI from a whole-slide iPath image. Width/height clamped to 2700px.
 
-    IMPORTANT: width and height are hard-clamped to a maximum of 2700 pixels each
-    before the HTTP request is made. This is enforced unconditionally regardless of
-    the values supplied. If clamping occurs, the response includes clamped=true so
-    the agent can note it.
-
-    Typical workflow:
-      1. fetch_thumbnail -> save thumbnail locally
-      2. LLM visually identifies tumor bbox in thumbnail pixels
-      3. get_slide_dimensions -> get full slide size
-      4. scale_roi_to_slide -> convert to slide-space coordinates
-      5. fetch_roi -> download the high-res ROI (this tool)
+    Workflow: fetch_thumbnail -> identify bbox -> get_slide_dimensions -> scale_roi_to_slide -> fetch_roi
 
     Args:
-        slide_uid: The DICOM UID of the slide
-        x: Left edge of ROI in full slide pixels
-        y: Top edge of ROI in full slide pixels
-        width: Width of ROI in full slide pixels (clamped to 2700 max)
-        height: Height of ROI in full slide pixels (clamped to 2700 max)
-        output_path: Absolute path where the ROI image will be saved
-
-    Returns:
-        {success: true, path, x, y, width, height, clamped} on success,
-        {success: false, error} on failure.
+        slide_uid: DICOM UID of the slide
+        x, y: Top-left of ROI in full slide pixels
+        width, height: Size of ROI in full slide pixels (max 2700)
+        output_path: Absolute path where the image will be saved
     """
+    slide_uid = normalize_uid(slide_uid)
     clamped = width > MAX_ROI_DIM or height > MAX_ROI_DIM
     width = min(width, MAX_ROI_DIM)
     height = min(height, MAX_ROI_DIM)

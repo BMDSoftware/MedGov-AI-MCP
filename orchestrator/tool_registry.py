@@ -97,7 +97,7 @@ class ToolRegistry:
                     task.uncancel()
                 print(f"[{name}] Not available - skipping (CancelledError)")
             except Exception as e:
-                print(f"[{name}] Not available - skipping ({type(e).__name__})")
+                print(f"[{name}] Not available - skipping ({type(e).__name__}: {e})")
             finally:
                 if success:
                     # Hand off cleanup to the main stack via callback

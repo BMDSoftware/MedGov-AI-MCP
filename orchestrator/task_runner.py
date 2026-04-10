@@ -499,7 +499,8 @@ def _handle_cellpose(input_data: Dict, session_id: str) -> Dict:
     when multiple users submit concurrent segmentation tasks.
     """
     image_path = input_data["image_path"]
-    model_type = input_data.get("model_type", "cyto3")
+    # Cellpose v4 only supports cpsam — force it regardless of what the agent requested
+    model_type = "cpsam"
     task_id = input_data.get("_task_id")
 
     _cellpose_semaphore.acquire()
@@ -532,6 +533,72 @@ def _handle_cellpose(input_data: Dict, session_id: str) -> Dict:
         _cellpose_semaphore.release()
 
 
+def _find_mcp_subprocess(cmdline_pattern: str):
+    """
+    Return the psutil.Process whose command line contains `cmdline_pattern`, or None.
+    Used to locate a running MCP stdio server subprocess for watchdog monitoring.
+    """
+    try:
+        import psutil
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                cmdline = proc.info.get("cmdline") or []
+                if any(cmdline_pattern in arg for arg in cmdline):
+                    return proc
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except Exception:
+        pass
+    return None
+
+
+async def _mcp_subprocess_watchdog(
+    proc,
+    warmup_secs: float = 60,
+    idle_check_interval: float = 5,
+    max_idle_checks: int = 10,
+) -> None:
+    """
+    General watchdog for any MCP stdio subprocess.
+
+    After `warmup_secs` (to allow model loading / startup), CPU% is sampled every
+    `idle_check_interval` seconds. If the process stays below 0.5% CPU for
+    `max_idle_checks` consecutive samples it is considered deadlocked and
+    RuntimeError is raised.
+
+    This catches any hang where the subprocess is alive but the MCP pipe has
+    stalled — OpenMP deadlocks, GPU stalls, infinite waits, etc.
+
+    Pair with asyncio.wait(..., return_when=FIRST_COMPLETED) alongside the actual
+    MCP tool call so the caller can cancel the tool call and fail the task.
+    """
+    import psutil
+
+    await asyncio.sleep(warmup_secs)
+
+    idle_checks = 0
+    loop = asyncio.get_event_loop()
+
+    while True:
+        try:
+            cpu = await loop.run_in_executor(None, proc.cpu_percent, 0.5)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            raise RuntimeError("MCP subprocess exited unexpectedly during tool call.")
+
+        if cpu < 0.5:
+            idle_checks += 1
+        else:
+            idle_checks = 0
+
+        if idle_checks >= max_idle_checks:
+            raise RuntimeError(
+                f"MCP subprocess appears hung (CPU idle for "
+                f"~{int(idle_checks * idle_check_interval)}s after warmup). Task failed."
+            )
+
+        await asyncio.sleep(idle_check_interval - 0.5)  # 0.5s already spent in cpu_percent
+
+
 async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict) -> Dict:
     """Open a fresh MCP session to the Cellpose server and run segmentation."""
     from mcp import ClientSession, StdioServerParameters
@@ -556,8 +623,9 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
 
         # Build a unique output path that includes the model name so concurrent
         # runs on the same image with different models don't overwrite each other.
+        # Always use .png for masks — JPEG is lossy and corrupts integer cell labels.
         p = Path(image_path)
-        unique_output = str(p.parent / f"{p.stem}_{model_type}_masks{p.suffix}")
+        unique_output = str(p.parent / f"{p.stem}_{model_type}_masks.png")
 
         arguments = {
             "image_path": image_path,
@@ -571,7 +639,32 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
             if key in input_data:
                 arguments[key] = input_data[key]
 
-        mcp_result = await session.call_tool("segment_cells_2d", arguments=arguments)
+        # Locate the cellpose subprocess for hang detection
+        cellpose_proc = _find_mcp_subprocess("mcp-cellpose/server.py")
+        if cellpose_proc is None:
+            print("[task_runner] Warning: could not locate cellpose subprocess; hang detection disabled")
+
+        infer_task = asyncio.create_task(
+            session.call_tool("segment_cells_2d", arguments=arguments)
+        )
+
+        if cellpose_proc is not None:
+            watch_task = asyncio.create_task(_mcp_subprocess_watchdog(cellpose_proc))
+            done, pending = await asyncio.wait(
+                [infer_task, watch_task], return_when=asyncio.FIRST_COMPLETED
+            )
+            for t in pending:
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+            if watch_task in done and not infer_task.done():
+                exc = watch_task.exception()
+                raise exc if exc else RuntimeError("Cellpose process hung during inference")
+            mcp_result = infer_task.result()
+        else:
+            mcp_result = await infer_task
 
         combined = "".join(
             block.text for block in mcp_result.content if hasattr(block, "text")
@@ -583,6 +676,31 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
 
         if isinstance(result, dict) and "error" in result:
             raise RuntimeError(result["error"])
+
+        # Generate overlay image (outlines drawn on original) for display in the Results tab.
+        # Hard 60s timeout — outlines_list can be slow on large images but should never
+        # block indefinitely. If it times out we skip the overlay and return masks only.
+        if isinstance(result, dict) and "output_path" in result:
+            try:
+                overlay_result = await asyncio.wait_for(
+                    session.call_tool(
+                        "save_overlay",
+                        arguments={"image_path": image_path, "mask_path": result["output_path"]},
+                    ),
+                    timeout=60.0,
+                )
+                overlay_combined = "".join(
+                    block.text for block in overlay_result.content if hasattr(block, "text")
+                )
+                overlay_data = json.loads(overlay_combined)
+                if "overlay_path" in overlay_data:
+                    result["image_path"] = image_path
+                    result["mask_path"] = overlay_data.get("display_mask_path", result["output_path"])
+                    result["output_path"] = overlay_data["overlay_path"]
+            except asyncio.TimeoutError:
+                print("[task_runner] Overlay generation timed out (>60s) — returning masks only")
+            except Exception as overlay_err:
+                print(f"[task_runner] Overlay generation failed (non-fatal): {overlay_err}")
 
         return result
 

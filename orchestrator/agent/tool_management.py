@@ -1,5 +1,7 @@
 from typing import Dict, Set
 
+from .builtin_tools import BUILTIN_TOOLS
+
 
 class ToolManagementMixin:
     """Enable, disable, and refresh MCP tools and servers."""
@@ -68,6 +70,7 @@ class ToolManagementMixin:
         previous_tools = set(self.available_tools.keys())
         previous_enabled = set(self.agent_tools)
         self.available_tools = await self.tool_registry.reload_config_and_refresh()
+        self.available_tools.update(BUILTIN_TOOLS)
         current_tools = set(self.available_tools.keys())
         still_enabled = previous_enabled & current_tools
         new_tools = current_tools - previous_tools

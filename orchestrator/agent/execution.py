@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 from typing import Dict, List, Optional, Any
@@ -23,7 +24,7 @@ class ExecutionMixin:
         goal: str,
         data: Any = None,
         fileList: Any = None,
-        max_iterations: int = 20,
+        max_iterations: int = 10,
         metadata: Dict = None,
         _resume_history: List = None,
         _resume_response: Optional[Any] = None,
@@ -113,7 +114,23 @@ class ExecutionMixin:
                     self.logger.info(f"\nCOMPOSED PROMPT SENT TO LLM:\n{composed_prompt}\n")
 
                     content_parts = [composed_prompt]
-                    response = self.llm_client.generate_content(content_parts, images_for_llm)
+                    loop = asyncio.get_event_loop()
+                    try:
+                        response = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                None, self.llm_client.generate_content, content_parts, images_for_llm
+                            ),
+                            timeout=120,
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.error("LLM call timed out after 120s")
+                        return {
+                            "type": "agent_response",
+                            "answer": "The AI model took too long to respond. Please try again.",
+                            "tools_used": [],
+                            "execution_history": execution_history,
+                            "success": False,
+                        }
                     self.logger.info(f"\nLLM RAW RESPONSE:\n{response}\n")
 
                 # Parse the LLM response
@@ -142,7 +159,7 @@ class ExecutionMixin:
                 # Stateful only: send tool results in the same chat turn.
                 # Stateless mode rebuilds a fresh prompt on next loop iteration.
                 if is_gemini and turn_results and not is_stateless:
-                    _resume_response = self._send_turn_results_to_llm(turn_results)
+                    _resume_response = await self._send_turn_results_to_llm(turn_results)
 
                 # If agent responded with text but no tool call (and not caught above)
                 if has_text and not has_function_call and text_content:
@@ -214,23 +231,21 @@ class ExecutionMixin:
         if fileList and isinstance(fileList, list) and fileList:
             file_paths = []
             dicom_dir_paths = []
-            image_dir_paths = []  # directories whose contents appear to be regular 2D images
 
             _DICOM_EXTS = {'.dcm', '.ima', '.img'}
 
             for temp_filepath, _ in fileList:
                 if os.path.isdir(temp_filepath):
                     # Check for explicit DICOM extensions — if found, treat as a DICOM series.
-                    # Otherwise label as an image directory and let the agent decide how to
-                    # process it (the user may have exported DICOM slices as PNG/TIFF, in
-                    # which case the agent should clarify intent before iterating files).
+                    # Otherwise expand the directory contents as individual files.
                     try:
-                        entries = [f for f in os.listdir(temp_filepath) if not f.startswith('.')]
+                        entries = sorted(f for f in os.listdir(temp_filepath) if not f.startswith('.'))
                         exts = {os.path.splitext(f)[1].lower() for f in entries}
                         if exts & _DICOM_EXTS:
                             dicom_dir_paths.append(temp_filepath)
                         else:
-                            image_dir_paths.append((temp_filepath, sorted(entries)))
+                            for entry in entries:
+                                file_paths.append(os.path.join(temp_filepath, entry))
                     except OSError:
                         dicom_dir_paths.append(temp_filepath)
                 else:
@@ -244,30 +259,22 @@ class ExecutionMixin:
                     "DICOM series directories (treat each as a single 3D volume — pass the directory path directly to MONAI tools): "
                     + ", ".join(f"[DICOM SERIES DIR] {p}" for p in dicom_dir_paths)
                 )
-            if image_dir_paths:
-                for dir_path, entries in image_dir_paths:
-                    file_list_str = ", ".join(entries[:10])
-                    if len(entries) > 10:
-                        file_list_str += f" ... ({len(entries)} files total)"
-                    parts.append(
-                        f"[IMAGE DIR] {dir_path} — contains: {file_list_str}. "
-                        f"Ask the user whether these are independent 2D images (process each file separately) "
-                        f"or exported DICOM slices of a 3D volume (reconstruct before analysis)."
-                    )
             image_context = "\n\nFILES AVAILABLE: Yes\n" + "\n".join(parts)
 
-            # Only pass small 2D images to LLM
-            images_for_llm = []
-            for temp_filepath, content in fileList:
-                if os.path.isdir(temp_filepath):
-                    continue
-                ext = temp_filepath.lower()
-                if not ext.endswith(('.nii', '.nii.gz', '.dcm', '.mha', '.mhd', '.nrrd')):
-                    if len(content) < 5 * 1024 * 1024:
-                        images_for_llm.append((temp_filepath, content))
-
-            if not images_for_llm:
-                images_for_llm = None
+            # Do not send image data to the LLM - file paths in the prompt are sufficient
+            # for the agent to call the right tools. Sending large images to flash-lite
+            # models causes timeouts and is not needed for tool dispatch decisions.
+            # images_for_llm = []
+            # for temp_filepath, content in fileList:
+            #     if os.path.isdir(temp_filepath):
+            #         continue
+            #     ext = temp_filepath.lower()
+            #     if not ext.endswith(('.nii', '.nii.gz', '.dcm', '.mha', '.mhd', '.nrrd')):
+            #         if len(content) < 5 * 1024 * 1024:
+            #             images_for_llm.append((temp_filepath, content))
+            # if not images_for_llm:
+            #     images_for_llm = None
+            images_for_llm = None
         elif fileList:
             image_context = "\n\nFILES AVAILABLE:\nImage data provided"
 
@@ -444,8 +451,14 @@ class ExecutionMixin:
             if tool_name == "queue_task":
                 result, result_summary = handle_queue_task(session_id, arguments)
                 execution_history.append({"tool": tool_name, "success": True, "result_summary": result_summary, "result": result})
-                turn_results.append((tool_name, result))
-                continue
+                # Return immediately — task is queued, no further LLM iterations needed
+                return turn_results, {
+                    "type": "agent_response",
+                    "answer": result.get("message", "Task has been queued and will run in the background."),
+                    "tools_used": ["queue_task"],
+                    "execution_history": execution_history,
+                    "success": True,
+                }
 
             if tool_name == "goal_achieved":
                 summary = arguments.get("summary", "")
@@ -624,7 +637,7 @@ class ExecutionMixin:
 
         return turn_results, None
 
-    def _send_turn_results_to_llm(self, turn_results):
+    async def _send_turn_results_to_llm(self, turn_results):
         """Send all accumulated results to the LLM in one message. Returns LLM response."""
         # Collect images from tool results that signal image_for_llm
         images = []
@@ -639,12 +652,23 @@ class ExecutionMixin:
                     print(f"Could not load tool image for LLM: {e}")
         images = images or None
 
+        loop = asyncio.get_event_loop()
         if len(turn_results) > 1:
             self.logger.info(f"\nSENDING {len(turn_results)} RESULTS TO LLM via send_multiple_function_responses")
-            return self.llm_client.send_multiple_function_responses(turn_results, images=images)
+            return await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, lambda: self.llm_client.send_multiple_function_responses(turn_results, images=images)
+                ),
+                timeout=120,
+            )
         else:
             single_name, single_data = turn_results[0]
             self.logger.info("\nSENDING FULL RESULT TO LLM via send_function_response")
-            response = self.llm_client.send_function_response(single_name, single_data, images=images)
+            response = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, lambda: self.llm_client.send_function_response(single_name, single_data, images=images)
+                ),
+                timeout=120,
+            )
             self.logger.info("Captured response from function_response(s) - will use on next iteration")
             return response

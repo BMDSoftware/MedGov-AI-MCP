@@ -35,7 +35,7 @@ BACKGROUND TASK RULES (read carefully):
 - After calling `queue_task`, respond to the user immediately - do NOT wait for the task to finish.
 - The user will receive a notification in the UI when the task is done.
 - For 'inference' tasks: input_data = {{"image_path": "...", "model_name": "..."}}
-- For 'cellpose' tasks: input_data = {{"image_path": "...", "model_type": "cyto3"}} (use cyto3 for general cells, nuclei for nucleus-only)
+- For 'cellpose' tasks: input_data = {{"image_path": "...", "model_type": "cpsam"}} (cellpose v4 uses a single universal model — cpsam — for all segmentation tasks)
 - For 'report' tasks: input_data = {{"task_ids": [...], "patient_context": {{...}}}}
 - Short operations (analyze_image, list_models, download_model, FHIR queries) can still be called directly.
 
@@ -52,7 +52,7 @@ TOOL USAGE RULES:
 5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
 6. After a tool returns results, summarize them clearly for the user.
 7. MULTI-FILE RULE: When multiple paths are listed in "FILES AVAILABLE" and the user asks to analyze or run inference, process ALL of them. Call the appropriate tool for each path one by one. Do not stop after the first.
-8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices forming a single 3D volume — pass it directly to analyze_image or run_inference, do NOT iterate files inside it. A path marked as [IMAGE DIR] contains files without explicit DICOM extensions (e.g. PNG, TIFF) — these could be independent 2D images OR exported DICOM slices. Ask the user to clarify before processing: if independent images, process each file separately; if exported DICOM slices, they need to be reconstructed into a volume first."""
+8. DIRECTORY RULE: A path marked as [DICOM SERIES DIR] is a directory of DICOM slices forming a single 3D volume — pass it directly to analyze_image or run_inference, do NOT iterate files inside it. All other files are listed individually and can be processed directly."""
 
 
 FIRST_ITERATION_PROMPT_TEMPLATE = """GOAL: {goal}{data_context}{image_context}{session_block}

@@ -45,6 +45,14 @@
       "env": {
         "PYTHONUNBUFFERED": "1"
       }
+    },
+    "ipath": {
+      "command": "${APP_ROOT}/mcp-ipath/venv/bin/python",
+      "args": ["${APP_ROOT}/mcp-ipath/server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
     }
   }
 }

@@ -26,7 +26,6 @@ The agent acts as the vision model — there is no AI detection tool. Visual ins
 5. **Fetch the high-resolution ROI**
    - `ipath.fetch_roi(slide_uid, x, y, width, height, output_path)`
    - The server clamps dimensions to 2700px max per side
-   - Result includes `image_for_llm: true` — examine this image for the detailed findings
 
 6. **Count cells in the ROI**
    - Call `cellpose.segment_cells_2d(image_path=<roi_output_path>, model_type="cpsam")`

@@ -45,6 +45,13 @@ RUN python3.11 -m venv mcp-skills/venv \
     && mcp-skills/venv/bin/pip install -r mcp-skills/requirements.txt
 COPY mcp-skills/ mcp-skills/
 
+# ── mcp-ipath ──────────────────────────────────────────────────────────────────
+COPY mcp-ipath/requirements.txt mcp-ipath/requirements.txt
+RUN python3.11 -m venv mcp-ipath/venv \
+    && mcp-ipath/venv/bin/pip install --upgrade pip \
+    && mcp-ipath/venv/bin/pip install -r mcp-ipath/requirements.txt
+COPY mcp-ipath/ mcp-ipath/
+
 # ── mcp-cellpose ───────────────────────────────────────────────────────────────
 COPY mcp-cellpose/requirements.txt mcp-cellpose/requirements.txt
 # Install torch with CUDA support FIRST so cellpose-mcp sees it pre-installed

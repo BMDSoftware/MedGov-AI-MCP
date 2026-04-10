@@ -178,7 +178,6 @@ def fetch_roi(
             "width": width,
             "height": height,
             "clamped": clamped,
-            "image_for_llm": True,
         }
     except Exception as e:
         return {"success": False, "error": str(e)}

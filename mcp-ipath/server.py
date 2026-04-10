@@ -85,7 +85,7 @@ def get_slide_dimensions(slide_uid: str) -> Dict[str, Any]:
     Args:
         slide_uid: DICOM UID of the slide
     """
-    slide_uid = normalize_uid(slide_uid)
+    slide_uid = slide_uid.strip()
     url = f"{IPATH_BASE}/dump?uid={slide_uid}"
     log(f"get_slide_dimensions: {url}")
     try:
@@ -157,7 +157,7 @@ def fetch_roi(
         width, height: Size of ROI in full slide pixels (max 2700)
         output_path: Absolute path where the image will be saved
     """
-    slide_uid = normalize_uid(slide_uid)
+    slide_uid = slide_uid.strip()
     clamped = width > MAX_ROI_DIM or height > MAX_ROI_DIM
     width = min(width, MAX_ROI_DIM)
     height = min(height, MAX_ROI_DIM)

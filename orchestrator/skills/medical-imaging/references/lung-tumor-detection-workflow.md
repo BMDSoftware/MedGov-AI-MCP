@@ -28,7 +28,12 @@ The agent acts as the vision model — there is no AI detection tool. Visual ins
    - The server clamps dimensions to 2700px max per side
    - Result includes `image_for_llm: true` — examine this image for the detailed findings
 
-6. **Generate a pathology report**
+6. **Count cells in the ROI**
+   - Call `cellpose.segment_cells_2d(image_path=<roi_output_path>, model_type="cpsam")`
+   - The result includes `output_path` (the mask file) and `cell_count` — the number of detected cells (`masks.max()`)
+   - Report the cell count to the clinician as part of the findings
+
+7. **Generate a pathology report**
    - Radlex (RadReport-Pro) is for radiology only — it is not appropriate here
    - Instead, load the pathology report structure from the clinical-reports skill: `skills.read_skill_file("clinical-reports")`
    - Use the Pathology Report section: Patient Info, Specimen Info, Clinical History, Gross Description, Microscopic Description, Diagnosis, Comments

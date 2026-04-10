@@ -1,4 +1,6 @@
+import json
 import logging
+from pathlib import Path
 from typing import Set
 
 from tool_registry import ToolRegistry
@@ -14,9 +16,11 @@ from .skills import SkillsMixin
 from .confirmation import ConfirmationMixin
 from .execution import ExecutionMixin
 from .formatting import ResultFormattingMixin
+from .stm import STMMixin, STM_BUILTIN_TOOLS, AgentStateManager
 
 
 class AgenticAgent(
+    STMMixin,              # first: runs __init__ then chains super()
     ToolManagementMixin,
     SessionMixin,
     SkillsMixin,
@@ -27,6 +31,7 @@ class AgenticAgent(
     """AI agent that decides which MCP tools to call based on context and data."""
 
     def __init__(self, callback=None, enable_debug_logging=True, log_level=logging.DEBUG):
+        self.stm_manager = AgentStateManager()
         self.tool_registry = ToolRegistry()
         self.available_tools = {}
         self.agent_tools: Set[str] = set()
@@ -47,6 +52,8 @@ class AgenticAgent(
 
         self.available_tools = await self.tool_registry.discover_tools()
         self.available_tools.update(BUILTIN_TOOLS)
+        if self._is_stateless_llm_mode():
+            self.available_tools.update(STM_BUILTIN_TOOLS)
         self.agent_tools = set(self.available_tools.keys())
         skills = self.load_all_skills()
         enabled_tools = self.get_enabled_agent_tools()
@@ -62,6 +69,15 @@ class AgenticAgent(
             print("Using Gemini (API) for orchestration")
             from gemini_client import GeminiClient
             self.llm_client = GeminiClient(enabled_tools, skills)
+
+    def _is_stateless_llm_mode(self) -> bool:
+        """Read llm_mode from app settings to decide whether STM tools should be exposed."""
+        settings_path = Path(__file__).resolve().parents[1] / "app_settings.json"
+        try:
+            with open(settings_path) as f:
+                return json.load(f).get("llm_mode", "stateful") == "stateless"
+        except Exception:
+            return False
 
     async def close(self):
         """Explicit async cleanup for tool registry resources."""

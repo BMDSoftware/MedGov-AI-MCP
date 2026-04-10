@@ -51,6 +51,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from contextlib import asynccontextmanager
 from agent import AgenticAgent
+from agent.stm import STM_BUILTIN_TOOLS
 import database as db
 import task_runner
 from watcher_service import watcher_service
@@ -419,6 +420,32 @@ async def set_mode(data: dict = Body(...), current_user: dict = Depends(get_curr
     return {"mode": mode}
 
 
+@app.get("/api/llm-mode", tags=["system"], summary="Get current LLM mode (stateful or stateless)")
+async def get_llm_mode(current_user: dict = Depends(get_current_user)):
+    return {"llm_mode": _app_settings.get("llm_mode", "stateful")}
+
+@app.post("/api/llm-mode", tags=["system"], summary="Set LLM mode — 'stateful' keeps history, 'stateless' sends each query fresh")
+async def set_llm_mode(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    llm_mode = data.get("llm_mode", "stateful")
+    if llm_mode not in ("stateful", "stateless"):
+        raise HTTPException(status_code=400, detail="llm_mode must be 'stateful' or 'stateless'")
+    _app_settings["llm_mode"] = llm_mode
+    _save_settings(_app_settings)
+
+    # Refresh active agents so STM built-ins are only exposed in stateless mode.
+    stm_tool_names = set(STM_BUILTIN_TOOLS.keys())
+    async with _agents_lock:
+        for agent in _agents.values():
+            if llm_mode == "stateless":
+                agent.available_tools.update(STM_BUILTIN_TOOLS)
+                agent.agent_tools.update(stm_tool_names)
+            else:
+                for tool_name in stm_tool_names:
+                    agent.available_tools.pop(tool_name, None)
+                    agent.agent_tools.discard(tool_name)
+            agent._refresh_agent_components()
+
+    return {"llm_mode": llm_mode}
 @app.get("/api/logs", tags=["system"], summary="Tail the latest agent debug log or startup log")
 async def get_agent_logs(lines: int = 200, source: str = "agent", current_user: dict = Depends(get_current_user)):
     import glob as _glob

@@ -7,7 +7,7 @@ from pathlib import Path
 import database as db
 
 from .constants import LLM_BACKEND
-from .prompts import FIRST_ITERATION_PROMPT_TEMPLATE, EVAL_PROMPT_TEMPLATE
+from .prompts import FIRST_ITERATION_PROMPT_TEMPLATE, EVAL_PROMPT_TEMPLATE, EVAL_PROMPT_TEMPLATE_STM
 from .builtin_tools import (
     handle_list_tasks,
     handle_queue_task,
@@ -65,12 +65,20 @@ class ExecutionMixin:
         iterations = 0
         final_result = None
         _inference_queued: set = set()
-
         is_gemini = LLM_BACKEND.lower() != "ollama"
+        is_stateless = is_gemini and getattr(self.llm_client, "is_stateless_mode", False)
+
+        # STM: init state only on first call (not on recursive resume)
+        if is_stateless and _resume_history is None and hasattr(self, "stm_manager"):
+            image_paths = [fp for fp, _ in fileList] if fileList and isinstance(fileList, list) and fileList and isinstance(fileList[0], tuple) else []
+            self.stm_manager.init_state(goal, data, image_paths)
 
         while iterations < max_iterations:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
+            # STM: expire outdated skill references
+            if is_stateless and hasattr(self, "stm_manager"):
+                self.stm_manager.tick_skill_ttls()
             try:
                 # Build prompt and get LLM response
                 if is_gemini and _resume_response is not None:
@@ -97,7 +105,15 @@ class ExecutionMixin:
                     if images_for_llm:
                         self.logger.info(f"Images attached: {len(images_for_llm)} file(s)")
 
-                    content_parts = [prompt]
+                    composed_prompt = prompt
+                    if is_stateless and hasattr(self, "stm_manager"):
+                        stm_text = self.stm_manager.render_state_text()
+                        if stm_text:
+                            composed_prompt = "\n\n---\n\n".join([stm_text, prompt])
+
+                    self.logger.info(f"\nCOMPOSED PROMPT SENT TO LLM:\n{composed_prompt}\n")
+
+                    content_parts = [composed_prompt]
                     loop = asyncio.get_event_loop()
                     try:
                         response = await asyncio.wait_for(
@@ -140,8 +156,9 @@ class ExecutionMixin:
                     if isinstance(_tr, dict) and not _tr.get("is_error"):
                         final_result = _tr
 
-                # Send accumulated results to LLM
-                if is_gemini and turn_results:
+                # Stateful only: send tool results in the same chat turn.
+                # Stateless mode rebuilds a fresh prompt on next loop iteration.
+                if is_gemini and turn_results and not is_stateless:
                     _resume_response = await self._send_turn_results_to_llm(turn_results)
 
                 # If agent responded with text but no tool call (and not caught above)
@@ -208,7 +225,7 @@ class ExecutionMixin:
         if data:
             data_context = f"\n\nDATA AVAILABLE:\n{json.dumps(data, indent=2)}"
 
-        image_context = "\n\nFILES AVAILABLE: None. User has not uploaded any images."
+        image_context = ""
         images_for_llm = None
 
         if fileList and isinstance(fileList, list) and fileList:
@@ -293,7 +310,32 @@ class ExecutionMixin:
                             error_msg = 'Tool execution failed'
                         history_text += f"Failed: {error_msg}\n"
 
-            prompt = EVAL_PROMPT_TEMPLATE.format(history_text=history_text)
+            # Include compact context for the most recent two calls in stateless mode.
+            if is_gemini and getattr(self.llm_client, "is_stateless_mode", False) and execution_history:
+                recent_events = execution_history[-2:]
+                recent_text = "\n\nRecent tool results (last 2):\n"
+                start_index = max(1, len(execution_history) - len(recent_events) + 1)
+                for idx, event in enumerate(recent_events, start=start_index):
+                    tool_name = event.get('tool', 'unknown_tool')
+                    if event.get('success'):
+                        result_summary = event.get('result_summary') or 'Success'
+                        recent_text += f"{idx}. {tool_name} -> Success. Summary: {result_summary}\n"
+                        result_data = event.get('result')
+                        if result_data:
+                            result_str = json.dumps(result_data, default=str)
+                            if len(result_str) > 400:
+                                result_str = result_str[:400] + "..."
+                            recent_text += f"   Data: {result_str}\n"
+                    else:
+                        error_msg = event.get('error') or 'Tool execution failed'
+                        if error_msg is None or (isinstance(error_msg, str) and not error_msg.strip()):
+                            error_msg = 'Tool execution failed'
+                        recent_text += f"{idx}. {tool_name} -> Failed: {error_msg}\n"
+
+                history_text += recent_text
+
+            eval_template = EVAL_PROMPT_TEMPLATE_STM if (is_gemini and getattr(self.llm_client, "is_stateless_mode", False)) else EVAL_PROMPT_TEMPLATE
+            prompt = eval_template.format(history_text=history_text)
 
         return prompt, images_for_llm
 
@@ -448,6 +490,36 @@ class ExecutionMixin:
                     "success": False,
                 }
 
+            # --- STM built-in handlers ---
+            if tool_name == "update_agent_notes":
+                if not (LLM_BACKEND.lower() != "ollama" and getattr(self.llm_client, "is_stateless_mode", False)):
+                    turn_results.append((tool_name, {"error": "Tool unavailable in stateful mode", "is_error": True}))
+                    continue
+                key = arguments.get("key", "")
+                value = arguments.get("value", "")
+                if hasattr(self, "stm_manager"):
+                    self.stm_manager.update_agent_notes(key, value)
+                result = {"status": "ok", "key": key}
+                result_summary = f"Noted: {key} = {str(value)[:50]}"
+                self.logger.info(f"\nSTM update_agent_notes: [{key}] = {value}")
+                execution_history.append({"tool": tool_name, "success": True, "result_summary": result_summary, "result": result})
+                turn_results.append((tool_name, result))
+                continue
+
+            if tool_name == "set_next_objective":
+                if not (LLM_BACKEND.lower() != "ollama" and getattr(self.llm_client, "is_stateless_mode", False)):
+                    turn_results.append((tool_name, {"error": "Tool unavailable in stateful mode", "is_error": True}))
+                    continue
+                objective = arguments.get("objective", "")
+                if hasattr(self, "stm_manager"):
+                    self.stm_manager.set_next_objective(objective)
+                result = {"status": "ok", "objective": objective}
+                result_summary = f"Objective set: {objective[:80]}"
+                self.logger.info(f"\nSTM set_next_objective: {objective}")
+                execution_history.append({"tool": tool_name, "success": True, "result_summary": result_summary, "result": result})
+                turn_results.append((tool_name, result))
+                continue
+
             # Inference always runs in background (non-autonomous mode)
             if tool_name == "monai.run_inference" and not self.is_agent_autonomous:
                 result, result_summary = handle_inference_as_task(
@@ -517,6 +589,9 @@ class ExecutionMixin:
                 })
                 key_data = self._extract_key_data(tool_name, result)
                 self._record_and_persist(tool_name, result_summary, key_data, session_id)
+                # STM: record completed step and extract artifacts
+                if LLM_BACKEND.lower() != "ollama" and getattr(self.llm_client, "is_stateless_mode", False) and hasattr(self, "stm_manager"):
+                    self.stm_manager.update_after_tool(tool_name, result, success=True, summary=result_summary)
                 print(f"Tool succeeded: {result_summary}")
                 self.logger.info("  Status: SUCCESS")
                 self.logger.info(f"  Summary: {result_summary}")
@@ -532,6 +607,9 @@ class ExecutionMixin:
                     "tool": tool_name, "success": False,
                     "error": str(error_msg), "result": result,
                 })
+                # STM: record failed step
+                if LLM_BACKEND.lower() != "ollama" and getattr(self.llm_client, "is_stateless_mode", False) and hasattr(self, "stm_manager"):
+                    self.stm_manager.update_after_tool(tool_name, result, success=False, summary=str(error_msg)[:200])
 
                 # Persist a failed task record so the Results tab shows it
                 _RESULT_TOOLS = {"monai.analyze_image", "monai.run_inference", "monai.download_model"}
@@ -561,12 +639,25 @@ class ExecutionMixin:
 
     async def _send_turn_results_to_llm(self, turn_results):
         """Send all accumulated results to the LLM in one message. Returns LLM response."""
+        # Collect images from tool results that signal image_for_llm
+        images = []
+        for _name, result in turn_results:
+            if isinstance(result, dict) and result.get("image_for_llm") and result.get("path"):
+                try:
+                    from PIL import Image
+                    img = Image.open(result["path"]).convert("RGB")
+                    images.append(img)
+                    print(f"Injecting tool image into LLM vision context: {result['path']}")
+                except Exception as e:
+                    print(f"Could not load tool image for LLM: {e}")
+        images = images or None
+
         loop = asyncio.get_event_loop()
         if len(turn_results) > 1:
             self.logger.info(f"\nSENDING {len(turn_results)} RESULTS TO LLM via send_multiple_function_responses")
             return await asyncio.wait_for(
                 loop.run_in_executor(
-                    None, self.llm_client.send_multiple_function_responses, turn_results
+                    None, lambda: self.llm_client.send_multiple_function_responses(turn_results, images=images)
                 ),
                 timeout=120,
             )
@@ -575,7 +666,7 @@ class ExecutionMixin:
             self.logger.info("\nSENDING FULL RESULT TO LLM via send_function_response")
             response = await asyncio.wait_for(
                 loop.run_in_executor(
-                    None, self.llm_client.send_function_response, single_name, single_data
+                    None, lambda: self.llm_client.send_function_response(single_name, single_data, images=images)
                 ),
                 timeout=120,
             )

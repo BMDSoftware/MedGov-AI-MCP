@@ -52,6 +52,8 @@ COPY mcp-ipath/ mcp-ipath/
 COPY mcp-cellpose/requirements.txt mcp-cellpose/requirements.txt
 RUN python -m venv mcp-cellpose/venv \
     && mcp-cellpose/venv/bin/pip install --upgrade pip \
+    && mcp-cellpose/venv/bin/pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+       torch torchvision \
     && mcp-cellpose/venv/bin/pip install -r mcp-cellpose/requirements.txt
 # Pre-download cpsam (the only model in cellpose v4) so first inference isn't slow
 RUN mcp-cellpose/venv/bin/python -c "from cellpose import models; models.CellposeModel(gpu=False)"

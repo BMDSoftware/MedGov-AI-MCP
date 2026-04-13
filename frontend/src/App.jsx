@@ -164,6 +164,20 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken]);
 
+  // Restore messages from localStorage when session is loaded
+  useEffect(() => {
+    if (!currentSessionId) return;
+    const saved = localStorage.getItem(`messages_${currentSessionId}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.length > 0) setMessages(parsed);
+      } catch {
+        // ignore corrupt data
+      }
+    }
+  }, [currentSessionId]);
+
   // Persist messages to localStorage whenever they change (filter out transient states)
   useEffect(() => {
     if (!currentSessionId) return;

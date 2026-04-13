@@ -20,6 +20,8 @@ from mcp.server.fastmcp import FastMCP
 
 
 IPATH_BASE = "https://ipath.bmd-software.com/dicoogle"
+DICOMWEB_BASE = "https://ipath.bmd-software.com/dicoogle/ext/dicom-web"
+WSI_BASE = "https://ipath.bmd-software.com/dicoogle/wsi"
 MAX_ROI_DIM = 2700
 UID_SUFFIX = ".1.1.1.1.1.1.1"
 
@@ -30,6 +32,14 @@ def normalize_uid(uid: str) -> str:
     if not uid.endswith(UID_SUFFIX):
         uid += UID_SUFFIX
     return uid
+
+
+def _validate_uid(uid: str) -> bool:
+    """Return True if uid is a valid DICOM UID (digits and dots only, max 64 chars)."""
+    uid = uid.strip()
+    if not uid or len(uid) > 64:
+        return False
+    return all(c.isdigit() or c == "." for c in uid)
 
 
 def log(msg: str):
@@ -178,6 +188,97 @@ def fetch_roi(
             "width": width,
             "height": height,
             "clamped": clamped,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def get_series_instances(series_uid: str) -> Dict[str, Any]:
+    """
+    List all pyramid-level instances in a WSI series with their SOP Instance UIDs and pixel dimensions.
+    Use this to identify which instance to use at each resolution level.
+    The response includes a 'smallest' field with the lowest-resolution instance - sufficient to report its UID and dimensions without downloading anything.
+    Only call fetch_dicom_instance if you need the actual file content for further processing.
+
+    Args:
+        series_uid: Series Instance UID to query (digits and dots only)
+    """
+    if not _validate_uid(series_uid):
+        return {"success": False, "error": "invalid arguments"}
+
+    url = f"{WSI_BASE}/pinfo"
+    log(f"get_series_instances: {url}?SeriesInstanceUID={series_uid}")
+    try:
+        with httpx.Client(timeout=15) as client:
+            r = client.get(url, params={"SeriesInstanceUID": series_uid})
+            r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    # Build flat list: top-level entry first, then subresolutions (already ordered large->small)
+    instances = [
+        {
+            "sop_instance_uid": data["SOPInstanceUID"],
+            "width": data["width"],
+            "height": data["height"],
+            "ntiles": data.get("ntiles"),
+            "level": 0,
+        }
+    ]
+    for i, sub in enumerate(data.get("subresolution_images", []), start=1):
+        instances.append(
+            {
+                "sop_instance_uid": sub["SOPInstanceUID"],
+                "width": sub["width"],
+                "height": sub["height"],
+                "ntiles": sub.get("ntiles"),
+                "level": i,
+            }
+        )
+
+    smallest = instances[-1] if instances else None
+    return {"success": True, "instances": instances, "smallest": smallest}
+
+
+@mcp.tool()
+def fetch_dicom_instance(
+    study_uid: str,
+    series_uid: str,
+    instance_uid: str,
+    output_path: str,
+) -> Dict[str, Any]:
+    """
+    Download a DICOM instance file from the DICOMweb server for further processing (e.g. parsing metadata, running inference).
+    Only call this when you need the actual file content - NOT just to identify an instance or report its dimensions.
+    Use get_series_instances to discover instance UIDs and dimensions without downloading anything.
+
+    Args:
+        study_uid: Study Instance UID (digits and dots only)
+        series_uid: Series Instance UID (digits and dots only)
+        instance_uid: SOP Instance UID (digits and dots only)
+        output_path: Absolute path where the .dcm file will be saved
+    """
+    for name, uid in [("study_uid", study_uid), ("series_uid", series_uid), ("instance_uid", instance_uid)]:
+        if not _validate_uid(uid):
+            return {"success": False, "error": f"invalid arguments: {name}"}
+
+    url = f"{DICOMWEB_BASE}/studies/{study_uid.strip()}/series/{series_uid.strip()}/instances/{instance_uid.strip()}"
+    log(f"fetch_dicom_instance: {url}")
+    try:
+        with httpx.Client(timeout=60, follow_redirects=True) as client:
+            r = client.get(url, headers={"Accept": "application/dicom"})
+            r.raise_for_status()
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(r.content)
+        return {
+            "success": True,
+            "path": output_path,
+            "size_bytes": len(r.content),
+            "study_uid": study_uid.strip(),
+            "series_uid": series_uid.strip(),
+            "instance_uid": instance_uid.strip(),
         }
     except Exception as e:
         return {"success": False, "error": str(e)}

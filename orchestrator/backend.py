@@ -132,7 +132,7 @@ def _save_settings(settings: dict):
 _app_settings = _load_settings()
 
 
-async def _poll_mcp_tools(interval: int = 30):
+async def _poll_mcp_tools(interval: int = 300):
     """Periodically re-query all connected MCP servers for tool changes across all user agents."""
     while True:
         try:

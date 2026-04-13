@@ -46,7 +46,7 @@ CONVERSATION RULES:
 
 TOOL USAGE RULES:
 1. Only call a tool when the user requests an action that requires it AND the required parameters are available.
-2. NEVER invent file paths. If a tool needs a file path, use the one from "FILES AVAILABLE" in the context. If none is available, ask the user to upload or provide one.
+2. NEVER invent file paths. If a tool needs an input file path, use the one from "FILES AVAILABLE" in the context. When a tool needs an output path for a file you are creating or downloading, save it to /app/orchestrator/data/uploads/<descriptive_filename>.
 3. For DICOM files (.dcm): parse the metadata first to extract modality and body part before selecting models or running inference.
 4. MONAI models require 3D volumes (.nii, .nii.gz). If the image is a single 2D slice, inform the user.
 5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
@@ -119,7 +119,7 @@ CONVERSATION RULES:
 
 TOOL USAGE RULES:
 1. Only call a tool when the user requests an action that requires it AND the required parameters are available.
-2. NEVER invent file paths. If a tool needs a file path, use the one from "FILES AVAILABLE" in the context. If none is available, ask the user to upload or provide one.
+2. NEVER invent file paths. If a tool needs an input file path, use the one from "FILES AVAILABLE" in the context. When a tool needs an output path for a file you are creating or downloading, save it to /app/orchestrator/data/uploads/<descriptive_filename>.
 3. For DICOM files (.dcm): parse the metadata first to extract modality and body part before selecting models or running inference.
 4. MONAI models require 3D volumes (.nii, .nii.gz). If the image is a single 2D slice, inform the user.
 5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.
@@ -159,7 +159,7 @@ BACKGROUND TASK RULES (read carefully):
 
 TOOL USAGE RULES:
 1. Only call a tool when the user requests an action that requires it AND the required parameters are available.
-2. NEVER invent file paths. If a tool needs a file path, use the one from "FILES AVAILABLE" in the context. If none is available, ask the user to upload or provide one.
+2. NEVER invent file paths. If a tool needs an input file path, use the one from "FILES AVAILABLE" in the context. When a tool needs an output path for a file you are creating or downloading, save it to /app/orchestrator/data/uploads/<descriptive_filename>.
 3. For DICOM files (.dcm): parse the metadata first to extract modality and body part before selecting models or running inference.
 4. MONAI models require 3D volumes (.nii, .nii.gz). If the image is a single 2D slice, inform the user.
 5. Do not repeat a tool call that already failed. Explain the error and ask how to proceed.

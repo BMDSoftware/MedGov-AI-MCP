@@ -143,8 +143,9 @@ function App() {
       .catch(() => {});
   }, [authToken]);
 
-  // Initialise running task count from DB on mount (auth required)
-  useEffect(() => {
+  // Sync running task count from DB. Called on mount and periodically as a
+  // safety net so stale SSE connections don't leave the counter stuck.
+  const syncRunningCount = () => {
     if (!authToken) return;
     apiFetch(getApiUrl('/api/tasks'))
       .then(r => r.json())
@@ -153,6 +154,14 @@ function App() {
         setRunningTaskCount(active);
       })
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    syncRunningCount();
+    // Re-sync every 60s to self-correct if SSE events were missed
+    const interval = setInterval(syncRunningCount, 60_000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken]);
 
   // Persist messages to localStorage whenever they change (filter out transient states)

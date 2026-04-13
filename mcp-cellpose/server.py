@@ -19,11 +19,18 @@ def _has_gpu() -> bool:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
 
-if not _has_gpu():
+_gpu = _has_gpu()
+if not _gpu:
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-os.environ.setdefault("OMP_NUM_THREADS", "1")
+# On CPU, allow PyTorch to use all cores — cpsam (SAM/ViT) is compute-heavy and
+# benefits greatly from multi-threading. OMP_NUM_THREADS=1 was set to prevent
+# OpenMP deadlocks with GPU; on CPU-only that restriction is unnecessary.
+if not _gpu:
+    os.environ.pop("OMP_NUM_THREADS", None)  # let PyTorch pick the right default
+else:
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 from cellpose_mcp.mcp_instance import mcp  # noqa: E402
 from cellpose_mcp import tools as _tools  # noqa: E402, F401 — registers all upstream tools

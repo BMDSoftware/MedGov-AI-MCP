@@ -516,7 +516,13 @@ def _handle_cellpose(input_data: Dict, session_id: str) -> Dict:
 
         async def _run():
             if task_id:
-                db.update_task(task_id, "running", message=f"Running model ({_DEVICE_LABEL})...")
+                # cpsam on CPU can take several minutes — tell the user so they don't think it hung
+                msg = (
+                    f"Running model ({_DEVICE_LABEL})..."
+                    if _GPU_AVAILABLE
+                    else "Running model (CPU - this may take several minutes)..."
+                )
+                db.update_task(task_id, "running", message=msg)
             return await _async_run_cellpose(image_path, model_type, input_data)
 
         coro_task = loop.create_task(_run())
@@ -648,23 +654,33 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
             session.call_tool("segment_cells_2d", arguments=arguments)
         )
 
+        # Hard cap: cellpose inference should never take more than 30 min even on CPU.
+        # If the subprocess is found we also run the CPU-idle watchdog alongside it;
+        # both race against the hard timeout so whichever trips first wins.
+        _MAX_INFER_SECS = 30 * 60  # 30 minutes
+
+        tasks_to_wait = [infer_task]
         if cellpose_proc is not None:
             watch_task = asyncio.create_task(_mcp_subprocess_watchdog(cellpose_proc))
-            done, pending = await asyncio.wait(
-                [infer_task, watch_task], return_when=asyncio.FIRST_COMPLETED
-            )
-            for t in pending:
-                t.cancel()
-                try:
-                    await t
-                except (asyncio.CancelledError, Exception):
-                    pass
-            if watch_task in done and not infer_task.done():
-                exc = watch_task.exception()
-                raise exc if exc else RuntimeError("Cellpose process hung during inference")
-            mcp_result = infer_task.result()
-        else:
-            mcp_result = await infer_task
+            tasks_to_wait.append(watch_task)
+
+        timeout_task = asyncio.create_task(asyncio.sleep(_MAX_INFER_SECS))
+        tasks_to_wait.append(timeout_task)
+
+        done, pending = await asyncio.wait(tasks_to_wait, return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if timeout_task in done and not infer_task.done():
+            raise RuntimeError(f"Cellpose inference timed out after {_MAX_INFER_SECS // 60} minutes.")
+        if cellpose_proc is not None and watch_task in done and not infer_task.done():
+            exc = watch_task.exception()
+            raise exc if exc else RuntimeError("Cellpose process hung during inference")
+        mcp_result = infer_task.result()
 
         combined = "".join(
             block.text for block in mcp_result.content if hasattr(block, "text")

@@ -139,12 +139,17 @@ def scale_roi_to_slide(
     """
     scale_x = slide_w / thumb_img_w
     scale_y = slide_h / thumb_img_h
-    return {
-        "x": round(thumb_x * scale_x),
-        "y": round(thumb_y * scale_y),
-        "width": round(thumb_w * scale_x),
-        "height": round(thumb_h * scale_y),
-    }
+
+    cx = round((thumb_x + thumb_w / 2) * scale_x)
+    cy = round((thumb_y + thumb_h / 2) * scale_y)
+
+    w = min(round(thumb_w * scale_x), MAX_ROI_DIM)
+    h = min(round(thumb_h * scale_y), MAX_ROI_DIM)
+
+    x = max(0, min(cx - w // 2, slide_w - w))
+    y = max(0, min(cy - h // 2, slide_h - h))
+
+    return {"x": x, "y": y, "width": w, "height": h}
 
 
 @mcp.tool()

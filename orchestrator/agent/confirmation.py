@@ -128,11 +128,7 @@ class ConfirmationMixin:
         if is_gemini and turn_accumulated_results and not is_stateless:
             self.logger.info(f"\nSENDING {len(turn_accumulated_results)} RESULT(S) TO LLM after confirmation")
             try:
-                if len(turn_accumulated_results) > 1:
-                    llm_response = self.llm_client.send_multiple_function_responses(turn_accumulated_results)
-                else:
-                    _single_name, _single_data = turn_accumulated_results[0]
-                    llm_response = self.llm_client.send_function_response(_single_name, _single_data)
+                llm_response = await self._send_turn_results_to_llm(turn_accumulated_results)
                 self.logger.info("Captured LLM response from function_response(s) (Gemini)")
             except Exception as llm_err:
                 print(f"LLM API error after tool execution: {type(llm_err).__name__}: {llm_err}")

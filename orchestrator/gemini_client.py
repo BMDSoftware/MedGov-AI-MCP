@@ -223,6 +223,7 @@ class GeminiClient:
             response={"result": response_data}
         )]
         if images:
+            print(f"Attaching {len(images)} image(s) to function response message for {function_name}")
             parts.extend(images)
         return self.chat_session.send_message(
             message=parts,
@@ -242,6 +243,7 @@ class GeminiClient:
             for name, data in results
         ]
         if images:
+            print(f"Attaching {len(images)} image(s) to function response message")
             parts.extend(images)
         return self.chat_session.send_message(
             message=parts,

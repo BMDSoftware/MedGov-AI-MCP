@@ -519,7 +519,7 @@ function App() {
         ) : page === 'autonomous' ? (
           <AutonomousAgent currentSessionId={currentSessionId} />
         ) : page === 'settings' ? (
-          <Settings onModeChange={setAppMode} />
+          <Settings onModeChange={setAppMode} appMode={appMode} />
         ) : page === 'test' ? (
           <InferenceTest />
         ) : page === 'results' ? (

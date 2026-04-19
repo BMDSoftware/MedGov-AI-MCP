@@ -1769,6 +1769,28 @@ async def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/api/system-stats", tags=["system"], summary="RAM, disk and CPU usage")
+async def system_stats():
+    import psutil
+    vm = psutil.virtual_memory()
+    disk = psutil.disk_usage("/app")
+    return {
+        "ram": {
+            "total_gb": round(vm.total / 1e9, 2),
+            "used_gb": round(vm.used / 1e9, 2),
+            "available_gb": round(vm.available / 1e9, 2),
+            "percent": vm.percent,
+        },
+        "disk": {
+            "total_gb": round(disk.total / 1e9, 2),
+            "used_gb": round(disk.used / 1e9, 2),
+            "free_gb": round(disk.free / 1e9, 2),
+            "percent": disk.percent,
+        },
+        "cpu_percent": psutil.cpu_percent(interval=0.2),
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     print("Starting server on http://localhost:5001")

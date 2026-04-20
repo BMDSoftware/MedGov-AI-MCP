@@ -336,7 +336,7 @@ function Settings({ onModeChange, appMode }) {
       {activeTab === 'diagnostics' ? (
         <div className="diag-panel">
           <p className="settings-mode-desc" style={{ marginBottom: 14 }}>
-            Runs checks inside the server container — useful for debugging deployment issues without SSH access.
+            Runs checks inside the server container
           </p>
           <button className="mcp-reload-btn" onClick={runDiagnostics} disabled={diagLoading}>
             {diagLoading ? 'Running...' : 'Run Diagnostics'}
@@ -372,6 +372,21 @@ function Settings({ onModeChange, appMode }) {
                         }
                       </div>
                     ))
+                  }
+                </div>
+              )}
+
+              {/* MONAI inference stderr */}
+              {diagData.monai_stderr !== undefined && (
+                <div className={`diag-section ${diagData.monai_stderr ? '' : 'diag-ok'}`}>
+                  <div className="diag-section-title">
+                    <span className="diag-dot" />
+                    MONAI inference log (last 4KB)
+                    {!diagData.monai_stderr && <span className="diag-badge">NO LOG YET</span>}
+                  </div>
+                  {diagData.monai_stderr
+                    ? <pre className="diag-pre">{diagData.monai_stderr}</pre>
+                    : <p className="diag-empty">Run an inference first, crash output will appear here.</p>
                   }
                 </div>
               )}

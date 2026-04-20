@@ -209,8 +209,18 @@ async def _async_run_inference(image_path: str, model_name: str) -> Dict:
         env={**os.environ, **monai_cfg.get("env", {})},
     )
 
+    # Redirect MONAI subprocess stderr to a rolling log file so crash output
+    # is visible via /api/diagnostics even when we can't SSH into the container.
+    stderr_log = Path(__file__).parent / "data" / "monai_inference_stderr.log"
+    stderr_log.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(stderr_log, "a") as _errfp:
+        _errfp.write(f"\n--- inference start: {model_name} ---\n")
+
     async with AsyncExitStack() as stack:
-        read, write = await stack.enter_async_context(stdio_client(params))
+        errlog = open(stderr_log, "a")  # noqa: WPS515, kept open for subprocess lifetime
+        stack.callback(errlog.close)
+        read, write = await stack.enter_async_context(stdio_client(params, errlog=errlog))
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
 

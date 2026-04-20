@@ -1799,7 +1799,7 @@ async def system_stats():
 
 @app.get("/api/diagnostics", tags=["system"], summary="Run server-side diagnostics")
 async def run_diagnostics():
-    """Check MONAI venv, model bundles, and system state — useful when you can't SSH in."""
+    """Check MONAI venv, model bundles, and system state. Useful when you can't SSH in."""
     import subprocess
     import platform
     import sys
@@ -1817,7 +1817,8 @@ async def run_diagnostics():
              "print(f'python {sys.version}'); "
              "print(f'torch {torch.__version__}'); "
              "print(f'monai {monai.__version__}'); "
-             "print(f'mcp {mcp.__version__}')"],
+             "print(f'mcp {getattr(mcp, \"__version__\", \"(no __version__)\")}')"
+             ],
             capture_output=True, text=True, timeout=30
         )
         results["monai_venv"] = {
@@ -1849,6 +1850,17 @@ async def run_diagnostics():
     else:
         bundle_info["__error__"] = "bundles directory not found"
     results["bundles"] = bundle_info
+
+    # Last MONAI inference stderr (crash output from subprocess)
+    stderr_log = app_root / "orchestrator" / "data" / "monai_inference_stderr.log"
+    if stderr_log.exists():
+        try:
+            text = stderr_log.read_text(errors="replace")
+            results["monai_stderr"] = text[-4000:] if len(text) > 4000 else text
+        except Exception as e:
+            results["monai_stderr"] = f"error reading log: {e}"
+    else:
+        results["monai_stderr"] = None
 
     # Uploads directory
     uploads = app_root / "orchestrator" / "data" / "uploads"

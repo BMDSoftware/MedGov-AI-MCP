@@ -70,23 +70,28 @@ MODEL_REGISTRY = {
         "sw_batch_size": 4,
         "overlap": 0.5,
     },
-    "swin_unetr_btcv_segmentation": {
-        "category": "segmentation",
-        "modality": "CT",
-        "body_part": "abdomen",
-        "description": "Multi-organ segmentation (13 organs) on CT",
-        "bundle_name": "swin_unetr_btcv_segmentation",
-        "labels": {
-            1: "spleen", 2: "right_kidney", 3: "left_kidney", 4: "gallbladder",
-            5: "esophagus", 6: "liver", 7: "stomach", 8: "aorta",
-            9: "inferior_vena_cava", 10: "portal_vein_and_splenic_vein",
-            11: "pancreas", 12: "right_adrenal_gland", 13: "left_adrenal_gland"
-        },
-        "input_size": [96, 96, 96],
-        "num_classes": 14,
-        "sw_batch_size": 1,
-        "overlap": 0.5,
-    },
+    # swin_unetr_btcv_segmentation is disabled — the bundle uses an 'img_size'
+    # constructor argument that SwinUNETR no longer accepts in current MONAI,
+    # causing TypeError on model load. The LLM tends to prefer it over
+    # spleen_ct_segmentation for abdominal CT because it lists 13 organs, but it
+    # always fails. Re-enable once the bundle or MONAI version is updated.
+    # "swin_unetr_btcv_segmentation": {
+    #     "category": "segmentation",
+    #     "modality": "CT",
+    #     "body_part": "abdomen",
+    #     "description": "Multi-organ segmentation (13 organs) on CT",
+    #     "bundle_name": "swin_unetr_btcv_segmentation",
+    #     "labels": {
+    #         1: "spleen", 2: "right_kidney", 3: "left_kidney", 4: "gallbladder",
+    #         5: "esophagus", 6: "liver", 7: "stomach", 8: "aorta",
+    #         9: "inferior_vena_cava", 10: "portal_vein_and_splenic_vein",
+    #         11: "pancreas", 12: "right_adrenal_gland", 13: "left_adrenal_gland"
+    #     },
+    #     "input_size": [96, 96, 96],
+    #     "num_classes": 14,
+    #     "sw_batch_size": 1,
+    #     "overlap": 0.5,
+    # },
     "pancreas_ct_dints_segmentation": {
         "category": "segmentation",
         "modality": "CT",

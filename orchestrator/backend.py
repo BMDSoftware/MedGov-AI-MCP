@@ -1797,6 +1797,84 @@ async def system_stats():
     }
 
 
+@app.get("/api/diagnostics", tags=["system"], summary="Run server-side diagnostics")
+async def run_diagnostics():
+    """Check MONAI venv, model bundles, and system state — useful when you can't SSH in."""
+    import subprocess, platform, sys
+    from pathlib import Path as _P
+
+    app_root = _P(os.environ.get("APP_ROOT", "/app"))
+    monai_python = str(app_root / "mcp-monai" / "venv" / "bin" / "python")
+    results = {}
+
+    # Python + package versions inside the MONAI venv
+    try:
+        out = subprocess.run(
+            [monai_python, "-c",
+             "import sys, torch, monai, mcp; "
+             "print(f'python {sys.version}'); "
+             "print(f'torch {torch.__version__}'); "
+             "print(f'monai {monai.__version__}'); "
+             "print(f'mcp {mcp.__version__}')"],
+            capture_output=True, text=True, timeout=30
+        )
+        results["monai_venv"] = {
+            "ok": out.returncode == 0,
+            "output": (out.stdout + out.stderr).strip()
+        }
+    except Exception as e:
+        results["monai_venv"] = {"ok": False, "output": str(e)}
+
+    # Model bundles
+    bundles_root = app_root / "mcp-monai" / "bundles"
+    bundle_info = {}
+    if bundles_root.exists():
+        for d in sorted(bundles_root.iterdir()):
+            if not d.is_dir():
+                continue
+            models_dir = d / "models"
+            if not models_dir.exists():
+                bundle_info[d.name] = {"status": "missing models/ dir"}
+                continue
+            pt_files = list(models_dir.glob("*.pt")) + list(models_dir.glob("*.ts"))
+            if not pt_files:
+                bundle_info[d.name] = {"status": "no weight files"}
+            else:
+                bundle_info[d.name] = {
+                    "status": "ok",
+                    "files": {f.name: f"{f.stat().st_size / 1e6:.0f} MB" for f in pt_files}
+                }
+    else:
+        bundle_info["__error__"] = "bundles directory not found"
+    results["bundles"] = bundle_info
+
+    # Uploads directory
+    uploads = app_root / "orchestrator" / "data" / "uploads"
+    try:
+        n = len(list(uploads.iterdir())) if uploads.exists() else 0
+        results["uploads"] = {"exists": uploads.exists(), "file_count": n}
+    except Exception as e:
+        results["uploads"] = {"exists": False, "error": str(e)}
+
+    # System
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        disk = psutil.disk_usage(str(app_root))
+        results["system"] = {
+            "platform": platform.platform(),
+            "python": sys.version,
+            "ram_available_gb": round(vm.available / 1e9, 1),
+            "ram_total_gb": round(vm.total / 1e9, 1),
+            "disk_free_gb": round(disk.free / 1e9, 1),
+            "disk_total_gb": round(disk.total / 1e9, 1),
+        }
+    except Exception as e:
+        results["system"] = {"error": str(e)}
+
+    return results
+
+
 if __name__ == "__main__":
     import uvicorn
     print("Starting server on http://localhost:5001")

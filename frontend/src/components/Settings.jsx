@@ -19,6 +19,20 @@ const NOTIF_COLORS = {
 function Settings({ onModeChange, appMode }) {
   const [activeTab, setActiveTab] = useState('settings');
 
+  // Diagnostics
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagData, setDiagData] = useState(null);
+
+  const runDiagnostics = () => {
+    setDiagLoading(true);
+    setDiagData(null);
+    apiFetch(`${API_URL}/api/diagnostics`)
+      .then(r => r.json())
+      .then(d => setDiagData(d))
+      .catch(e => setDiagData({ error: String(e) }))
+      .finally(() => setDiagLoading(false));
+  };
+
   // System stats (debug only)
   const [systemStats, setSystemStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -316,9 +330,81 @@ function Settings({ onModeChange, appMode }) {
         <button className={`settings-tab${activeTab === 'notifications' ? ' active' : ''}`} onClick={() => setActiveTab('notifications')}>
           Notifications {notifications.length > 0 && <span className="notif-badge">{notifications.length}</span>}
         </button>
+        <button className={`settings-tab${activeTab === 'diagnostics' ? ' active' : ''}`} onClick={() => setActiveTab('diagnostics')}>Diagnostics</button>
       </div>
 
-      {activeTab === 'notifications' ? (
+      {activeTab === 'diagnostics' ? (
+        <div className="diag-panel">
+          <p className="settings-mode-desc" style={{ marginBottom: 14 }}>
+            Runs checks inside the server container — useful for debugging deployment issues without SSH access.
+          </p>
+          <button className="mcp-reload-btn" onClick={runDiagnostics} disabled={diagLoading}>
+            {diagLoading ? 'Running...' : 'Run Diagnostics'}
+          </button>
+
+          {diagData && (
+            <div className="diag-results">
+
+              {/* MONAI venv */}
+              {diagData.monai_venv && (
+                <div className={`diag-section ${diagData.monai_venv.ok ? 'diag-ok' : 'diag-err'}`}>
+                  <div className="diag-section-title">
+                    <span className="diag-dot" />
+                    MONAI venv packages
+                    <span className="diag-badge">{diagData.monai_venv.ok ? 'OK' : 'FAIL'}</span>
+                  </div>
+                  <pre className="diag-pre">{diagData.monai_venv.output}</pre>
+                </div>
+              )}
+
+              {/* Model bundles */}
+              {diagData.bundles && (
+                <div className="diag-section">
+                  <div className="diag-section-title"><span className="diag-dot" />Model Bundles</div>
+                  {Object.keys(diagData.bundles).length === 0
+                    ? <p className="diag-empty">No bundles found — models need to be downloaded first.</p>
+                    : Object.entries(diagData.bundles).map(([name, info]) => (
+                      <div key={name} className={`diag-bundle ${info.status === 'ok' ? 'diag-ok' : 'diag-err'}`}>
+                        <span className="diag-bundle-name">{name}</span>
+                        {info.status === 'ok'
+                          ? <span className="diag-bundle-files">{Object.entries(info.files).map(([f, s]) => `${f} (${s})`).join(', ')}</span>
+                          : <span className="diag-bundle-err">{info.status}</span>
+                        }
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
+
+              {/* Uploads */}
+              {diagData.uploads && (
+                <div className={`diag-section ${diagData.uploads.exists ? 'diag-ok' : 'diag-err'}`}>
+                  <div className="diag-section-title"><span className="diag-dot" />Uploads directory</div>
+                  <p className="diag-line">
+                    {diagData.uploads.exists
+                      ? `${diagData.uploads.file_count} file(s) in uploads/`
+                      : 'Directory not found'}
+                  </p>
+                </div>
+              )}
+
+              {/* System */}
+              {diagData.system && !diagData.system.error && (
+                <div className="diag-section">
+                  <div className="diag-section-title"><span className="diag-dot" />System</div>
+                  <pre className="diag-pre">
+{`Platform : ${diagData.system.platform}
+Python   : ${diagData.system.python?.split(' ')[0]}
+RAM      : ${diagData.system.ram_available_gb} GB free / ${diagData.system.ram_total_gb} GB total
+Disk     : ${diagData.system.disk_free_gb} GB free / ${diagData.system.disk_total_gb} GB total`}
+                  </pre>
+                </div>
+              )}
+
+            </div>
+          )}
+        </div>
+      ) : activeTab === 'notifications' ? (
         <div className="notif-list">
           {notifications.length === 0 && <p className="settings-mode-desc">No notifications yet.</p>}
           {[...notifications].reverse().map((n, i) => {

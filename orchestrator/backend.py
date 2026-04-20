@@ -1800,7 +1800,9 @@ async def system_stats():
 @app.get("/api/diagnostics", tags=["system"], summary="Run server-side diagnostics")
 async def run_diagnostics():
     """Check MONAI venv, model bundles, and system state — useful when you can't SSH in."""
-    import subprocess, platform, sys
+    import subprocess
+    import platform
+    import sys
     from pathlib import Path as _P
 
     app_root = _P(os.environ.get("APP_ROOT", "/app"))

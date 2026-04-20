@@ -753,8 +753,15 @@ function App() {
                     onChange={handleChatDirectoryUpload}
                     disabled={uploadingDir}
                   />
-                  <label htmlFor="dirInput" className="chatbot-file-label" title="Attach directory" style={{ opacity: uploadingDir ? 0.5 : 1 }}>
-                    <svg width="22" height="22" fill="none" stroke="#10b981" strokeWidth="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                  <label htmlFor="dirInput" className="chatbot-file-label" title={uploadingDir ? 'Uploading...' : 'Attach directory'} style={{ opacity: uploadingDir ? 0.6 : 1, position: 'relative' }}>
+                    {uploadingDir ? (
+                      <svg width="22" height="22" viewBox="0 0 22 22" style={{ animation: 'spin 1s linear infinite' }}>
+                        <circle cx="11" cy="11" r="9" fill="none" stroke="#10b981" strokeWidth="2" strokeOpacity="0.25" />
+                        <path d="M11 2a9 9 0 0 1 9 9" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    ) : (
+                      <svg width="22" height="22" fill="none" stroke="#10b981" strokeWidth="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    )}
                   </label>
                   <button type="submit" className="chatbot-send-btn">
                     <span>Send</span>

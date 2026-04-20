@@ -1593,17 +1593,20 @@ async def sse_events(request: Request, token: Optional[str] = Query(None), curre
         try:
             yield f"data: {json.dumps({'type': 'connected'})}\n\n"
 
-            # Pre-populate so we don't fire stale notifications on reconnect.
+            # Pre-populate so we don't replay old done/failed notifications on reconnect.
+            # Only mark done/failed tasks as already-notified — queued/running tasks are
+            # re-emitted so the client never misses a notification due to SSE reconnects.
             notified: set = set()   # tasks already sent done/failed event
             started: set = set()    # tasks already sent running event
             seen_ids: set = set()   # all task IDs ever seen (to detect brand-new tasks)
             try:
                 for t in db.list_tasks(user_id=current_user["user_id"]):
-                    seen_ids.add(t["id"])
-                    if t["status"] in ("done", "failed"):
+                    if t["status"] in ("done", "failed", "cancelled"):
+                        seen_ids.add(t["id"])
                         notified.add(t["id"])
-                    if t["status"] in ("running", "done", "failed"):
                         started.add(t["id"])
+                    # queued/running tasks are intentionally NOT added to seen_ids
+                    # so they get task_queued / task_running re-emitted after reconnect
             except Exception as e:
                 print(f"[SSE] init error: {e}")
 
@@ -1699,8 +1702,11 @@ async def sse_events(request: Request, token: Optional[str] = Query(None), curre
                     yield ": keepalive\n\n"
                     keepalive_ticks = 0
 
-        except BaseException:
-            return  # Swallow any thrown exception so the generator closes cleanly
+        except (GeneratorExit, asyncio.CancelledError):
+            return  # Client disconnected — clean exit
+        except BaseException as _sse_err:
+            print(f"[SSE] generator closed unexpectedly: {type(_sse_err).__name__}: {_sse_err}")
+            return
 
     return StreamingResponse(
         event_generator(),

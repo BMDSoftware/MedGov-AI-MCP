@@ -822,6 +822,22 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
                 "required_roi": roi_size,
             }
 
+        # Log available RAM so we can diagnose OOM crashes from server logs
+        try:
+            import psutil
+            vm = psutil.virtual_memory()
+            num_classes = model_info.get("num_classes", 2)
+            spatial_voxels = 1
+            for s in image.shape[2:]:
+                spatial_voxels *= int(s)
+            est_bytes = 2 * num_classes * spatial_voxels * 4  # output + count buf, float32
+            log(
+                f"RAM: {vm.available / 1e9:.1f} GB available / {vm.total / 1e9:.1f} GB total | "
+                f"est. output buffers: {est_bytes / 1e9:.2f} GB"
+            )
+        except Exception:
+            pass
+
         def _run_sliding_window(img, mdl, dev):
             with torch.no_grad():
                 return sliding_window_inference(
@@ -897,9 +913,9 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
             "labels": model_info.get("labels", {})
         }
 
-    except Exception as e:
+    except BaseException as e:
         import traceback
-        log(f"Inference failed: {str(e)}\n{traceback.format_exc()}")
+        log(f"Inference failed ({type(e).__name__}): {str(e)}\n{traceback.format_exc()}")
         return {
             "error": f"Inference failed: {str(e)}",
             "traceback": traceback.format_exc(),

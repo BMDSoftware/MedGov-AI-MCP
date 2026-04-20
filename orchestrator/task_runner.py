@@ -194,7 +194,6 @@ def _handle_inference(input_data: Dict, session_id: str) -> Dict:
 
 async def _async_run_inference(image_path: str, model_name: str) -> Dict:
     """Open a fresh MCP session to the MONAI server and run inference."""
-    import tempfile
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     from contextlib import AsyncExitStack
@@ -210,28 +209,15 @@ async def _async_run_inference(image_path: str, model_name: str) -> Dict:
         env={**os.environ, **monai_cfg.get("env", {})},
     )
 
-    # Use a real temp file for stderr so the subprocess gets a valid fd
-    stderr_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+    async with AsyncExitStack() as stack:
+        read, write = await stack.enter_async_context(stdio_client(params))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
 
-    try:
-        async with AsyncExitStack() as stack:
-            read, write = await stack.enter_async_context(stdio_client(params, errlog=stderr_file))
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-
-            mcp_result = await session.call_tool(
-                "run_inference",
-                arguments={"image_path": image_path, "model_name": model_name},
-            )
-    except Exception as exc:
-        stderr_file.seek(0)
-        stderr_output = stderr_file.read().strip()
-        if stderr_output:
-            print(f"[monai stderr] {stderr_output[-2000:]}")
-            raise RuntimeError(f"{exc}\n\nMONAI server output:\n{stderr_output[-1000:]}") from exc
-        raise
-    finally:
-        stderr_file.close()
+        mcp_result = await session.call_tool(
+            "run_inference",
+            arguments={"image_path": image_path, "model_name": model_name},
+        )
 
     combined = "".join(
         block.text for block in mcp_result.content if hasattr(block, "text")
@@ -255,10 +241,11 @@ def _explain_inference_error(technical_error: str, input_data: Dict) -> str:
     image_filename = os.path.basename(image_path) if image_path else "unknown file"
 
     prompt = (
-        "A medical imaging AI failed to analyse a scan. "
-        "Explain the error below to a radiologist in 2-3 plain English sentences. "
-        "Do not use Python, programming, or technical computing terms. "
-        "State clearly what went wrong and what the radiologist should do instead.\n\n"
+        "A medical imaging AI inference job failed. "
+        "Explain the error to a technical user in 2-3 sentences. "
+        "State the specific technical reason it failed (include the actual error message), "
+        "what it means in plain terms, and what the user should do to fix or work around it. "
+        "Be accurate and specific — do not generalise or omit the real cause.\n\n"
         f"Technical error: {technical_error}\n"
         f"Model: {model_name}\n"
         f"Image file: {image_filename}\n\n"

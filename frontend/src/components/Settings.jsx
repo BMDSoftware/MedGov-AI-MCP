@@ -503,36 +503,31 @@ function Settings({ onModeChange, appMode }) {
       )}
 
       {appMode === 'debug' && (
-        <div className="settings-mode-section">
-          <div className="settings-section-header">
-            <h3 className="settings-mode-title">System Resources</h3>
+        <div className="system-resources-section">
+          <div className="system-resources-header">
+            <h3 className="settings-mode-title" style={{ margin: 0 }}>System Resources</h3>
             <button className="settings-refresh-btn" onClick={fetchSystemStats} disabled={statsLoading}>
               {statsLoading ? 'Refreshing...' : 'Refresh'}
             </button>
           </div>
           {systemStats ? (
             <div className="system-stats-grid">
-              <div className="system-stat-card">
-                <div className="system-stat-label">RAM</div>
-                <div className="system-stat-bar-wrap">
-                  <div className="system-stat-bar" style={{ width: `${systemStats.ram.percent}%`, background: systemStats.ram.percent > 85 ? '#ef4444' : systemStats.ram.percent > 65 ? '#f59e0b' : '#10b981' }} />
+              {[
+                { label: 'RAM', value: `${systemStats.ram.used_gb} / ${systemStats.ram.total_gb} GB`, pct: systemStats.ram.percent },
+                { label: 'Disk (/app)', value: `${systemStats.disk.used_gb} / ${systemStats.disk.total_gb} GB — ${systemStats.disk.free_gb} GB free`, pct: systemStats.disk.percent },
+                { label: 'CPU', value: `${systemStats.cpu_percent}%`, pct: systemStats.cpu_percent },
+              ].map(({ label, value, pct }) => (
+                <div className="system-stat-card" key={label}>
+                  <div className="system-stat-header">
+                    <span className="system-stat-label">{label}</span>
+                    <span className="system-stat-pct" style={{ color: pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#10b981' }}>{pct}%</span>
+                  </div>
+                  <div className="system-stat-bar-wrap">
+                    <div className="system-stat-bar" style={{ width: `${pct}%`, background: pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#10b981' }} />
+                  </div>
+                  <div className="system-stat-value">{value}</div>
                 </div>
-                <div className="system-stat-value">{systemStats.ram.used_gb} / {systemStats.ram.total_gb} GB ({systemStats.ram.percent}%)</div>
-              </div>
-              <div className="system-stat-card">
-                <div className="system-stat-label">Disk (/app)</div>
-                <div className="system-stat-bar-wrap">
-                  <div className="system-stat-bar" style={{ width: `${systemStats.disk.percent}%`, background: systemStats.disk.percent > 90 ? '#ef4444' : systemStats.disk.percent > 75 ? '#f59e0b' : '#10b981' }} />
-                </div>
-                <div className="system-stat-value">{systemStats.disk.used_gb} / {systemStats.disk.total_gb} GB ({systemStats.disk.percent}%) — {systemStats.disk.free_gb} GB free</div>
-              </div>
-              <div className="system-stat-card">
-                <div className="system-stat-label">CPU</div>
-                <div className="system-stat-bar-wrap">
-                  <div className="system-stat-bar" style={{ width: `${systemStats.cpu_percent}%`, background: systemStats.cpu_percent > 90 ? '#ef4444' : systemStats.cpu_percent > 70 ? '#f59e0b' : '#10b981' }} />
-                </div>
-                <div className="system-stat-value">{systemStats.cpu_percent}%</div>
-              </div>
+              ))}
             </div>
           ) : (
             <p className="settings-mode-desc">{statsLoading ? 'Loading...' : 'Could not load system stats.'}</p>

@@ -194,7 +194,7 @@ def _handle_inference(input_data: Dict, session_id: str) -> Dict:
 
 async def _async_run_inference(image_path: str, model_name: str) -> Dict:
     """Open a fresh MCP session to the MONAI server and run inference."""
-    import io
+    import tempfile
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     from contextlib import AsyncExitStack
@@ -210,11 +210,12 @@ async def _async_run_inference(image_path: str, model_name: str) -> Dict:
         env={**os.environ, **monai_cfg.get("env", {})},
     )
 
-    stderr_buf = io.StringIO()
+    # Use a real temp file for stderr so the subprocess gets a valid fd
+    stderr_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
 
     try:
         async with AsyncExitStack() as stack:
-            read, write = await stack.enter_async_context(stdio_client(params, errlog=stderr_buf))
+            read, write = await stack.enter_async_context(stdio_client(params, errlog=stderr_file))
             session = await stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
 
@@ -223,11 +224,14 @@ async def _async_run_inference(image_path: str, model_name: str) -> Dict:
                 arguments={"image_path": image_path, "model_name": model_name},
             )
     except Exception as exc:
-        stderr_output = stderr_buf.getvalue().strip()
+        stderr_file.seek(0)
+        stderr_output = stderr_file.read().strip()
         if stderr_output:
             print(f"[monai stderr] {stderr_output[-2000:]}")
             raise RuntimeError(f"{exc}\n\nMONAI server output:\n{stderr_output[-1000:]}") from exc
         raise
+    finally:
+        stderr_file.close()
 
     combined = "".join(
         block.text for block in mcp_result.content if hasattr(block, "text")

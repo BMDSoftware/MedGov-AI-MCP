@@ -67,7 +67,7 @@ MODEL_REGISTRY = {
         "labels": {1: "spleen"},
         "input_size": [96, 96, 96],
         "num_classes": 2,
-        "sw_batch_size": 4,
+        "sw_batch_size": 1,
         "overlap": 0.5,
     },
     # swin_unetr_btcv_segmentation is disabled — the bundle uses an 'img_size'

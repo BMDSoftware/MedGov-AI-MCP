@@ -1704,7 +1704,7 @@ async def sse_events(request: Request, token: Optional[str] = Query(None), curre
                     notified.add(tid)
 
                 keepalive_ticks += 1
-                if keepalive_ticks >= 25:
+                if keepalive_ticks >= 15:
                     yield ": keepalive\n\n"
                     keepalive_ticks = 0
 

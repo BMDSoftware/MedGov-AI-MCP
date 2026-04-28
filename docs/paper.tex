@@ -1,0 +1,176 @@
+\documentclass[conference]{IEEEtran}
+
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{cite}
+
+\title{MedGov-AI: An MCP-Based Agentic Orchestrator for Clinical Medical Image Analysis and Structured Report Generation}
+
+% too current text? maybe we should do more separation or starting bolding and puting in italic some things
+
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\end{abstract}
+
+\begin{IEEEkeywords}
+Agentic AI, Medical Imaging, MCP, MONAI, Clinical Workflow Automation
+\end{IEEEkeywords}
+
+\section{Background}
+
+\subsection{AI in Medical Imaging}
+% talk about AI in medical imaging
+% real case scenarios and uses
+% risks
+% pros and cons
+Before starting with all the technologies, methods and results, we need to understand why this work was started in the first place, what was the necessity that brought this possible solution, does it work? Is it something still in development and being explored? Are new technologies really necessary for this line of work? These and more will all be questions that we hope to answer with our experience in this project.
+% get real metrics for this
+Healthcare systems worldwide face increasing demand with limited resources. The volume of medical imaging studies continues to grow while the number of specialists remains constrained, creating diagnostic backlogs that directly affect patient outcomes. Automating routine analysis tasks is therefore not merely a convenience but a structural necessity. Greater automation brings greater consistency, reduces the workload on healthcare professionals, accelerates diagnosis, and allows clinicians to dedicate more time to complex cases and direct patient care.
+Since the project focuses on the exploration of AI and MCP in order to provide assistance in medical fields we need to ask these 4 questions:
+% this part will be filled more as we read some papers in order to answer, and I dont know if the answer should be right after on ir another sections
+
+- What AI tools are currently being used in medical imaging? (Segmentation models, detection, report generation, NLP on clinical notes)
+% research had to be done
+Several AI tools are currently being used in medical imaging, with the notable detail that they typically operate in isolation from one another, with no single standard way of connecting them. Examples include segmentation and detection systems such as chest X-ray analysis for detecting pneumonia, nodules and fractures used in triage, CT scan analysis for lung nodule detection with FDA-cleared tools such as Viz.ai and Aidoc, mammography screening with AI-assisted breast cancer detection tools such as Transpara and iCAD, and diabetic retinopathy screening from fundus images with systems such as IDx-DR.
+There are also tools for radiology reporting, such as automated preliminary reads that flag findings for radiologist review, structured report generation, and critical finding alerts. In pathology, cell counting and tissue classification models are in active clinical use. More general capabilities include worklist prioritization, where AI decides which scan a radiologist should read first based on predicted urgency.
+
+- What are they actually being used for? (Workflow automation, decision support, quality control, radiology, pathology, etc.)
+% search for hospitals admitting to the use of AI - verify all examples below before final submission
+These tools are being used across several areas of clinical practice, with adoption documented in leading institutions worldwide. In radiology, AI assists with worklist prioritization and critical finding alerts, where the system detects life-threatening conditions such as stroke, pulmonary embolism or intracranial hemorrhage and immediately notifies the clinical team. Mass General Brigham (United States) has deployed AI-driven radiology worklist prioritization to reduce time-to-read for urgent studies. The NHS (United Kingdom) deployed Annalise.ai across more than 40 hospital trusts for chest X-ray triage, allowing radiologists to focus on flagged abnormal cases first. In screening programs, AI acts as a first filter, flagging high-risk cases for specialist review and allowing programs to scale without proportionally increasing the number of specialists required. Google Health conducted a published clinical trial of an AI system for diabetic retinopathy screening in Thailand, demonstrating that AI-assisted grading matched or exceeded specialist performance in a real clinical setting. Mayo Clinic (United States) has integrated AI into ECG interpretation and cardiac imaging workflows, using it as a decision support layer for cardiologists. In pathology, whole slide image analysis is used for tumour grading and cell counting, reducing the time needed to evaluate complex specimens. More broadly, AI is being used for documentation support, generating structured preliminary reports from imaging findings that the clinician then reviews and validates.
+% --- references to add ---
+% Mass General Brigham + Annalise.ai deployment:
+% https://www.massgeneralbrigham.org/en/about/newsroom/press-releases/annalise-ai-imaging-tools
+% https://www.healthcareitnews.com/news/mass-general-brigham-and-future-ai-radiology
+% NHS Annalise.ai across 40+ trusts:
+% https://harrison.ai/news/transformational-ai-diagnostic-tool-made-available-to-radiologists-in-over-40-nhs-trusts/
+% https://www.leedsth.nhs.uk/news/new-ai-chest-x-ray-software-to-speed-up-diagnosis-and-improve-patient-care-at-leeds/
+% Google Health Thailand trial (The Lancet Digital Health - add as citation):
+% https://www.thelancet.com/journals/landig/article/PIIS2589-7500(22)00017-6/fulltext
+% https://pubmed.ncbi.nlm.nih.gov/35272972/
+% NOTE: the Thailand trial also found real-world challenges worth mentioning in risks/limitations:
+% image quality requirements that staff could not always meet, inconsistent workflows between
+% clinics, and connectivity issues - good example that real-world deployment is harder than lab results
+% Mayo Clinic AI ECG:
+% https://www.mayoclinic.org/departments-centers/ai-cardiology/overview/ovc-20486648
+% https://newsnetwork.mayoclinic.org/discussion/spotlight-on-early-detection-of-3-heart-diseases-using-ecg-ai/
+% Viz.ai, Aidoc, Transpara, iCAD, IDx-DR - to add references after
+- What are the benefits and why could this be a solution? (faster diagnosis, reduced workload, consistency)
+The benefits of AI in medical fields are directly tied to the limitations of the current manual process. Faster diagnosis is perhaps the most immediate gain, as AI systems can process and flag findings in seconds, reducing the time between scan acquisition and clinical decision. Consistency is another key advantage, although not fully achieved in today's world, particularly when referring to general large language models and chatbots. However, as these systems become more widely used in clinical settings and more medically specific, they will only improve. Human specialists on the other hand are subject to many influencing factors such as fatigue, experience, and personal circumstances, whereas AI models apply the same criteria uniformly across every case. The reduction in workload is also significant, as automating routine reads and preliminary reports frees specialists to focus on cases that genuinely require expert judgement. Taken together, these benefits suggest that AI is not a replacement for clinicians but a force multiplier.
+
+- What are the risks and limitations? (bias, hallucinations, black box decisions, regulatory concerns, no existing standards for agentic systems in healthcare)
+The risks and limitations of AI in medical imaging are as significant as its potential benefits. One of the most pressing concerns is bias, as AI models are only as representative as the data they were trained on, meaning that systems trained predominantly on data from certain demographics or imaging equipment may underperform on patients from underrepresented groups or institutions using different hardware and protocols. Hallucination is another critical risk, particularly in large language models used for report generation, where the system may produce confident but clinically incorrect statements. The black-box nature of many deep learning models raises accountability concerns, since clinicians and regulators often cannot explain why a model reached a particular conclusion, which complicates both clinical trust and legal responsibility. From a regulatory standpoint, the approval and monitoring of AI tools in healthcare remains inconsistent across countries and institutions, with no unified framework governing how these systems should be validated, updated, or audited in production. Finally, and most relevant to this work, there are currently no established standards for how agentic AI systems should operate in clinical environments, including how they should communicate with existing tools, when they should escalate to a human, and how their decisions should be logged for audit.
+
+
+Despite the progress of individual AI tools, no standard integration layer exists to orchestrate them together within a clinical workflow. Each institution must develop its own connectors and its own standards, which leads to fragmentation, lack of interoperability, slow adoption, and deployments that are expensive and difficult to maintain. The Model Context Protocol (MCP) is a promising solution to this problem, providing a standardized way for agents to discover and call tools without bespoke integration. This work explores the application of MCP as the integration layer for an agentic AI system that orchestrates multiple clinical imaging tools in a real-world workflow.
+
+\subsection{Agentic AI in Healthcare}
+
+% define agentic AI: goal-directed, tool-using, multi-step reasoning
+% why an agent fits clinical imaging workflows (sequential by nature)
+% exploration of agentic systems that we tried and conclusions
+% mention maybe also safety concerns, more adaptability, the customization of the system and determined specific clinical workflows, and the fact that we wanted to explore the design space of agentic systems in healthcare more broadly rather than being constrained by the design choices of existing frameworks.
+
+Agentic AI refers to systems that can autonomously set goals, plan multi-step actions, and use tools to achieve those goals. Unlike traditional AI models that operate in a single step or require human input at every stage, agentic systems can reason through complex tasks, make decisions about which tools to use, and adapt their behavior based on feedback. This makes them particularly well-suited for clinical imaging workflows, which are inherently sequential and often require the integration of multiple tools and data sources. For example, a typical workflow for analyzing a CT scan might involve first running a segmentation model to identify regions of interest, then using a classification model to characterize those regions, and finally generating a structured report summarizing the findings. An agentic AI system can orchestrate this entire process autonomously, calling each tool in the correct sequence and synthesizing the results into a coherent output.
+
+Three core properties characterize agentic systems: goal persistence (the system does not stop until the required deliverables are met), tool use (it can act on external systems, not just generate text), and iterative reasoning (each result informs the next decision). We evaluated several existing agentic frameworks, including LangChain, CrewAI, and AutoGen, but opted to build a custom agentic system. The primary reason was the need for tight integration with MCP: existing frameworks do not natively support MCP as a tool protocol, which would have required additional adapter layers and reintroduced the fragmentation problem we were trying to solve. Building a custom loop also allowed us to enforce specific behaviors required in a clinical context, such as a completion contract under which the agent cannot declare success while required deliverables remain unmet, and a debug mode in which the user must approve each tool call before execution.
+
+Contrasting with simpler alternatives clarifies why this design was necessary. A plain chatbot produces one response per prompt and cannot maintain state or call tools. A hardcoded pipeline can call tools but relies on the developer to anticipate every possible execution path, making it brittle in the face of real-world variability. A standalone ML model provides predictions but has no language interface and cannot adapt its behavior based on context. We found that only a true agentic system could handle the complexity and variability of real clinical workflows, which often require conditional logic, error handling, and dynamic tool selection.
+
+Our own system began as precisely this kind of hardcoded pipeline: in the initial version, the LLM was never consulted, and all sequencing decisions were made by explicit conditional logic in the orchestrator code. This approach proved limiting, as it could not adapt to new information without significant reprogramming, which motivated the transition to a fully agentic design.
+
+This transition is not without its challenges. Reliable agentic behavior requires careful prompt engineering: the agent must be guided to select tools in the correct order, avoid premature declarations of success, and handle ambiguous or incomplete results gracefully. These challenges are discussed in detail in later sections. However, the fundamental advantage over any hardcoded alternative is scalability: supporting a new clinical domain does not require rewriting workflow logic but only adding a new MCP server that exposes the relevant tools, or a skill file that encodes the domain-specific protocol, and the agent discovers and incorporates both at runtime without code changes. This also opens a much wider architectural design space. Rather than a single fixed agent, one could configure specialist agents for distinct clinical tasks, use prompt-based behavioral switches to change the agent's operating mode, or compose multiple MCP servers covering entirely different domains. None of these extensions require touching the orchestration code, which is simply not true of any hardcoded pipeline.
+
+% Note: LLM backbone comparison placed here; consider moving to Methods or Results if the teacher prefers
+
+% is it worth mentioning the hardware it was tested on? and enumerating all the models for example?
+When testing the system we explored two LLM backend approaches: a locally-hosted model and a cloud API. The local model was Ollama's deepseek-r1:7b, with llama3.1:8b also evaluated, both small enough to run on consumer hardware and allowing for complete data privacy since all processing happens locally. The API-based model was Gemini 2.0 Flash, with later versions used as token limits required, a significantly larger and more capable model hosted in the cloud. The local approach offers greater control and privacy but proved to struggle with the demands of multi-step clinical workflows. We observed consistent failures in tool calling: the model frequently failed to select the correct tool for the given context and could not reliably chain multiple calls to reach a goal. Addressing this consumed considerable development time across prompt engineering, workflow simplification, logging, and targeted adjustments. None of these fully resolved the problem, as the root cause was model size rather than configuration. Switching to the API-hosted model resolved all of these issues immediately. The API approach introduces trade-offs of its own, namely latency and potential data security concerns in privacy-sensitive deployments, but for the complex reasoning required by clinical imaging workflows it proved to be the only reliably viable option at the model sizes currently available for local inference. The system architecture supports both backends, allowing deployment to be tailored to the constraints of a given clinical environment.
+
+\subsection{MCP as a Standardized Tool Integration Layer}
+
+The conventional approach to agent-tool integration is the bespoke REST adapter: for each tool the agent must call, a custom connector is written that handles authentication, request serialization, response parsing, and error mapping. This approach does not scale. Each new tool adds a new adapter; changes to a tool API break the corresponding adapter; and the agent itself must encode assumptions about every tool it might call.
+
+The Model Context Protocol (MCP) addresses this directly. MCP defines a client-server protocol in which each tool server declares its available tools at startup, specifying names, input schemas, and descriptions. The agent discovers tools dynamically at runtime and invokes them by name without requiring any prior knowledge of the server's internal implementation. This decouples the agent from individual tool APIs: adding a new tool server requires no changes to the agent, only a new MCP-compliant server that exposes the relevant capabilities.
+
+Singh et al. (2025) survey MCP's architecture in detail, positioning it as the solution to fragmented API integrations for agentic AI systems~\cite{mcp-aditi}. The survey also identifies MCP sampling, a mechanism for LLM-to-LLM communication within the MCP protocol, as a path toward sub-agent specialization, in which a coordinating agent can delegate to specialist agents exposed as MCP servers. Singh et al. note that healthcare is a domain where these properties are especially relevant, but the survey discusses clinical applications only conceptually; no implemented system is presented.
+
+\subsection{Skills as Clinical Capability Packages}
+
+Tool access via MCP determines what an agent can do, it does not determine what the agent should do in a given clinical domain. A segmentation server, a terminology server, and a report template server can all be exposed as MCP tools, but the correct sequencing of those tools for a CT lung evaluation versus a pathology workflow requires domain knowledge that is separate from both the agent's general reasoning capability and the tool's own logic.
+
+Skills address this layer. Xu and Yan (2026) formalize agent skills as composable, on-demand capability packages that provide domain-specific behavioral guidance to an LLM without retraining it~\cite{agentskillslargelanguage}. The key architectural insight is that skills and MCP are complementary rather than competing: skills define what to do in a given domain, while MCP exposes the tools with which to do it. Xu and Yan do not address healthcare-specific skill design, the governance question of who maintains skill files when clinical protocols change, or how skills compose with MCP in a working system, gaps that this work directly addresses.
+
+\subsection{Positioning of This Work}
+% no prior work combines: DICOM parsing + segmentation + reports under one agent,
+% MCP as the actual interoperability layer, and skill files for protocol encoding
+% reference the MCP-FHIR paper which found the exact same fragmentation problem
+
+\section{Methods}
+
+\subsection{System Architecture Overview}
+% three-layer design: React frontend, FastAPI backend/orchestrator, MCP tool servers
+% single-agent design: one AgenticAgent is the sole decision-maker
+% communication: HTTP/SSE for frontend-backend, stdio transport for agent-MCP servers
+% include architecture diagram here
+
+\subsection{MCP Server Layer}
+% explain dynamic tool discovery at startup
+% tool namespacing by server (monai.run_inference, radlex.get_template, etc.)
+% per-server isolated virtual environments (key: resolves GPU vs CPU PyTorch conflict)
+% table of MCP servers and their clinical function
+
+\subsection{Skills System}
+% YAML-frontmatter + Markdown skill files
+% agent reads skill file on demand before acting in that domain
+% domain experts can update skill files without touching agent or tool servers
+
+\subsection{Agentic Execution Loop}
+% goal in, tools called iteratively, result evaluated each step
+% completion contract: agent cannot declare success while required deliverables are missing
+% two modes: autonomous (no interruption) and debug (confirmation before each tool call)
+% LLM backbone configurable: Gemini (cloud) or Ollama (local, privacy-preserving)
+
+\subsection{Background Task Queue}
+% long-running operations (MONAI inference, Cellpose) queued to thread pool
+% state machine: queued, running, completed/failed, persisted in SQLite
+% SSE notifications to frontend on completion
+% semaphore: only one inference runs at a time to prevent memory crashes
+
+\subsection{Workspace Monitoring}
+% named monitored directories registered in the system
+% file deposited triggers agent automatically with a predefined prompt
+% event-driven clinical workflows: files from PACS or scanner initiate pipeline
+% no change to upstream systems required
+
+\subsection{Evaluation Setup}
+% the 3 experimental phases defined in the March 2026 meeting with the teacher
+% hardware: NVIDIA GeForce RTX 3050 6GB, MONAI 1.5.1, PyTorch 2.5.1
+% data: public DICOM datasets (Cancer Imaging Archive, Medical Segmentation Decathlon)
+% LLM backends tested: Gemini 2.0/2.5 Flash (API), Ollama deepseek-r1:7b and llama3.1:8b
+
+\section{Results}
+
+\subsection{Phase 1 - Model Experimentation}
+% Gemini vs Ollama for tool calling in clinical workflows
+% local versus API, limitations, pros and cons
+
+\subsection{Phase 2 - MCP Tools and Skills}
+% tool discovery at startup, dynamic registration
+% skills experimentation: advantages, disadvantages, findings
+
+\subsection{Phase 3 - Use Case Comparison}
+% use cases go here
+% autonomous workflow vs manual/guided workflow
+
+\section{Discussion}
+
+\section{Conclusions}
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}

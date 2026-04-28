@@ -32,6 +32,18 @@ Thumbs.db
 
 orchestrator/logs/
 
+# LaTeX build artifacts
+docs/*.aux
+docs/*.fdb_latexmk
+docs/*.fls
+docs/*.log
+docs/*.out
+docs/*.pdf
+docs/*.synctex.gz
+docs/*.toc
+docs/*.bbl
+docs/*.blg
+
 
 # Database
 *.db

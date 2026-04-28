@@ -12,59 +12,59 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# ── mcp-monai ──────────────────────────────────────────────────────────────────
+# -- Copy all requirements first (cache-friendly) -------------------------------------------------------------------------------
 COPY mcp-monai/requirements.txt mcp-monai/requirements.txt
+COPY mcp-radlex/requirements.txt mcp-radlex/requirements.txt
+COPY mcp-utils/requirements.txt mcp-utils/requirements.txt
+COPY mcp-skills/requirements.txt mcp-skills/requirements.txt
+COPY mcp-ipath/requirements.txt mcp-ipath/requirements.txt
+COPY mcp-cellpose/requirements.txt mcp-cellpose/requirements.txt
+COPY orchestrator/requirements.txt orchestrator/requirements.txt
+
+# -- Install all dependencies -------------------------------------------------------------------------------────────────────────
 RUN python -m venv mcp-monai/venv \
     && mcp-monai/venv/bin/pip install --upgrade pip \
     && mcp-monai/venv/bin/pip install --extra-index-url https://download.pytorch.org/whl/cpu \
        -r mcp-monai/requirements.txt
-COPY mcp-monai/ mcp-monai/
 
-# ── mcp-radlex ─────────────────────────────────────────────────────────────────
-COPY mcp-radlex/requirements.txt mcp-radlex/requirements.txt
 RUN python -m venv mcp-radlex/venv \
     && mcp-radlex/venv/bin/pip install --upgrade pip \
     && mcp-radlex/venv/bin/pip install -r mcp-radlex/requirements.txt
-COPY mcp-radlex/ mcp-radlex/
 
-# ── mcp-utils ──────────────────────────────────────────────────────────────────
-COPY mcp-utils/requirements.txt mcp-utils/requirements.txt
 RUN python -m venv mcp-utils/venv \
     && mcp-utils/venv/bin/pip install --upgrade pip \
     && mcp-utils/venv/bin/pip install -r mcp-utils/requirements.txt
-COPY mcp-utils/ mcp-utils/
 
-# ── mcp-skills ─────────────────────────────────────────────────────────────────
-COPY mcp-skills/requirements.txt mcp-skills/requirements.txt
 RUN python -m venv mcp-skills/venv \
     && mcp-skills/venv/bin/pip install --upgrade pip \
     && mcp-skills/venv/bin/pip install -r mcp-skills/requirements.txt
-COPY mcp-skills/ mcp-skills/
 
-# ── mcp-ipath ──────────────────────────────────────────────────────────────────
-COPY mcp-ipath/requirements.txt mcp-ipath/requirements.txt
 RUN python -m venv mcp-ipath/venv \
     && mcp-ipath/venv/bin/pip install --upgrade pip \
     && mcp-ipath/venv/bin/pip install -r mcp-ipath/requirements.txt
-COPY mcp-ipath/ mcp-ipath/
 
-# ── mcp-cellpose ───────────────────────────────────────────────────────────────
-COPY mcp-cellpose/requirements.txt mcp-cellpose/requirements.txt
 RUN python -m venv mcp-cellpose/venv \
     && mcp-cellpose/venv/bin/pip install --upgrade pip \
     && mcp-cellpose/venv/bin/pip install --extra-index-url https://download.pytorch.org/whl/cpu \
        torch torchvision \
     && mcp-cellpose/venv/bin/pip install -r mcp-cellpose/requirements.txt
+
 # Pre-download cpsam (the only model in cellpose v4) so first inference isn't slow
 RUN mcp-cellpose/venv/bin/python -c "from cellpose import models; models.CellposeModel(gpu=False)"
-COPY mcp-cellpose/ mcp-cellpose/
 
-# ── orchestrator ───────────────────────────────────────────────────────────────
-COPY orchestrator/requirements.txt orchestrator/requirements.txt
 RUN python -m venv orchestrator/venv \
     && orchestrator/venv/bin/pip install --upgrade pip \
     && orchestrator/venv/bin/pip install -r orchestrator/requirements.txt
+
+# -- Copy source files (changes here won't invalidate dep layers above) --------
+COPY mcp-monai/ mcp-monai/
+COPY mcp-radlex/ mcp-radlex/
+COPY mcp-utils/ mcp-utils/
+COPY mcp-skills/ mcp-skills/
+COPY mcp-ipath/ mcp-ipath/
+COPY mcp-cellpose/ mcp-cellpose/
 COPY orchestrator/ orchestrator/
+
 # mcp-config.json is gitignored (machine-specific); use the example as the in-image default
 RUN cp orchestrator/mcp-config.json.example orchestrator/mcp-config.json
 

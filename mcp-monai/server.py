@@ -67,26 +67,31 @@ MODEL_REGISTRY = {
         "labels": {1: "spleen"},
         "input_size": [96, 96, 96],
         "num_classes": 2,
-        "sw_batch_size": 4,
-        "overlap": 0.5,
-    },
-    "swin_unetr_btcv_segmentation": {
-        "category": "segmentation",
-        "modality": "CT",
-        "body_part": "abdomen",
-        "description": "Multi-organ segmentation (13 organs) on CT",
-        "bundle_name": "swin_unetr_btcv_segmentation",
-        "labels": {
-            1: "spleen", 2: "right_kidney", 3: "left_kidney", 4: "gallbladder",
-            5: "esophagus", 6: "liver", 7: "stomach", 8: "aorta",
-            9: "inferior_vena_cava", 10: "portal_vein_and_splenic_vein",
-            11: "pancreas", 12: "right_adrenal_gland", 13: "left_adrenal_gland"
-        },
-        "input_size": [96, 96, 96],
-        "num_classes": 14,
         "sw_batch_size": 1,
         "overlap": 0.5,
     },
+    # swin_unetr_btcv_segmentation is disabled — the bundle uses an 'img_size'
+    # constructor argument that SwinUNETR no longer accepts in current MONAI,
+    # causing TypeError on model load. The LLM tends to prefer it over
+    # spleen_ct_segmentation for abdominal CT because it lists 13 organs, but it
+    # always fails. Re-enable once the bundle or MONAI version is updated.
+    # "swin_unetr_btcv_segmentation": {
+    #     "category": "segmentation",
+    #     "modality": "CT",
+    #     "body_part": "abdomen",
+    #     "description": "Multi-organ segmentation (13 organs) on CT",
+    #     "bundle_name": "swin_unetr_btcv_segmentation",
+    #     "labels": {
+    #         1: "spleen", 2: "right_kidney", 3: "left_kidney", 4: "gallbladder",
+    #         5: "esophagus", 6: "liver", 7: "stomach", 8: "aorta",
+    #         9: "inferior_vena_cava", 10: "portal_vein_and_splenic_vein",
+    #         11: "pancreas", 12: "right_adrenal_gland", 13: "left_adrenal_gland"
+    #     },
+    #     "input_size": [96, 96, 96],
+    #     "num_classes": 14,
+    #     "sw_batch_size": 1,
+    #     "overlap": 0.5,
+    # },
     "pancreas_ct_dints_segmentation": {
         "category": "segmentation",
         "modality": "CT",
@@ -822,6 +827,22 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
                 "required_roi": roi_size,
             }
 
+        # Log available RAM so we can diagnose OOM crashes from server logs
+        try:
+            import psutil
+            vm = psutil.virtual_memory()
+            num_classes = model_info.get("num_classes", 2)
+            spatial_voxels = 1
+            for s in image.shape[2:]:
+                spatial_voxels *= int(s)
+            est_bytes = 2 * num_classes * spatial_voxels * 4  # output + count buf, float32
+            log(
+                f"RAM: {vm.available / 1e9:.1f} GB available / {vm.total / 1e9:.1f} GB total | "
+                f"est. output buffers: {est_bytes / 1e9:.2f} GB"
+            )
+        except Exception:
+            pass
+
         def _run_sliding_window(img, mdl, dev):
             with torch.no_grad():
                 return sliding_window_inference(
@@ -897,9 +918,9 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
             "labels": model_info.get("labels", {})
         }
 
-    except Exception as e:
+    except BaseException as e:
         import traceback
-        log(f"Inference failed: {str(e)}\n{traceback.format_exc()}")
+        log(f"Inference failed ({type(e).__name__}): {str(e)}\n{traceback.format_exc()}")
         return {
             "error": f"Inference failed: {str(e)}",
             "traceback": traceback.format_exc(),

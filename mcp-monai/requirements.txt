@@ -1,7 +1,7 @@
 fastapi>=0.100.0
 uvicorn>=0.23.0
 monai>=1.3.0
-torch>=2.0.0
+torch==2.5.1
 numpy>=1.24.0
 mcp
 Pillow # for reading jpegs as in the example

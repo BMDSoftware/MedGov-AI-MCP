@@ -1599,17 +1599,20 @@ async def sse_events(request: Request, token: Optional[str] = Query(None), curre
         try:
             yield f"data: {json.dumps({'type': 'connected'})}\n\n"
 
-            # Pre-populate so we don't fire stale notifications on reconnect.
+            # Pre-populate so we don't replay old done/failed notifications on reconnect.
+            # Only mark done/failed tasks as already-notified — queued/running tasks are
+            # re-emitted so the client never misses a notification due to SSE reconnects.
             notified: set = set()   # tasks already sent done/failed event
             started: set = set()    # tasks already sent running event
             seen_ids: set = set()   # all task IDs ever seen (to detect brand-new tasks)
             try:
                 for t in db.list_tasks(user_id=current_user["user_id"]):
-                    seen_ids.add(t["id"])
-                    if t["status"] in ("done", "failed"):
+                    if t["status"] in ("done", "failed", "cancelled"):
+                        seen_ids.add(t["id"])
                         notified.add(t["id"])
-                    if t["status"] in ("running", "done", "failed"):
                         started.add(t["id"])
+                    # queued/running tasks are intentionally NOT added to seen_ids
+                    # so they get task_queued / task_running re-emitted after reconnect
             except Exception as e:
                 print(f"[SSE] init error: {e}")
 
@@ -1705,8 +1708,11 @@ async def sse_events(request: Request, token: Optional[str] = Query(None), curre
                     yield ": keepalive\n\n"
                     keepalive_ticks = 0
 
-        except BaseException:
-            return  # Swallow any thrown exception so the generator closes cleanly
+        except (GeneratorExit, asyncio.CancelledError):
+            return  # Client disconnected — clean exit
+        except BaseException as _sse_err:
+            print(f"[SSE] generator closed unexpectedly: {type(_sse_err).__name__}: {_sse_err}")
+            return
 
     return StreamingResponse(
         event_generator(),
@@ -1773,6 +1779,120 @@ async def generate_report(data: dict = Body(...), current_user: dict = Depends(g
 @app.get("/api/health", tags=["system"], summary="Health check")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/api/system-stats", tags=["system"], summary="RAM, disk and CPU usage")
+async def system_stats():
+    import psutil
+    vm = psutil.virtual_memory()
+    disk = psutil.disk_usage("/app")
+    return {
+        "ram": {
+            "total_gb": round(vm.total / 1e9, 2),
+            "used_gb": round(vm.used / 1e9, 2),
+            "available_gb": round(vm.available / 1e9, 2),
+            "percent": vm.percent,
+        },
+        "disk": {
+            "total_gb": round(disk.total / 1e9, 2),
+            "used_gb": round(disk.used / 1e9, 2),
+            "free_gb": round(disk.free / 1e9, 2),
+            "percent": disk.percent,
+        },
+        "cpu_percent": psutil.cpu_percent(interval=0.2),
+    }
+
+
+@app.get("/api/diagnostics", tags=["system"], summary="Run server-side diagnostics")
+async def run_diagnostics():
+    """Check MONAI venv, model bundles, and system state. Useful when you can't SSH in."""
+    import subprocess
+    import platform
+    import sys
+    from pathlib import Path as _P
+
+    app_root = _P(os.environ.get("APP_ROOT", "/app"))
+    monai_python = str(app_root / "mcp-monai" / "venv" / "bin" / "python")
+    results = {}
+
+    # Python + package versions inside the MONAI venv
+    try:
+        out = subprocess.run(
+            [monai_python, "-c",
+             "import sys, torch, monai, mcp; "
+             "print(f'python {sys.version}'); "
+             "print(f'torch {torch.__version__}'); "
+             "print(f'monai {monai.__version__}'); "
+             "print(f'mcp {getattr(mcp, \"__version__\", \"(no __version__)\")}')"
+             ],
+            capture_output=True, text=True, timeout=30
+        )
+        results["monai_venv"] = {
+            "ok": out.returncode == 0,
+            "output": (out.stdout + out.stderr).strip()
+        }
+    except Exception as e:
+        results["monai_venv"] = {"ok": False, "output": str(e)}
+
+    # Model bundles
+    bundles_root = app_root / "mcp-monai" / "bundles"
+    bundle_info = {}
+    if bundles_root.exists():
+        for d in sorted(bundles_root.iterdir()):
+            if not d.is_dir():
+                continue
+            models_dir = d / "models"
+            if not models_dir.exists():
+                bundle_info[d.name] = {"status": "missing models/ dir"}
+                continue
+            pt_files = list(models_dir.glob("*.pt")) + list(models_dir.glob("*.ts"))
+            if not pt_files:
+                bundle_info[d.name] = {"status": "no weight files"}
+            else:
+                bundle_info[d.name] = {
+                    "status": "ok",
+                    "files": {f.name: f"{f.stat().st_size / 1e6:.0f} MB" for f in pt_files}
+                }
+    else:
+        bundle_info["__error__"] = "bundles directory not found"
+    results["bundles"] = bundle_info
+
+    # Last MONAI inference stderr (crash output from subprocess)
+    stderr_log = app_root / "orchestrator" / "data" / "monai_inference_stderr.log"
+    if stderr_log.exists():
+        try:
+            text = stderr_log.read_text(errors="replace")
+            results["monai_stderr"] = text[-4000:] if len(text) > 4000 else text
+        except Exception as e:
+            results["monai_stderr"] = f"error reading log: {e}"
+    else:
+        results["monai_stderr"] = None
+
+    # Uploads directory
+    uploads = app_root / "orchestrator" / "data" / "uploads"
+    try:
+        n = len(list(uploads.iterdir())) if uploads.exists() else 0
+        results["uploads"] = {"exists": uploads.exists(), "file_count": n}
+    except Exception as e:
+        results["uploads"] = {"exists": False, "error": str(e)}
+
+    # System
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        disk = psutil.disk_usage(str(app_root))
+        results["system"] = {
+            "platform": platform.platform(),
+            "python": sys.version,
+            "ram_available_gb": round(vm.available / 1e9, 1),
+            "ram_total_gb": round(vm.total / 1e9, 1),
+            "disk_free_gb": round(disk.free / 1e9, 1),
+            "disk_total_gb": round(disk.total / 1e9, 1),
+        }
+    except Exception as e:
+        results["system"] = {"error": str(e)}
+
+    return results
 
 
 if __name__ == "__main__":

@@ -16,8 +16,42 @@ const NOTIF_COLORS = {
   tool_disabled:   { bg: 'rgba(45,  27, 105, 0.15)', border: '#7c3aed33', text: '#c4b5fd', label: 'Tool Disabled'   },
 };
 
-function Settings({ onModeChange }) {
+function Settings({ onModeChange, appMode }) {
   const [activeTab, setActiveTab] = useState('settings');
+
+  // Diagnostics
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagData, setDiagData] = useState(null);
+
+  const runDiagnostics = () => {
+    setDiagLoading(true);
+    setDiagData(null);
+    apiFetch(`${API_URL}/api/diagnostics`)
+      .then(r => r.json())
+      .then(d => setDiagData(d))
+      .catch(e => setDiagData({ error: String(e) }))
+      .finally(() => setDiagLoading(false));
+  };
+
+  // System stats (debug only)
+  const [systemStats, setSystemStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+
+  const fetchSystemStats = () => {
+    setStatsLoading(true);
+    apiFetch(`${API_URL}/api/system-stats`)
+      .then(r => r.json())
+      .then(d => setSystemStats(d))
+      .catch(() => setSystemStats(null))
+      .finally(() => setStatsLoading(false));
+  };
+
+  useEffect(() => {
+    if (appMode !== 'debug') return;
+    fetchSystemStats();
+    const interval = setInterval(fetchSystemStats, 30_000);
+    return () => clearInterval(interval);
+  }, [appMode]);
 
   // Mode
   const [mode, setMode] = useState('debug');
@@ -296,9 +330,96 @@ function Settings({ onModeChange }) {
         <button className={`settings-tab${activeTab === 'notifications' ? ' active' : ''}`} onClick={() => setActiveTab('notifications')}>
           Notifications {notifications.length > 0 && <span className="notif-badge">{notifications.length}</span>}
         </button>
+        <button className={`settings-tab${activeTab === 'diagnostics' ? ' active' : ''}`} onClick={() => setActiveTab('diagnostics')}>Diagnostics</button>
       </div>
 
-      {activeTab === 'notifications' ? (
+      {activeTab === 'diagnostics' ? (
+        <div className="diag-panel">
+          <p className="settings-mode-desc" style={{ marginBottom: 14 }}>
+            Runs checks inside the server container
+          </p>
+          <button className="mcp-reload-btn" onClick={runDiagnostics} disabled={diagLoading}>
+            {diagLoading ? 'Running...' : 'Run Diagnostics'}
+          </button>
+
+          {diagData && (
+            <div className="diag-results">
+
+              {/* MONAI venv */}
+              {diagData.monai_venv && (
+                <div className={`diag-section ${diagData.monai_venv.ok ? 'diag-ok' : 'diag-err'}`}>
+                  <div className="diag-section-title">
+                    <span className="diag-dot" />
+                    MONAI venv packages
+                    <span className="diag-badge">{diagData.monai_venv.ok ? 'OK' : 'FAIL'}</span>
+                  </div>
+                  <pre className="diag-pre">{diagData.monai_venv.output}</pre>
+                </div>
+              )}
+
+              {/* Model bundles */}
+              {diagData.bundles && (
+                <div className="diag-section">
+                  <div className="diag-section-title"><span className="diag-dot" />Model Bundles</div>
+                  {Object.keys(diagData.bundles).length === 0
+                    ? <p className="diag-empty">No bundles found — models need to be downloaded first.</p>
+                    : Object.entries(diagData.bundles).map(([name, info]) => (
+                      <div key={name} className={`diag-bundle ${info.status === 'ok' ? 'diag-ok' : 'diag-err'}`}>
+                        <span className="diag-bundle-name">{name}</span>
+                        {info.status === 'ok'
+                          ? <span className="diag-bundle-files">{Object.entries(info.files).map(([f, s]) => `${f} (${s})`).join(', ')}</span>
+                          : <span className="diag-bundle-err">{info.status}</span>
+                        }
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
+
+              {/* MONAI inference stderr */}
+              {diagData.monai_stderr !== undefined && (
+                <div className={`diag-section ${diagData.monai_stderr ? '' : 'diag-ok'}`}>
+                  <div className="diag-section-title">
+                    <span className="diag-dot" />
+                    MONAI inference log (last 4KB)
+                    {!diagData.monai_stderr && <span className="diag-badge">NO LOG YET</span>}
+                  </div>
+                  {diagData.monai_stderr
+                    ? <pre className="diag-pre">{diagData.monai_stderr}</pre>
+                    : <p className="diag-empty">Run an inference first, crash output will appear here.</p>
+                  }
+                </div>
+              )}
+
+              {/* Uploads */}
+              {diagData.uploads && (
+                <div className={`diag-section ${diagData.uploads.exists ? 'diag-ok' : 'diag-err'}`}>
+                  <div className="diag-section-title"><span className="diag-dot" />Uploads directory</div>
+                  <p className="diag-line">
+                    {diagData.uploads.exists
+                      ? `${diagData.uploads.file_count} file(s) in uploads/`
+                      : 'Directory not found'}
+                  </p>
+                </div>
+              )}
+
+              {/* System */}
+              {diagData.system && !diagData.system.error && (
+                <div className="diag-section">
+                  <div className="diag-section-title"><span className="diag-dot" />System</div>
+                  <pre className="diag-pre">
+{`Platform : ${diagData.system.platform}
+Python   : ${diagData.system.python?.split(' ')[0]}
+RAM      : ${diagData.system.ram_available_gb} GB free / ${diagData.system.ram_total_gb} GB total
+Disk     : ${diagData.system.disk_free_gb} GB free / ${diagData.system.disk_total_gb} GB total`}
+                  </pre>
+                </div>
+              )}
+
+            </div>
+          )}
+        </div>
+      ) : activeTab === 'notifications' ? (
         <div className="notif-list">
           {notifications.length === 0 && <p className="settings-mode-desc">No notifications yet.</p>}
           {[...notifications].reverse().map((n, i) => {
@@ -480,6 +601,39 @@ function Settings({ onModeChange }) {
         </div>
       </div>
       </>
+      )}
+
+      {appMode === 'debug' && (
+        <div className="system-resources-section">
+          <div className="system-resources-header">
+            <h3 className="settings-mode-title" style={{ margin: 0 }}>System Resources</h3>
+            <button className="settings-refresh-btn" onClick={fetchSystemStats} disabled={statsLoading}>
+              {statsLoading ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
+          {systemStats ? (
+            <div className="system-stats-grid">
+              {[
+                { label: 'RAM', value: `${systemStats.ram.used_gb} / ${systemStats.ram.total_gb} GB`, pct: systemStats.ram.percent },
+                { label: 'Disk (/app)', value: `${systemStats.disk.used_gb} / ${systemStats.disk.total_gb} GB — ${systemStats.disk.free_gb} GB free`, pct: systemStats.disk.percent },
+                { label: 'CPU', value: `${systemStats.cpu_percent}%`, pct: systemStats.cpu_percent },
+              ].map(({ label, value, pct }) => (
+                <div className="system-stat-card" key={label}>
+                  <div className="system-stat-header">
+                    <span className="system-stat-label">{label}</span>
+                    <span className="system-stat-pct" style={{ color: pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#10b981' }}>{pct}%</span>
+                  </div>
+                  <div className="system-stat-bar-wrap">
+                    <div className="system-stat-bar" style={{ width: `${pct}%`, background: pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#10b981' }} />
+                  </div>
+                  <div className="system-stat-value">{value}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="settings-mode-desc">{statsLoading ? 'Loading...' : 'Could not load system stats.'}</p>
+          )}
+        </div>
       )}
     </div>
   );

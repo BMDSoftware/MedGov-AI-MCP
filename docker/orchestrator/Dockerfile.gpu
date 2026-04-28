@@ -17,55 +17,43 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
 
 WORKDIR /app
 
-# ── mcp-monai ──────────────────────────────────────────────────────────────────
+# -- Copy all requirements first (cache-friendly) -------------------------------------------------------------------------------
 COPY mcp-monai/requirements.txt mcp-monai/requirements.txt
+COPY mcp-radlex/requirements.txt mcp-radlex/requirements.txt
+COPY mcp-utils/requirements.txt mcp-utils/requirements.txt
+COPY mcp-skills/requirements.txt mcp-skills/requirements.txt
+COPY mcp-ipath/requirements.txt mcp-ipath/requirements.txt
+COPY mcp-cellpose/requirements.txt mcp-cellpose/requirements.txt
+COPY orchestrator/requirements.txt orchestrator/requirements.txt
+
+# -- Install all dependencies -------------------------------------------------------------------------------────────────────────
 RUN python3.11 -m venv mcp-monai/venv \
     && mcp-monai/venv/bin/pip install --upgrade pip \
     && mcp-monai/venv/bin/pip install -r mcp-monai/requirements.txt
-COPY mcp-monai/ mcp-monai/
 
-# ── mcp-radlex ─────────────────────────────────────────────────────────────────
-COPY mcp-radlex/requirements.txt mcp-radlex/requirements.txt
 RUN python3.11 -m venv mcp-radlex/venv \
     && mcp-radlex/venv/bin/pip install --upgrade pip \
     && mcp-radlex/venv/bin/pip install -r mcp-radlex/requirements.txt
-COPY mcp-radlex/ mcp-radlex/
 
-# ── mcp-utils ──────────────────────────────────────────────────────────────────
-COPY mcp-utils/requirements.txt mcp-utils/requirements.txt
 RUN python3.11 -m venv mcp-utils/venv \
     && mcp-utils/venv/bin/pip install --upgrade pip \
     && mcp-utils/venv/bin/pip install -r mcp-utils/requirements.txt
-COPY mcp-utils/ mcp-utils/
 
-# ── mcp-skills ─────────────────────────────────────────────────────────────────
-COPY mcp-skills/requirements.txt mcp-skills/requirements.txt
 RUN python3.11 -m venv mcp-skills/venv \
     && mcp-skills/venv/bin/pip install --upgrade pip \
     && mcp-skills/venv/bin/pip install -r mcp-skills/requirements.txt
-COPY mcp-skills/ mcp-skills/
 
-# ── mcp-ipath ──────────────────────────────────────────────────────────────────
-COPY mcp-ipath/requirements.txt mcp-ipath/requirements.txt
 RUN python3.11 -m venv mcp-ipath/venv \
     && mcp-ipath/venv/bin/pip install --upgrade pip \
     && mcp-ipath/venv/bin/pip install -r mcp-ipath/requirements.txt
-COPY mcp-ipath/ mcp-ipath/
 
-# ── mcp-cellpose ───────────────────────────────────────────────────────────────
-COPY mcp-cellpose/requirements.txt mcp-cellpose/requirements.txt
 # Install torch with CUDA support FIRST so cellpose-mcp sees it pre-installed
 # and does not pull a newer incompatible build from PyPI.
 # CUDA_VERSION is set by the nvidia/cuda base image (e.g. "12.1.0").
-# cu124 wheels are forward-compatible with host drivers up to CUDA 12.x.
+# We map all CUDA 12.x to cu124: it has the most recent torch builds and is
+# forward-compatible with host drivers supporting CUDA 12.4+.
 RUN python3.11 -m venv mcp-cellpose/venv \
     && mcp-cellpose/venv/bin/pip install --upgrade pip \
-    # Map CUDA major version → PyTorch wheel tag.
-    # CUDA_VERSION is set by the nvidia/cuda base image (e.g. "12.1.0").
-    # We map all CUDA 12.x to cu124: it has the most recent torch builds and is
-    # forward-compatible with host drivers supporting CUDA 12.4+.
-    # cu121 is intentionally skipped — it tops out at torch 2.5.1, which cellpose-mcp
-    # may override with a newer incompatible build from PyPI.
     && MAJOR=$(echo ${CUDA_VERSION} | cut -d. -f1) \
     && if   [ "$MAJOR" -ge 13 ]; then TORCH_CUDA=cu126; \
        elif [ "$MAJOR" -eq 12 ]; then TORCH_CUDA=cu124; \
@@ -75,20 +63,26 @@ RUN python3.11 -m venv mcp-cellpose/venv \
        torch torchvision \
        --index-url https://download.pytorch.org/whl/${TORCH_CUDA} \
     && mcp-cellpose/venv/bin/pip install -r mcp-cellpose/requirements.txt
+
 # Pre-download cpsam (the only model in cellpose v4) so first inference isn't slow
 RUN mcp-cellpose/venv/bin/python -c "from cellpose import models; models.CellposeModel(gpu=True)"
-COPY mcp-cellpose/ mcp-cellpose/
 
-# ── orchestrator ───────────────────────────────────────────────────────────────
-COPY orchestrator/requirements.txt orchestrator/requirements.txt
 RUN python3.11 -m venv orchestrator/venv \
     && orchestrator/venv/bin/pip install --upgrade pip \
     && orchestrator/venv/bin/pip install -r orchestrator/requirements.txt
+
+# -- Copy source files (changes here won't invalidate dep layers above) --------
+COPY mcp-monai/ mcp-monai/
+COPY mcp-radlex/ mcp-radlex/
+COPY mcp-utils/ mcp-utils/
+COPY mcp-skills/ mcp-skills/
+COPY mcp-ipath/ mcp-ipath/
+COPY mcp-cellpose/ mcp-cellpose/
 COPY orchestrator/ orchestrator/
+
 # mcp-config.json is gitignored (machine-specific); use the example as the in-image default
 RUN cp orchestrator/mcp-config.json.example orchestrator/mcp-config.json
 
-# Use the example config — inside the container APP_ROOT=/app so ${APP_ROOT} resolves correctly
 ENV APP_ROOT=/app
 
 EXPOSE 5001

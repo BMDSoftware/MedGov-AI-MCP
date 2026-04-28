@@ -209,8 +209,18 @@ async def _async_run_inference(image_path: str, model_name: str) -> Dict:
         env={**os.environ, **monai_cfg.get("env", {})},
     )
 
+    # Redirect MONAI subprocess stderr to a rolling log file so crash output
+    # is visible via /api/diagnostics even when we can't SSH into the container.
+    stderr_log = Path(__file__).parent / "data" / "monai_inference_stderr.log"
+    stderr_log.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(stderr_log, "a") as _errfp:
+        _errfp.write(f"\n--- inference start: {model_name} ---\n")
+
     async with AsyncExitStack() as stack:
-        read, write = await stack.enter_async_context(stdio_client(params))
+        errlog = open(stderr_log, "a")  # noqa: WPS515, kept open for subprocess lifetime
+        stack.callback(errlog.close)
+        read, write = await stack.enter_async_context(stdio_client(params, errlog=errlog))
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
 
@@ -219,19 +229,19 @@ async def _async_run_inference(image_path: str, model_name: str) -> Dict:
             arguments={"image_path": image_path, "model_name": model_name},
         )
 
-        combined = "".join(
-            block.text for block in mcp_result.content if hasattr(block, "text")
-        )
-        try:
-            result = json.loads(combined)
-        except (json.JSONDecodeError, TypeError):
-            return {"text": combined}
+    combined = "".join(
+        block.text for block in mcp_result.content if hasattr(block, "text")
+    )
+    try:
+        result = json.loads(combined)
+    except (json.JSONDecodeError, TypeError):
+        return {"text": combined}
 
-        # If MONAI returned an error dict, raise so _run_task marks this task as failed
-        if isinstance(result, dict) and "error" in result:
-            raise RuntimeError(result["error"])
+    # If MONAI returned an error dict, raise so _run_task marks this task as failed
+    if isinstance(result, dict) and "error" in result:
+        raise RuntimeError(result["error"])
 
-        return result
+    return result
 
 
 def _explain_inference_error(technical_error: str, input_data: Dict) -> str:
@@ -241,10 +251,11 @@ def _explain_inference_error(technical_error: str, input_data: Dict) -> str:
     image_filename = os.path.basename(image_path) if image_path else "unknown file"
 
     prompt = (
-        "A medical imaging AI failed to analyse a scan. "
-        "Explain the error below to a radiologist in 2-3 plain English sentences. "
-        "Do not use Python, programming, or technical computing terms. "
-        "State clearly what went wrong and what the radiologist should do instead.\n\n"
+        "A medical imaging AI inference job failed. "
+        "Explain the error to a technical user in 2-3 sentences. "
+        "State the specific technical reason it failed (include the actual error message), "
+        "what it means in plain terms, and what the user should do to fix or work around it. "
+        "Be accurate and specific — do not generalise or omit the real cause.\n\n"
         f"Technical error: {technical_error}\n"
         f"Model: {model_name}\n"
         f"Image file: {image_filename}\n\n"
@@ -514,16 +525,23 @@ def _handle_cellpose(input_data: Dict, session_id: str) -> Dict:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
+        _MAX_CELLPOSE_SECS = 30 * 60  # 30 minutes hard cap
+
         async def _run():
             if task_id:
-                # cpsam on CPU can take several minutes — tell the user so they don't think it hung
                 msg = (
                     f"Running model ({_DEVICE_LABEL})..."
                     if _GPU_AVAILABLE
                     else "Running model (CPU - this may take several minutes)..."
                 )
                 db.update_task(task_id, "running", message=msg)
-            return await _async_run_cellpose(image_path, model_type, input_data)
+            try:
+                return await asyncio.wait_for(
+                    _async_run_cellpose(image_path, model_type, input_data),
+                    timeout=_MAX_CELLPOSE_SECS,
+                )
+            except asyncio.TimeoutError:
+                raise RuntimeError(f"Cellpose inference timed out after {_MAX_CELLPOSE_SECS // 60} minutes.")
 
         coro_task = loop.create_task(_run())
         if task_id:
@@ -645,7 +663,7 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
             if key in input_data:
                 arguments[key] = input_data[key]
 
-        # Locate the cellpose subprocess for hang detection
+        # Locate the cellpose subprocess for hang detection (CPU idle watchdog)
         cellpose_proc = _find_mcp_subprocess("mcp-cellpose/server.py")
         if cellpose_proc is None:
             print("[task_runner] Warning: could not locate cellpose subprocess; hang detection disabled")
@@ -654,18 +672,10 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
             session.call_tool("segment_cells_2d", arguments=arguments)
         )
 
-        # Hard cap: cellpose inference should never take more than 30 min even on CPU.
-        # If the subprocess is found we also run the CPU-idle watchdog alongside it;
-        # both race against the hard timeout so whichever trips first wins.
-        _MAX_INFER_SECS = 30 * 60  # 30 minutes
-
         tasks_to_wait = [infer_task]
         if cellpose_proc is not None:
             watch_task = asyncio.create_task(_mcp_subprocess_watchdog(cellpose_proc))
             tasks_to_wait.append(watch_task)
-
-        timeout_task = asyncio.create_task(asyncio.sleep(_MAX_INFER_SECS))
-        tasks_to_wait.append(timeout_task)
 
         done, pending = await asyncio.wait(tasks_to_wait, return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
@@ -675,8 +685,6 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
             except (asyncio.CancelledError, Exception):
                 pass
 
-        if timeout_task in done and not infer_task.done():
-            raise RuntimeError(f"Cellpose inference timed out after {_MAX_INFER_SECS // 60} minutes.")
         if cellpose_proc is not None and watch_task in done and not infer_task.done():
             exc = watch_task.exception()
             raise exc if exc else RuntimeError("Cellpose process hung during inference")

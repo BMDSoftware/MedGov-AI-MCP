@@ -5,7 +5,10 @@
       "args": ["${APP_ROOT}/mcp-monai/server.py"],
       "transport": "stdio",
       "env": {
-        "PYTHONUNBUFFERED": "1"
+        "PYTHONUNBUFFERED": "1",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "PYTHONFAULTHANDLER": "1"
       }
     },
     "radlex": {

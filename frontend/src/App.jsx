@@ -423,7 +423,7 @@ function App() {
         }
       }} />
 
-      {appMode === 'debug' && <AgentLog />}
+      {appMode === 'debug' && <AgentLog sessionId={currentSessionId} />}
 
       {page !== 'home' && <aside className="sidebar">
         <div className="logo" style={{ cursor: 'pointer' }} onClick={() => setPage('home')}>

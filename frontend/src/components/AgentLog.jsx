@@ -6,7 +6,7 @@ import { API_URL } from '../config.js';
  * Floating debug log panel — only rendered in debug mode.
  * Polls /api/logs every 2 seconds and shows the tail of the agent log file.
  */
-function AgentLog() {
+function AgentLog({ sessionId }) {
   const [lines, setLines] = useState([]);
   const [collapsed, setCollapsed] = useState(false);
   const [filename, setFilename] = useState('');
@@ -19,7 +19,8 @@ function AgentLog() {
     let active = true;
     const poll = async () => {
       try {
-        const res = await apiFetch(`${API_URL}/api/logs?lines=200&source=${source}`);
+        const sessionParam = sessionId ? `&session_id=${sessionId}` : '';
+        const res = await apiFetch(`${API_URL}/api/logs?lines=200&source=${source}${sessionParam}`);
         const data = await res.json();
         if (active) {
           setLines(data.lines || []);
@@ -32,7 +33,7 @@ function AgentLog() {
     poll();
     const interval = setInterval(poll, 2000);
     return () => { active = false; clearInterval(interval); };
-  }, [source]);
+  }, [source, sessionId]);
 
   // Auto-scroll to bottom unless user scrolled up
   useEffect(() => {

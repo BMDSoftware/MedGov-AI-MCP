@@ -268,6 +268,12 @@ def delete_session(session_id: str):
         except OSError:
             pass
 
+    log_file = Path(__file__).parent / "logs" / f"agenticagent_debug_{session_id}.txt"
+    try:
+        log_file.unlink(missing_ok=True)
+    except OSError:
+        pass
+
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
     conn.close()

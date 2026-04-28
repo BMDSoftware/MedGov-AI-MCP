@@ -47,6 +47,9 @@ class ExecutionMixin:
         Returns:
             Final result if successful, None if goal not achieved
         """
+        if session_id:
+            self.logger.start_session(session_id)
+
         print(f"\n{'='*80}")
         print("Autonomous agent: ", self.is_agent_autonomous)
         print(f"Starting autonomous task: {goal}")

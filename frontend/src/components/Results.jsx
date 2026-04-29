@@ -323,7 +323,7 @@ function TaskResult({ task }) {
             </tbody>
           </table>
         )}
-        {htmlReport && <ReportPreview html={htmlReport} />}
+        {htmlReport && <ReportPreview html={htmlReport} narrative={radlex.narrative} />}
       </div>
     );
   }
@@ -334,7 +334,7 @@ function TaskResult({ task }) {
   );
 }
 
-function ReportPreview({ html }) {
+function ReportPreview({ html, narrative }) {
   const [open, setOpen] = useState(false);
   const [blobUrl, setBlobUrl] = useState(null);
 
@@ -362,6 +362,28 @@ function ReportPreview({ html }) {
           sandbox="allow-same-origin"
           title="Radiology Report"
         />
+      )}
+      {open && narrative && (
+        <div className="report-narrative-below">
+          {narrative.findings_narrative && (
+            <div className="report-narrative-section">
+              <h4>Findings</h4>
+              <p>{narrative.findings_narrative}</p>
+            </div>
+          )}
+          {narrative.impression && (
+            <div className="report-narrative-section">
+              <h4>Impression</h4>
+              <p>{narrative.impression}</p>
+            </div>
+          )}
+          {narrative.recommendations && (
+            <div className="report-narrative-section">
+              <h4>Recommendations</h4>
+              <p>{narrative.recommendations}</p>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

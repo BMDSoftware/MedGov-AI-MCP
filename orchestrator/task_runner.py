@@ -360,7 +360,10 @@ def _handle_report(input_data: Dict, session_id: str) -> Dict:
     finally:
         loop.close()
 
-    narrative = _generate_report_narrative(findings, patient_context)
+    if radlex_report and radlex_report.get("narrative"):
+        narrative = radlex_report["narrative"]
+    else:
+        narrative = _generate_report_narrative(findings, patient_context)
 
     return {
         "patient_context": patient_context,

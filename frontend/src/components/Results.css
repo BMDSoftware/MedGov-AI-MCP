@@ -373,6 +373,12 @@
   background: var(--bg-secondary, #1c1c24);
 }
 
+.report-narrative-below {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border, #27272a);
+}
+
 .report-preview-iframe {
   display: block;
   margin-top: 10px;

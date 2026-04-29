@@ -332,6 +332,7 @@ async def generate_report(
         return schema
 
     mapped_findings: Dict[str, Any] = {}
+    sampling_narrative: Optional[Dict] = None
 
     if inference_results is not None:
         system_prompt = SPECIALTY_SYSTEM_PROMPTS.get(specialty, SPECIALTY_SYSTEM_PROMPTS["general"])
@@ -348,7 +349,9 @@ async def generate_report(
             f"Raw inference results:\n{json.dumps(inference_results, indent=2)}\n\n"
             "Map each relevant inference finding to the most appropriate template field key "
             "from the list above. Use exact key names.\n"
-            'Respond with valid JSON only: {"field_mappings": {"<field_key>": "<value>", ...}}'
+            "Respond with valid JSON only, with exactly these keys:\n"
+            '{"field_mappings": {"<field_key>": "<value>", ...}, '
+            '"findings_narrative": "<string>", "impression": "<string>", "recommendations": "<string>"}'
         )
         try:
             sample_result = await ctx.session.create_message(
@@ -359,7 +362,7 @@ async def generate_report(
                     )
                 ],
                 system_prompt=system_prompt,
-                max_tokens=512,
+                max_tokens=1024,
             )
             raw_text = ""
             if hasattr(sample_result.content, "text"):
@@ -373,6 +376,11 @@ async def generate_report(
             if match:
                 parsed = json.loads(match.group())
                 mapped_findings = parsed.get("field_mappings") or {}
+                sampling_narrative = {
+                    "findings_narrative": parsed.get("findings_narrative"),
+                    "impression": parsed.get("impression"),
+                    "recommendations": parsed.get("recommendations"),
+                }
         except Exception as exc:
             logging.warning(f"[radlex] Sampling failed ({exc}), falling back to flat key mapping")
             for item in inference_results:
@@ -413,6 +421,8 @@ async def generate_report(
         "validation": validation_result["validation"],
         "specialty": specialty,
     }
+    if sampling_narrative:
+        result["narrative"] = sampling_narrative
 
     if output_path:
         try:

@@ -98,16 +98,21 @@ BUILTIN_TOOLS: Dict[str, Dict] = {
 def handle_list_tasks(session_id: Optional[str], user_id: Optional[str] = None) -> Tuple[Dict, str]:
     """Execute the list_tasks built-in and return (result, summary)."""
     tasks = db.list_tasks(user_id=user_id) if user_id else db.list_tasks(session_id=session_id)
-    summary_list = [
-        {
+    summary_list = []
+    for t in tasks:
+        entry = {
             "id": t["id"],
             "type": t["task_type"],
             "description": t["description"],
             "status": t["status"],
             "error": t.get("error"),
         }
-        for t in tasks
-    ]
+        if t["status"] == "done" and t.get("result"):
+            r = t["result"]
+            if isinstance(r, dict):
+                entry["result"] = {k: v for k, v in r.items()
+                                   if k not in ("output_path", "mask_path", "image_path", "overlay_path")}
+        summary_list.append(entry)
     result = {
         "tasks": summary_list,
         "running": sum(1 for t in tasks if t["status"] in ("queued", "running")),

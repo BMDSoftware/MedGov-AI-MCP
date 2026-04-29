@@ -557,71 +557,6 @@ def _handle_cellpose(input_data: Dict, session_id: str) -> Dict:
         _cellpose_semaphore.release()
 
 
-def _find_mcp_subprocess(cmdline_pattern: str):
-    """
-    Return the psutil.Process whose command line contains `cmdline_pattern`, or None.
-    Used to locate a running MCP stdio server subprocess for watchdog monitoring.
-    """
-    try:
-        import psutil
-        for proc in psutil.process_iter(["pid", "cmdline"]):
-            try:
-                cmdline = proc.info.get("cmdline") or []
-                if any(cmdline_pattern in arg for arg in cmdline):
-                    return proc
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-    except Exception:
-        pass
-    return None
-
-
-async def _mcp_subprocess_watchdog(
-    proc,
-    warmup_secs: float = 60,
-    idle_check_interval: float = 5,
-    max_idle_checks: int = 10,
-) -> None:
-    """
-    General watchdog for any MCP stdio subprocess.
-
-    After `warmup_secs` (to allow model loading / startup), CPU% is sampled every
-    `idle_check_interval` seconds. If the process stays below 0.5% CPU for
-    `max_idle_checks` consecutive samples it is considered deadlocked and
-    RuntimeError is raised.
-
-    This catches any hang where the subprocess is alive but the MCP pipe has
-    stalled — OpenMP deadlocks, GPU stalls, infinite waits, etc.
-
-    Pair with asyncio.wait(..., return_when=FIRST_COMPLETED) alongside the actual
-    MCP tool call so the caller can cancel the tool call and fail the task.
-    """
-    import psutil
-
-    await asyncio.sleep(warmup_secs)
-
-    idle_checks = 0
-    loop = asyncio.get_event_loop()
-
-    while True:
-        try:
-            cpu = await loop.run_in_executor(None, proc.cpu_percent, 0.5)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            raise RuntimeError("MCP subprocess exited unexpectedly during tool call.")
-
-        if cpu < 0.5:
-            idle_checks += 1
-        else:
-            idle_checks = 0
-
-        if idle_checks >= max_idle_checks:
-            raise RuntimeError(
-                f"MCP subprocess appears hung (CPU idle for "
-                f"~{int(idle_checks * idle_check_interval)}s after warmup). Task failed."
-            )
-
-        await asyncio.sleep(idle_check_interval - 0.5)  # 0.5s already spent in cpu_percent
-
 
 async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict) -> Dict:
     """Open a fresh MCP session to the Cellpose server and run segmentation."""
@@ -663,32 +598,7 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
             if key in input_data:
                 arguments[key] = input_data[key]
 
-        # Locate the cellpose subprocess for hang detection (CPU idle watchdog)
-        cellpose_proc = _find_mcp_subprocess("mcp-cellpose/server.py")
-        if cellpose_proc is None:
-            print("[task_runner] Warning: could not locate cellpose subprocess; hang detection disabled")
-
-        infer_task = asyncio.create_task(
-            session.call_tool("segment_cells_2d", arguments=arguments)
-        )
-
-        tasks_to_wait = [infer_task]
-        if cellpose_proc is not None:
-            watch_task = asyncio.create_task(_mcp_subprocess_watchdog(cellpose_proc))
-            tasks_to_wait.append(watch_task)
-
-        done, pending = await asyncio.wait(tasks_to_wait, return_when=asyncio.FIRST_COMPLETED)
-        for t in pending:
-            t.cancel()
-            try:
-                await t
-            except (asyncio.CancelledError, Exception):
-                pass
-
-        if cellpose_proc is not None and watch_task in done and not infer_task.done():
-            exc = watch_task.exception()
-            raise exc if exc else RuntimeError("Cellpose process hung during inference")
-        mcp_result = infer_task.result()
+        mcp_result = await session.call_tool("segment_cells_2d", arguments=arguments)
 
         combined = "".join(
             block.text for block in mcp_result.content if hasattr(block, "text")

@@ -217,6 +217,25 @@
   border-color: rgba(6,182,212,0.35);
   background: rgba(6,182,212,0.03);
 }
+.sl-password-input {
+  padding-right: 36px;
+}
+.sl-pw-toggle {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: rgba(100,116,139,0.6);
+  display: flex;
+  align-items: center;
+  font-size: 16px;
+  transition: color 0.15s;
+}
+.sl-pw-toggle:hover {
+  color: #94a3b8;
+}
 
 /* error */
 .sl-error {

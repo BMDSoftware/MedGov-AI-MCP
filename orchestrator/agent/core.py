@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -45,6 +46,7 @@ class AgenticAgent(
         self.pending_task_context = None
 
         self.logger = Logger(name="AgenticAgent", log_level=log_level, is_active=enable_debug_logging)
+        self._execution_lock = asyncio.Lock()
 
     async def _initialize_components(self):
         """Initialize LLM client and tool registry with discovered tools."""

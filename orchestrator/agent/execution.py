@@ -50,6 +50,24 @@ class ExecutionMixin:
         if session_id:
             self.logger.start_session(session_id)
 
+        async with self._execution_lock:
+            return await self._execute_task_inner(
+                goal, data, fileList, max_iterations, metadata,
+                _resume_history, _resume_response, session_id, user_id,
+            )
+
+    async def _execute_task_inner(
+        self,
+        goal: str,
+        data: Any = None,
+        fileList: Any = None,
+        max_iterations: int = 10,
+        metadata: Dict = None,
+        _resume_history: List = None,
+        _resume_response: Optional[Any] = None,
+        session_id: str = None,
+        user_id: str = None,
+    ) -> Optional[Dict]:
         print(f"\n{'='*80}")
         print("Autonomous agent: ", self.is_agent_autonomous)
         print(f"Starting autonomous task: {goal}")
@@ -522,6 +540,25 @@ class ExecutionMixin:
                 execution_history.append({"tool": tool_name, "success": True, "result_summary": result_summary, "result": result})
                 turn_results.append((tool_name, result))
                 continue
+
+            # Cellpose segmentation always runs as a background task, never call directly.
+            # Calling the MCP tool inline hangs the agent loop on GPU stalls in deployment.
+            if tool_name in ("cellpose.segment_cells_2d", "cellpose.segment_cells_3d", "cellpose.segment_cells_batch"):
+                image_path = arguments.get("image_path", "")
+                fname = Path(image_path).name if image_path else "image"
+                result, result_summary = handle_queue_task(session_id, {
+                    "task_type": "cellpose",
+                    "description": f"Cellpose segmentation: {fname}",
+                    "input_data": {**arguments, "model_type": "cpsam"},
+                })
+                execution_history.append({"tool": tool_name, "success": True, "result_summary": result_summary, "result": result})
+                return turn_results, {
+                    "type": "agent_response",
+                    "answer": result.get("message", "Cellpose segmentation has been queued and will run in the background."),
+                    "tools_used": ["queue_task"],
+                    "execution_history": execution_history,
+                    "success": True,
+                }
 
             # Inference always runs in background (non-autonomous mode)
             if tool_name == "monai.run_inference" and not self.is_agent_autonomous:

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MdLocalHospital, MdLock, MdPerson, MdEmail, MdArrowForward, MdCheckCircle } from 'react-icons/md';
+import { MdLocalHospital, MdLock, MdPerson, MdEmail, MdArrowForward, MdCheckCircle, MdVisibility, MdVisibilityOff } from 'react-icons/md';
 import { getApiUrl } from '../config';
 import { setAuth } from '../auth';
 import './Login.css';
@@ -18,6 +18,7 @@ export default function Login({ onLogin }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -137,13 +138,23 @@ export default function Login({ onLogin }) {
                 <MdLock className="sl-input-icon" />
                 <input
                   id="sl-password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••"
                   autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  className="sl-password-input"
                   required
                 />
+                <button
+                  type="button"
+                  className="sl-pw-toggle"
+                  onClick={() => setShowPassword(v => !v)}
+                  tabIndex={-1}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <MdVisibilityOff /> : <MdVisibility />}
+                </button>
               </div>
             </div>
 

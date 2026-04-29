@@ -122,15 +122,17 @@ def cellpose_diagnostics(model_type: str = "cyto3") -> dict:
     results["gpu_detected"] = _gpu
     results["step1_nvidia_smi_s"] = round(time.time() - t, 2)
 
-    # Step 2: torch CUDA
+    # Step 2: torch CUDA / MPS
     t = time.time()
     try:
         import torch
         results["torch_cuda_available"] = torch.cuda.is_available()
         if torch.cuda.is_available():
             results["torch_cuda_device"] = torch.cuda.get_device_name(0)
+        results["torch_mps_available"] = torch.backends.mps.is_available()
     except Exception as e:
         results["torch_cuda_available"] = False
+        results["torch_mps_available"] = False
         results["torch_cuda_error"] = str(e)
     results["step2_torch_s"] = round(time.time() - t, 2)
 

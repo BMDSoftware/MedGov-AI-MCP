@@ -17,7 +17,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Dict, Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 import database as db

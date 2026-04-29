@@ -105,6 +105,63 @@ def describe_models(model_names: list[str]) -> dict:
 
 
 @mcp.tool()
+def cellpose_diagnostics(model_type: str = "cyto3") -> dict:
+    """Run a step-by-step diagnostic and return results for each stage.
+
+    Tests: GPU detection, torch CUDA availability, model loading, and a tiny
+    inference pass. Call this when segment_cells_2d hangs to pinpoint which
+    step is failing. Results are returned as a dict and will appear in the
+    orchestrator debug log.
+    """
+    import time
+    import numpy as np
+    results = {}
+
+    # Step 1: nvidia-smi
+    t = time.time()
+    results["gpu_detected"] = _gpu
+    results["step1_nvidia_smi_s"] = round(time.time() - t, 2)
+
+    # Step 2: torch CUDA
+    t = time.time()
+    try:
+        import torch
+        results["torch_cuda_available"] = torch.cuda.is_available()
+        if torch.cuda.is_available():
+            results["torch_cuda_device"] = torch.cuda.get_device_name(0)
+    except Exception as e:
+        results["torch_cuda_available"] = False
+        results["torch_cuda_error"] = str(e)
+    results["step2_torch_s"] = round(time.time() - t, 2)
+
+    # Step 3: model load
+    t = time.time()
+    try:
+        from cellpose import models
+        model = models.CellposeModel(gpu=_gpu, model_type=model_type)
+        results["model_loaded"] = True
+    except Exception as e:
+        results["model_loaded"] = False
+        results["model_error"] = str(e)
+        results["step3_model_load_s"] = round(time.time() - t, 2)
+        return results
+    results["step3_model_load_s"] = round(time.time() - t, 2)
+
+    # Step 4: inference on a tiny 64x64 synthetic image
+    t = time.time()
+    try:
+        img = np.random.randint(0, 255, (64, 64), dtype=np.uint8)
+        out = model.eval(img, diameter=30, channels=None)
+        results["inference_ok"] = True
+    except Exception as e:
+        results["inference_ok"] = False
+        results["inference_error"] = str(e)
+    results["step4_inference_s"] = round(time.time() - t, 2)
+
+    return results
+
+
+@mcp.tool()
 def save_overlay(image_path: str, mask_path: str, output_path: str | None = None) -> dict:
     """Draw segmentation outlines on the original image and save as PNG.
 

@@ -332,7 +332,7 @@ problems by keeping the system prompt minimal and loading
 domain-specific protocol only when the agent determines it is needed
 for the current task.
 
-\subsubsection*{Structure}
+\subsubsection{Structure}
 
 Each skill is a directory containing a \texttt{SKILL.md} file as its
 entry point, written in YAML-frontmatter Markdown. The frontmatter
@@ -356,7 +356,7 @@ fetches deeper protocol detail on demand, keeping the context window
 focused and avoiding unnecessary token consumption on workflows that
 are not relevant to the current task.
 
-\subsubsection*{Implemented Skills}
+\subsubsection{Implemented Skills}
 
 Two skills are currently deployed in the system. The
 \textbf{medical-imaging} skill covers any task involving medical image
@@ -383,7 +383,7 @@ clinical-reports skill is a publicly available skill integrated without
 modification, demonstrating that third-party skills can be adopted
 into the system without any code changes.
 
-\subsubsection*{Governance}
+\subsubsection{Governance}
 
 A key property of this design is that skill files are plain text and
 can be updated by domain experts (clinicians, radiologists,
@@ -398,11 +398,27 @@ they identified: the question of who maintains skill files and how they
 are kept current with clinical practice.
 
 
-\subsection{Agentic Execution Loop}
-% goal in, tools called iteratively, result evaluated each step
-% completion contract: agent cannot declare success while required deliverables are missing
-% two modes: autonomous (no interruption) and debug (confirmation before each tool call)
-% LLM backbone configurable: Gemini (cloud) or Ollama (local, privacy-preserving)
+\subsection{****Agentic Execution Loop****}
+
+The agent's operation is governed by an iterative execution loop that drives the system from a natural language goal to a set of completed deliverables, calling MCP tools at each step based on the LLM's reasoning about what to do next.
+
+\subsubsection{System Prompt and Session Initialisation}
+
+At the start of each session the agent receives a system prompt that establishes its role, its available tools, and its behavioural rules. The system prompt includes the list of available skills in structured XML, injected at startup after dynamic discovery, so the agent knows what clinical domains it can operate in before any user message arrives. It also includes explicit rules for tool usage: when to read a skill file before acting, when to queue a long-running operation to the background task runner rather than calling it inline, how to handle DICOM series directories versus individual files, and how to avoid repeating failed tool calls. Two variants of the system prompt exist: one for autonomous mode, which omits confirmation-related guidance, and one for assisted mode, which includes it.
+
+\subsubsection{Iterative Reasoning and Tool Dispatch}
+
+Each iteration of the loop follows the same structure. The agent receives a prompt describing the current goal, any available files, and the results of all prior tool calls in the session. On the first iteration the prompt is minimal: goal, data, and file context. On subsequent iterations the prompt includes the execution history and the completion contract (described below), which the agent must evaluate before deciding its next action. The LLM responds with either one or more function calls, or a text response indicating that the goal is complete or that more information is needed. Multiple tool calls can be returned in a single LLM response and are executed sequentially within the same iteration, with all results collected and sent back to the LLM together before the next iteration begins. Function calls are parsed and dispatched to the appropriate MCP server via the tool registry. The result is appended to the execution history and the loop continues.
+A repetition guard prevents the agent from calling the same tool twice consecutively after two failures on that tool, forcing it to try a different approach rather than looping indefinitely on a broken call.
+
+\subsubsection{Built-in Tools}
+
+Alongside the MCP tools discovered at startup, the agent has access to a set of built-in tools that are handled directly by the orchestrator rather than by any MCP server. \texttt{goal\_achieved} signals that the task is complete and carries a summary of the result; calling it is the only way for the agent to exit the loop successfully. \texttt{need\_more\_info} allows the agent to pause execution and ask the user a clarifying question when the goal is ambiguous or required inputs are missing. \texttt{queue\_task} submits a long-running operation to the background task runner and returns immediately, allowing the agent to respond to the user without blocking on inference. \texttt{list\_tasks} retrieves the current status of queued or running background tasks, allowing the agent to check whether a previously submitted inference job has completed before proceeding. These tools give the agent explicit control over its own lifecycle and over the background task queue without exposing those concerns as MCP tool servers.
+
+\subsubsection{Operating Modes}
+
+The system supports two operating modes that can be selected per session. In \textbf{autonomous mode}, the agent executes tool calls without interruption from goal receipt to completion. This is the intended mode for event-driven workflows triggered by the workspace watcher, where no user is present to intervene. In \textbf{assisted mode} (referred to in the codebase as debug mode), the loop pauses before each tool call and returns a \texttt{confirmation\_required} response to the frontend, which presents the proposed tool name and arguments to the user for approval or rejection before execution resumes.
+
 
 \subsection{Background Task Queue}
 % long-running operations (MONAI inference, Cellpose) queued to thread pool
@@ -410,11 +426,23 @@ are kept current with clinical practice.
 % SSE notifications to frontend on completion
 % semaphore: only one inference runs at a time to prevent memory crashes
 
-\subsection{Workspace Monitoring}
-% named monitored directories registered in the system
-% file deposited triggers agent automatically with a predefined prompt
-% event-driven clinical workflows: files from PACS or scanner initiate pipeline
-% no change to upstream systems required
+\subsection{****Workspace Monitoring and Event-Driven Triggering****}
+
+Clinical imaging data does not arrive through a chat interface; it is deposited into directories by PACS exporters, scanners, and laboratory instruments as part of existing institutional workflows. The workspace monitoring system bridges this gap by turning filesystem events into agent triggers, allowing MedGov-AI to participate in clinical workflows without requiring any modification to upstream systems.
+
+\subsubsection{Architecture}
+
+Each workspace is a named, registered directory stored in the SQLite database alongside a configurable prompt that defines what the agent should do when a file arrives. At startup, the orchestrator resumes watching all previously registered workspaces. The \texttt{watcher\_service} uses a polling observer to monitor each registered path recursively, bridging filesystem events into the orchestrator's asyncio event loop via an internal queue.
+
+When a new file is detected, the service does not trigger the agent immediately. Instead it starts a three-second debounce window: if additional files arrive within that window, they are batched together. Only after three seconds of inactivity does the service dispatch all accumulated files to the agent in a single invocation. This prevents a burst of files, such as a DICOM series arriving slice by slice, from spawning multiple redundant agent executions.
+
+\subsubsection{Trigger Flow}
+
+When the debounce window closes, the watcher copies the incoming files from the watched directory into the corresponding workspace directory and constructs a goal prompt that includes the workspace name, the list of received files, and the preconfigured prompt for that workspace. It then invokes the agent in autonomous mode, since no user is present to confirm tool calls. The agent proceeds through its standard execution loop: reading the appropriate skill file (if needed), parsing the files, running the required analysis, and producing the configured outputs. The entire activity log, including file detection events, agent actions, and results, is streamed to the frontend via SSE under the workspace's dedicated console channel, giving an operator real-time visibility even when the workflow was triggered without user interaction.
+
+\subsubsection{Clinical Relevance}
+
+
 
 \subsection{Evaluation Setup}
 % the 3 experimental phases defined in the March 2026 meeting with the teacher

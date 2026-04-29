@@ -8,6 +8,7 @@ from contextlib import AsyncExitStack
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from sampling_handler import make_sampling_handler
 
 class ToolRegistry:
     def __init__(self):
@@ -63,13 +64,13 @@ class ToolRegistry:
                         env={**os.environ, **cfg.get("env", {})}
                     )
                     read, write = await server_stack.enter_async_context(stdio_client(params))
-                    session = await server_stack.enter_async_context(ClientSession(read, write))
+                    session = await server_stack.enter_async_context(ClientSession(read, write, sampling_callback=make_sampling_handler()))
                     await session.initialize()
                     self.sessions[name] = (session, "stdio")
                 elif transport == "http":
                     url = cfg.get("url", "http://localhost:8000/mcp")
                     read, write, _ = await server_stack.enter_async_context(streamable_http_client(url))
-                    session = await server_stack.enter_async_context(ClientSession(read, write))
+                    session = await server_stack.enter_async_context(ClientSession(read, write, sampling_callback=make_sampling_handler()))
                     await session.initialize()
                     self.sessions[name] = (session, "http")
 
@@ -213,7 +214,7 @@ class ToolRegistry:
             else:
                 return None
 
-            session = await server_stack.enter_async_context(ClientSession(read, write))
+            session = await server_stack.enter_async_context(ClientSession(read, write, sampling_callback=make_sampling_handler()))
             await session.initialize()
             self.sessions[name] = (session, transport)
             self.stack.push_async_callback(server_stack.aclose)
@@ -285,13 +286,13 @@ class ToolRegistry:
                     env={**os.environ, **cfg.get("env", {})}
                 )
                 read, write = await server_stack.enter_async_context(stdio_client(params))
-                session = await server_stack.enter_async_context(ClientSession(read, write))
+                session = await server_stack.enter_async_context(ClientSession(read, write, sampling_callback=make_sampling_handler()))
                 await session.initialize()
                 self.sessions[name] = (session, "stdio")
             elif transport == "http":
                 url = cfg.get("url", "")
                 read, write, _ = await server_stack.enter_async_context(streamable_http_client(url))
-                session = await server_stack.enter_async_context(ClientSession(read, write))
+                session = await server_stack.enter_async_context(ClientSession(read, write, sampling_callback=make_sampling_handler()))
                 await session.initialize()
                 self.sessions[name] = (session, "http")
             else:

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
+import json
 import logging
+import re
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp import types as mcp_types
+from mcp.server.fastmcp import Context, FastMCP
 
 from template_filler import build_template_schema, fill_template_html, validate_findings
 
@@ -142,7 +146,8 @@ async def search_templates(
             if not templates:
                 return [{"error": f"No templates found for query={query}, specialty={specialty}"}]
 
-            return templates
+            approved = [t for t in templates if t.get("TLAP_Approved") == "1"]
+            return approved if approved else templates
         except Exception as exc:
             return [{"error": f"Search failed: {exc}"}]
 
@@ -215,6 +220,47 @@ async def fetch_template_html(template_id: str) -> Dict[str, Any]:
         }
 
 
+_GROUNDING_RULE = (
+    " Only use measurements and findings explicitly present in the provided inference results — "
+    "do not invent structures, values, or findings that are not in the data. "
+    "You may apply established clinical reference knowledge (normal ranges, grading criteria, "
+    "clinical significance thresholds) to interpret the given measurements and populate "
+    "assessment, impression, and recommendation fields accordingly."
+)
+
+SPECIALTY_SYSTEM_PROMPTS = {
+    "general": (
+        "You are a board-certified radiologist. Map the provided AI inference results to "
+        "the given template fields." + _GROUNDING_RULE
+    ),
+    "oncology": (
+        "You are a board-certified radiologist subspecialised in oncologic imaging. "
+        "Prioritize lesion size, enhancement pattern, TNM staging, and treatment response (RECIST 1.1). "
+        "Use formal ACR RADS language." + _GROUNDING_RULE
+    ),
+    "cardiology": (
+        "You are a board-certified radiologist subspecialised in cardiac imaging. "
+        "Prioritize ejection fraction, wall motion, pericardial effusion, and valve morphology. "
+        "Use AHA/ACC terminology." + _GROUNDING_RULE
+    ),
+    "emergency": (
+        "You are a board-certified emergency radiologist. "
+        "Lead with time-critical findings (pneumothorax, hemorrhage, PE, dissection). "
+        "Be concise. Use STAT-level conventions." + _GROUNDING_RULE
+    ),
+    "neuroradiology": (
+        "You are a board-certified neuroradiologist. "
+        "Prioritize lesion location, signal characteristics, mass effect, midline shift, "
+        "and enhancement pattern. Use ACR brain reporting guidelines." + _GROUNDING_RULE
+    ),
+    "musculoskeletal": (
+        "You are a board-certified musculoskeletal radiologist. "
+        "Prioritize joint space, cortical integrity, bone marrow signal, and tendon/ligament continuity."
+        + _GROUNDING_RULE
+    ),
+}
+
+
 # --- MCP Tool Definitions ---
 
 @mcp.tool()
@@ -242,39 +288,36 @@ async def find_templates(
     return await search_templates(query=query, specialty=specialty_code)
 
 
-@mcp.tool()
-async def get_template_schema(template_id: str) -> Dict[str, Any]:
-    """
-    Fetch a template schema from RadReport API HTML (latest revision).
-
-    Returns normalized field metadata including key, aliases, control_type,
-    options, and section grouping to guide exact field mapping.
-    """
-    template_payload = await fetch_template_html(template_id)
-    if "error" in template_payload:
-        return template_payload
-
-    return build_template_schema(
-        template_html=template_payload["html_template"],
-        template_id=template_payload["template_id"],
-        template_title=template_payload["template_title"],
-    )
-
 
 @mcp.tool()
 async def generate_report(
     template_id: str,
-    findings: Dict[str, Any],
-    report_title: Optional[str] = None,
+    ctx: Context,
+    output_path: str = "",
+    findings: Optional[Dict[str, Any]] = None,
+    inference_results: Optional[List[Dict]] = None,
+    patient_context: Optional[Dict] = None,
+    specialty: str = "general",
 ) -> Dict[str, Any]:
     """
-    Fill an exact RadReport template DOM in-place using findings.
+    Fill a RadReport template, using MCP sampling to map raw AI inference results to
+    template fields and generate a clinical narrative when inference_results is provided.
 
-    Rules:
-    - Template source is always RadReport API HTML.
-    - Unknown findings keys return hard error (unknown_fields).
-    - Invalid select/radio values return hard error (invalid_choice).
-    - Unspecified fields keep original template defaults.
+    Two modes:
+    - inference_results provided: host LLM maps structures to template fields and writes
+      findings_narrative, impression, recommendations via MCP sampling.
+    - findings dict provided: legacy rigid mapping (exact template keys required, no sampling).
+    At least one of findings or inference_results must be supplied.
+
+    Args:
+        template_id: RadReport template ID (from find_templates).
+        output_path: File path to save the HTML report. Omit or pass "" to skip saving.
+        findings: Pre-mapped field key/value dict (legacy path).
+        inference_results: Raw inference results list, each with 'description', 'model',
+            'structures' keys (structures have 'name', 'volume_cm3', 'voxel_count').
+        patient_context: Optional patient demographics / clinical context dict.
+        specialty: Reporting specialty for the sampling prompt. One of: general, oncology,
+            cardiology, emergency, neuroradiology, musculoskeletal. Default: general.
     """
     template_payload = await fetch_template_html(template_id)
     if "error" in template_payload:
@@ -288,7 +331,64 @@ async def generate_report(
     if "error" in schema:
         return schema
 
-    validation_result = validate_findings(findings=findings, all_fields=schema["all_fields"])
+    mapped_findings: Dict[str, Any] = {}
+
+    if inference_results is not None:
+        system_prompt = SPECIALTY_SYSTEM_PROMPTS.get(specialty, SPECIALTY_SYSTEM_PROMPTS["general"])
+        field_descriptions = [
+            f"{key} (type={f.get('control_type', 'text')}, "
+            f"section={f.get('section', '')}, aliases={f.get('aliases', [])})"
+            for key, f in schema["all_fields"].items()
+        ]
+        user_message = (
+            f"Template: {schema['title']}\n\n"
+            f"Available template fields:\n"
+            + "\n".join(f"  - {d}" for d in field_descriptions)
+            + f"\n\nPatient context: {json.dumps(patient_context) if patient_context else 'Not provided'}\n\n"
+            f"Raw inference results:\n{json.dumps(inference_results, indent=2)}\n\n"
+            "Map each relevant inference finding to the most appropriate template field key "
+            "from the list above. Use exact key names.\n"
+            'Respond with valid JSON only: {"field_mappings": {"<field_key>": "<value>", ...}}'
+        )
+        try:
+            sample_result = await ctx.session.create_message(
+                messages=[
+                    mcp_types.SamplingMessage(
+                        role="user",
+                        content=mcp_types.TextContent(type="text", text=user_message),
+                    )
+                ],
+                system_prompt=system_prompt,
+                max_tokens=512,
+            )
+            raw_text = ""
+            if hasattr(sample_result.content, "text"):
+                raw_text = sample_result.content.text
+            elif isinstance(sample_result.content, list):
+                for block in sample_result.content:
+                    if hasattr(block, "text"):
+                        raw_text += block.text
+
+            match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+                mapped_findings = parsed.get("field_mappings") or {}
+        except Exception as exc:
+            logging.warning(f"[radlex] Sampling failed ({exc}), falling back to flat key mapping")
+            for item in inference_results:
+                for s in item.get("structures", []):
+                    key = s.get("name", "").replace(" ", "_")
+                    if s.get("volume_cm3") is not None:
+                        mapped_findings[key] = f"{s['volume_cm3']} cm³"
+                    elif s.get("voxel_count") is not None:
+                        mapped_findings[key] = f"{s['voxel_count']:,} voxels"
+
+    elif findings is not None:
+        mapped_findings = findings
+    else:
+        return {"error": "Either 'findings' or 'inference_results' must be provided.", "error_type": "missing_input"}
+
+    validation_result = validate_findings(findings=mapped_findings, all_fields=schema["all_fields"])
     if "error" in validation_result:
         return validation_result
 
@@ -303,16 +403,33 @@ async def generate_report(
     applied_fields = validation_result["applied_fields"]
     total_fields = len(schema["all_fields"])
 
-    return {
+    result: Dict[str, Any] = {
         "status": "Finalized",
         "template_id": template_id,
         "template_title": schema["title"],
-        "report_title": report_title or schema["title"],
         "html_report": fill_result["html_report"],
         "applied_fields": applied_fields,
         "preserved_defaults_count": max(total_fields - len(applied_fields), 0),
         "validation": validation_result["validation"],
+        "specialty": specialty,
     }
+
+    if output_path:
+        try:
+            import os as _os
+            resolved = Path(output_path)
+            # In local dev APP_ROOT differs from the Docker /app mount; remap if needed.
+            app_root = _os.getenv("APP_ROOT", "")
+            if app_root and str(resolved).startswith("/app/"):
+                resolved = Path(app_root) / str(resolved)[len("/app/"):]
+            dest = resolved.with_suffix(".html")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(fill_result["html_report"], encoding="utf-8")
+            result["saved_to"] = str(dest.resolve())
+        except Exception as exc:
+            result["save_error"] = f"Failed to save report: {exc}"
+
+    return result
 
 
 if __name__ == "__main__":

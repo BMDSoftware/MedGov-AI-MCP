@@ -452,12 +452,39 @@ def _find_radio_controls(soup: BeautifulSoup, field: Dict[str, Any]) -> List[Tag
     return controls
 
 
+def _reset_all_fields(soup, all_fields: Dict[str, Dict[str, Any]]) -> None:
+    """Clear all template field defaults so only our mapped values remain."""
+    for field in all_fields.values():
+        control_type = field.get("control_type")
+        if control_type == "radio":
+            for radio in _find_radio_controls(soup, field):
+                radio.attrs.pop("checked", None)
+        elif control_type == "select":
+            control = _find_control(soup, field)
+            if control:
+                for option in control.find_all("option"):
+                    option.attrs.pop("selected", None)
+        elif control_type == "checkbox":
+            control = _find_control(soup, field)
+            if control:
+                control.attrs.pop("checked", None)
+        elif control_type == "textarea":
+            control = _find_control(soup, field)
+            if control:
+                control.clear()
+        else:
+            control = _find_control(soup, field)
+            if control:
+                control.attrs.pop("value", None)
+
+
 def fill_template_html(
     template_html: str,
     all_fields: Dict[str, Dict[str, Any]],
     normalized_findings: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Any]:
     soup = BeautifulSoup(template_html, "html.parser")
+    _reset_all_fields(soup, all_fields)
     missing_controls: List[str] = []
 
     for field_key, normalized_value in normalized_findings.items():

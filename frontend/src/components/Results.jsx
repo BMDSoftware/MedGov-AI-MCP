@@ -289,49 +289,41 @@ function TaskResult({ task }) {
   }
 
   if (task.task_type === 'report') {
-    const narrative = result?.narrative || {};
     const findings = result?.findings || [];
+    const radlex = result?.radlex_template || {};
+    const htmlReport = radlex.html_report;
+    const allStructures = findings.flatMap(f => f.structures || []);
+
     return (
       <div className="task-result-report">
-        {findings.map((f, i) => (
-          <div key={i} className="report-finding-block">
-            <h4>{f.description}</h4>
-            {f.structures?.length > 0 && (
-              <table className="result-structures-table">
-                <thead>
-                  <tr><th>Structure</th><th>Volume</th><th>% of scan</th></tr>
-                </thead>
-                <tbody>
-                  {f.structures.map((s, j) => (
-                    <tr key={j}>
-                      <td>{s.name}</td>
-                      <td>{s.volume_cm3 != null ? `${s.volume_cm3} cm³` : `${s.voxel_count?.toLocaleString()} vox`}</td>
-                      <td>{s.volume_percentage?.toFixed(2)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {radlex.template_title && (
+          <div className="report-template-header">
+            <span className="report-template-title">{radlex.template_title}</span>
+            {radlex.specialty && radlex.specialty !== 'general' && (
+              <span className="report-specialty-badge">{radlex.specialty}</span>
+            )}
+            {radlex.applied_fields?.length > 0 && (
+              <span className="report-fields-badge">{radlex.applied_fields.length} fields filled</span>
             )}
           </div>
-        ))}
-        {narrative.findings_narrative && (
-          <div className="report-narrative-section">
-            <h4>Findings</h4>
-            <p>{narrative.findings_narrative}</p>
-          </div>
         )}
-        {narrative.impression && (
-          <div className="report-narrative-section">
-            <h4>Impression</h4>
-            <p>{narrative.impression}</p>
-          </div>
+        {allStructures.length > 0 && (
+          <table className="result-structures-table">
+            <thead>
+              <tr><th>Structure</th><th>Volume</th><th>% of scan</th></tr>
+            </thead>
+            <tbody>
+              {allStructures.map((s, i) => (
+                <tr key={i}>
+                  <td style={{textTransform: 'capitalize'}}>{s.name.replace(/_/g, ' ')}</td>
+                  <td>{s.volume_cm3 != null ? `${s.volume_cm3} cm³` : `${s.voxel_count?.toLocaleString()} vox`}</td>
+                  <td>{s.volume_percentage?.toFixed(2)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
-        {narrative.recommendations && (
-          <div className="report-narrative-section">
-            <h4>Recommendations</h4>
-            <p>{narrative.recommendations}</p>
-          </div>
-        )}
+        {htmlReport && <ReportPreview html={htmlReport} />}
       </div>
     );
   }
@@ -339,6 +331,39 @@ function TaskResult({ task }) {
   // Generic fallback
   return (
     <pre className="task-result-raw">{JSON.stringify(result, null, 2)}</pre>
+  );
+}
+
+function ReportPreview({ html }) {
+  const [open, setOpen] = useState(false);
+  const [blobUrl, setBlobUrl] = useState(null);
+
+  const toggle = () => {
+    if (!open && !blobUrl) {
+      const blob = new Blob([html], { type: 'text/html' });
+      setBlobUrl(URL.createObjectURL(blob));
+    }
+    setOpen(v => !v);
+  };
+
+  useEffect(() => {
+    return () => { if (blobUrl) URL.revokeObjectURL(blobUrl); };
+  }, [blobUrl]);
+
+  return (
+    <div className="report-preview-container">
+      <button className="report-preview-toggle" onClick={toggle}>
+        {open ? 'Hide Template Preview' : 'Preview Template'}
+      </button>
+      {open && blobUrl && (
+        <iframe
+          className="report-preview-iframe"
+          src={blobUrl}
+          sandbox="allow-same-origin"
+          title="Radiology Report"
+        />
+      )}
+    </div>
   );
 }
 

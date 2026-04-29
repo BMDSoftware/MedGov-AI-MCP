@@ -12,7 +12,7 @@ This is a workflow router. Before executing any tools, read the reference file f
 | Workflow | When to use | Reference |
 | --- | --- | --- |
 | DICOM Analysis + Report | User provides DICOM files or directories, wants inference, segmentation, or a radiology report | `references/dicom-analysis-workflow.md` |
-| Lung Tumor Detection | User provides a slide UID and wants tumor detection in a whole-slide pathology image | `references/lung-tumor-detection-workflow.md` |
+| WSI Tumor Detection | User provides a slide UID and wants tumor detection in any whole-slide pathology image (any tissue type or organ) | `references/wsi-tumor-detection-workflow.md` |
 
 If both workflows apply, ask the user which to run first.
 

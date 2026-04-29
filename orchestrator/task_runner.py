@@ -365,17 +365,18 @@ def _handle_report(input_data: Dict, session_id: str) -> Dict:
     return {
         "patient_context": patient_context,
         "findings": findings,
-        "radlex_template": radlex_report,   # structured template output (may be None)
-        "narrative": narrative,             # LLM-generated sections
+        "radlex_template": radlex_report,
+        "narrative": narrative,
         "generated_at": datetime.now().isoformat(),
     }
 
 
 async def _async_radlex_report(query: str, findings: list, patient_context: Dict) -> Optional[Dict]:
-    """Open a fresh MCP session to RadLex and fill a template with the findings."""
+    """Open a fresh MCP session to RadLex (with sampling) and fill a template."""
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     from contextlib import AsyncExitStack
+    from sampling_handler import make_sampling_handler
 
     config_path = Path(__file__).parent / "mcp-config.json"
     with open(config_path) as f:
@@ -390,7 +391,9 @@ async def _async_radlex_report(query: str, findings: list, patient_context: Dict
 
     async with AsyncExitStack() as stack:
         read, write = await stack.enter_async_context(stdio_client(params))
-        session = await stack.enter_async_context(ClientSession(read, write))
+        session = await stack.enter_async_context(
+            ClientSession(read, write, sampling_callback=make_sampling_handler())
+        )
         await session.initialize()
 
         # 1. Find matching templates
@@ -405,27 +408,19 @@ async def _async_radlex_report(query: str, findings: list, patient_context: Dict
         if not templates:
             return None
 
-        # Pick the first result
         template_id = templates[0].get("id") or templates[0].get("template_id")
         if not template_id:
             return None
 
-        # 2. Build a flat findings dict to pass to the template
-        flat_findings: Dict[str, Any] = {}
-        if patient_context:
-            flat_findings["patient"] = patient_context
-        for f in findings:
-            for s in f.get("structures", []):
-                key = s["name"].replace(" ", "_")
-                flat_findings[key] = (
-                    f"{s['volume_cm3']} cm³" if s.get("volume_cm3") is not None
-                    else f"{s['voxel_count']:,} voxels"
-                )
-
-        # 3. Fill the template
+        # 2. Pass raw findings so the server-side sampling does the mapping
         gen_result = await session.call_tool(
             "generate_report",
-            arguments={"template_id": template_id, "findings": flat_findings},
+            arguments={
+                "template_id": template_id,
+                "inference_results": findings,
+                "patient_context": patient_context,
+                "specialty": "general",
+            },
         )
         gen_text = "".join(b.text for b in gen_result.content if hasattr(b, "text"))
         try:

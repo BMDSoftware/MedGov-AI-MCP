@@ -1,8 +1,8 @@
-# Lung Tumor Detection Workflow (iPath / Whole-Slide Image)
+# Whole-Slide Image (WSI) Tumor Detection Workflow (iPath)
 
-**Goal:** Given a slide UID, locate the tumor region visually and retrieve a high-resolution view of it.
+**Goal:** Given a slide UID, locate the most suspicious region visually and retrieve a high-resolution view of it for cell-level analysis.
 
-The agent acts as the vision model — there is no AI detection tool. Visual inspection happens after thumbnail and ROI images are fetched.
+The agent acts as the vision model — there is no AI detection tool. Visual inspection happens after thumbnail and ROI images are fetched. This workflow applies to any whole-slide pathology image regardless of tissue type or organ.
 
 ## Tools and Sequence
 
@@ -12,8 +12,10 @@ The agent acts as the vision model — there is no AI detection tool. Visual ins
    - Save the returned `width` and `height` (actual values, needed in step 4)
 
 2. **Visual inspection** *(no tool call)*
-   - Examine the thumbnail and identify the most suspicious region
+   - Examine the thumbnail and identify the **single most probable tumor location** — the region with the highest suspicion based on color, texture, and structural abnormality
+   - You must commit to one bounding box before continuing. If multiple regions are suspicious, note them all but select only the most prominent for the ROI fetch
    - Estimate a bounding box in thumbnail pixel coordinates: `(thumb_x, thumb_y, thumb_w, thumb_h)`
+   - **HARD LIMIT: `thumb_w` MUST NOT exceed 30 and `thumb_h` MUST NOT exceed 30. If your visual estimate is larger, clamp it to 30. Never pass a value above 30 for width or height in step 4.**
    - Describe the finding to the clinician before continuing
 
 3. **Get full slide dimensions**
@@ -42,4 +44,3 @@ The agent acts as the vision model — there is no AI detection tool. Visual ins
 
 - The slide UID (DICOM SOPInstanceUID) must come from the user. Ask for it if not provided.
 - Describe findings in clinical language only — no file paths, coordinates, or tool names in user-facing output.
-- If multiple suspicious regions are visible in the thumbnail, note them all but retrieve the ROI for the most prominent one first.

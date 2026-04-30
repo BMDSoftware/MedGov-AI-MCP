@@ -202,7 +202,7 @@ for local inference. Both backends implement the same internal
 interface.
 
 \subsubsection*{MCP Server Layer}
-The tool layer consists of seven MCP servers, each running as an
+The tool layer consists of six MCP servers, each running as an
 independent process in its own isolated Python virtual environment.
 Isolation at the process level is a deliberate design choice: it
 prevents dependency conflicts between servers with incompatible
@@ -211,9 +211,8 @@ installation required by \texttt{mcp-monai} and the CPU-only
 installation used elsewhere, which cannot coexist in a single
 environment). Tool names are prefixed with the server name
 (e.g., \texttt{monai.run\_inference}, \texttt{radlex.generate\_report}),
-providing unambiguous namespacing across servers. Six servers
-communicate over stdio transport; the FHIR server uses HTTP transport
-to connect to an external endpoint. The available servers and their
+providing unambiguous namespacing across servers. All servers
+communicate over stdio transport. The available servers and their
 clinical functions are listed in Table~\ref{tab:mcp-servers}.
 
 \begin{table}[t]
@@ -230,7 +229,6 @@ clinical functions are listed in Table~\ref{tab:mcp-servers}.
     mcp-skills   & stdio & Skill workflow loading and execution \\
     mcp-ipath    & stdio & iPath telepathology integration \\
     mcp-cellpose & stdio & 2D/3D cell segmentation (Cellpose) \\
-    mcp-fhir     & HTTP  & FHIR patient data retrieval \\
     \bottomrule
   \end{tabular}
 \end{table}

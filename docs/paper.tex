@@ -476,9 +476,67 @@ When the debounce window closes, the watcher copies the incoming files from the 
 % tool discovery at startup, dynamic registration
 % skills experimentation: advantages, disadvantages, findings
 
+
+
+
 \subsection{Phase 3 - Use Case Comparison}
 % use cases go here
 % autonomous workflow vs manual/guided workflow
+% im going to describe the two use cases i have in the diagrams
+% they were tested and worked well locally, one of them is still being tested more thoroughly in the deployment environment
+% doubts in notes 30th of april
+% also in this use cases part we should talk about how the system behaves mostly right?
+% screenshots? etc
+
+
+% should we consider the reprot generation? is what appears in the result tab the report? or should we consider something else? because we just get voxels so...
+% is the report even rich enough to be considered? and henrique changed the radlex so i need further testing now to see if its relevant enough but for now ill only mention the segementation and the result generated
+% leaving out the generat report part for now
+\subsubsection{Use Case 1 - Interactive DICOM Analysis and Segmentation}
+
+\textbf{Clinical context.}
+A clinician has a DICOM scan and needs segmentation without knowing which model to use or how to chain the required tools, or simply wants to accelerate their work by dropping the DICOM files and looking directly at the processed and interpreted data.
+
+% here is where i dont know if we mentino debug and normal or just do one because i put both in the diagram
+
+\textbf{Setup.}
+The user uploads either a single DICOM volume file or a directory of DICOM slices forming a 3D series through the frontend file selector, and enters the following prompt in the chat to initiate the workflow:
+
+\begin{quote}
+\textit{``Analyze this CT scan and run the appropriate segmentation model.''}
+\end{quote}
+
+\textbf{Workflow.}
+The workflow is illustrated in Figure~\ref{fig:analysis-workflow}. The agent calls \texttt{parse\_dicom\_file} to extract modality, body part, and acquisition metadata from the DICOM header, then \texttt{analyze\_image} to determine image type, intensity, and spatial dimensions. Based on these findings, \texttt{list\_models} returns a filtered list of compatible segmentation models. If the selected model is not cached locally, \texttt{download\_model} retrieves it from HuggingFace Hub. Inference is then submitted to the background task queue via \texttt{run\_inference}, which applies a sliding window strategy to process the 3D volume without exceeding GPU memory limits. The agent responds immediately after queuing without waiting for inference to complete. When the background task finishes, an SSE notification is pushed to the frontend and the segmentation results, including per-organ volumes, are displayed in the Results tab.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{images/AnalysisWorkflow.png}
+  \caption{Use Case 1 - Interactive DICOM analysis and segmentation workflow.}
+  \label{fig:analysis-workflow}
+\end{figure}
+
+\subsubsection{Use Case 2 - Autonomous Pathology ROI Monitoring}
+
+\textbf{Clinical context.}
+A pathology instrument or PACS system exports region-of-interest (ROI) images to a local directory as part of its standard output. No human is available to initiate analysis for each arriving file. The goal is for the system to detect each new file, run cell segmentation automatically, and route the result based on a configurable cell count threshold, without any user interaction. Files can also be deposited manually through the Workspaces tab in the frontend, which provides a console showing detection events and agent activity in real time.
+
+\textbf{Setup.}
+A workspace is registered pointing to the watched directory. The following prompt is configured for that workspace, defining the agent's behaviour for every arriving file:
+
+\begin{quote}
+\textit{``When a new file arrives, check whether it is a pathology ROI image. If it is, run Cellpose cell segmentation and count the cells. If the cell count exceeds 2000, copy the segmentation mask to the output folder and log the result. If the file is not a valid ROI image, move it to the uncertain folder.''}
+\end{quote}
+
+\textbf{Workflow.}
+The workflow is illustrated in Figure~\ref{fig:workspace-workflow}. When the polling observer detects a new file, the watcher copies it to the workspace incoming folder and triggers the agent after a three-second debounce window. The agent calls \texttt{get\_file\_metadata} to determine file type, extension, and dimensions, and attempts to classify whether the file is a pathology ROI image. This classification step is an inherent limitation of the current design: reliably determining whether an arbitrary image is a valid ROI would require running a dedicated detection model, effectively doubling the computational cost before any analysis begins. To avoid this overhead, the workspace prompt instructs the agent to make a best-effort classification from file metadata and dimensions alone, and to route uncertain cases to a dedicated folder for manual review rather than proceeding with segmentation. This trades false-negative robustness for efficiency, and is an acknowledged design constraint rather than a failure of the workflow. If the file is classified as a valid ROI image, \texttt{segment\_cells\_2d} is submitted to the background task queue using the Cellpose v4 universal model (cpsam). When the task completes, the result is pushed to the frontend via SSE and displayed in the Workspaces console. If the cell count exceeds 2000, the segmentation mask is copied to the output folder; otherwise only a JSON log entry is written. Final results, including cell count, mask path, and timestamp, are persisted and accessible in the Results tab.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{images/WorkspaceMonitoringWorkflow.png}
+  \caption{Use Case 2 - Autonomous pathology ROI monitoring workflow.}
+  \label{fig:workspace-workflow}
+\end{figure}
 
 \section{Discussion}
 

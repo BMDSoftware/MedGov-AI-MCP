@@ -336,89 +336,62 @@ described in detail in Section~\ref{sec:skills}.
 \label{sec:skills}
 
 MCP defines what tools are available to the agent; it does not define
-how those tools should be used in a given clinical domain. The correct
-sequence of operations for a CT lung workflow (parse DICOM, detect
-modality, select an appropriate segmentation model, run inference,
-retrieve results, fill a RadLex report template) is not derivable
-from tool schemas alone. It requires domain knowledge about clinical
-protocols, sequencing constraints, and the interpretation of
-intermediate results. The skills system encodes this knowledge in a
-form the agent can load on demand without any retraining.
+how those tools should be used together for a given task. This gap
+becomes significant in workflows that span multiple MCP servers, where
+the agent must coordinate tools from different servers in a specific
+order to reach a result. The correct sequence of operations for a
+DICOM analysis workflow (parse the file with \texttt{mcp-utils},
+analyze the image and run inference with \texttt{mcp-monai}, then
+locate a template and generate a report with \texttt{mcp-radlex})
+is not derivable from tool schemas alone. It requires explicit
+sequencing constraints, guard conditions, and cross-server coordination
+patterns that sit above the capability level of any individual tool.
+The skills system encodes this workflow-level knowledge in a form the
+agent can load on demand without any retraining.
 
-This knowledge could in principle be embedded directly in the system
-prompt, but doing so has two drawbacks. First, it increases token
-consumption on every request, including those that do not require that
-domain. Second, a large system prompt increases the risk of the LLM
-overlooking or misapplying specific instructions, a well-documented
-failure mode in prompt engineering~\cite{}. Skills address both
-problems by keeping the system prompt minimal and loading
-domain-specific protocol only when the agent determines it is needed
-for the current task.
+This workflow knowledge could in principle be embedded directly in the
+system prompt, but doing so has two drawbacks. First, it increases
+token consumption on every request, including those that do not
+require that domain. Second, a large system prompt increases the risk
+of the LLM overlooking or misapplying specific instructions, a
+well-documented failure mode in prompt engineering~\cite{jaroslawicz2025ifscale}. Skills
+address both problems by keeping the system prompt minimal and loading
+workflow detail only when the agent determines it is needed for the
+current task.
 
 \subsubsection{Structure}
+A skill separates awareness from detail. Every available skill is surfaced to the agent at startup through a short name and natural language description kept permanently in the system prompt, while the full skill body remains unloaded until needed. When a request arrives, the agent reasons over these descriptions to identify the applicable skill, then loads its body on demand as operating instructions for that task. This enables progressive disclosure: the context window carries only a lightweight index at rest, expanding to include full workflow detail only for the domain currently in use.
 
-Each skill is a directory containing a \texttt{SKILL.md} file as its
-entry point, written in YAML-frontmatter Markdown. The frontmatter
-defines the skill's name and a natural language description that is
-injected into the agent's system prompt at startup. When the agent
-encounters a task that matches a skill's description, it calls
-\texttt{skills.read\_skill\_file} to load the full content before
-taking any action in that domain. The skill file then acts as the
-agent's operating instructions for that workflow.
-
-The skill directory can contain additional resources alongside
-\texttt{SKILL.md}: reference documents that detail specific
-sub-workflows, assets such as report templates or annotated examples,
-and executable scripts that can be invoked via
-\texttt{skills.execute\_script}. This structure allows a single skill
-to encode multiple related workflows, with \texttt{SKILL.md} acting as
-a router that directs the agent to the appropriate reference file based
-on the user's request. This filesystem-based architecture enables
-progressive disclosure: the agent loads only the router at first, then
-fetches deeper protocol detail on demand, keeping the context window
-focused and avoiding unnecessary token consumption on workflows that
-are not relevant to the current task.
+A skill body can itself be hierarchical, containing an entry-level document that routes to more specific sub-documents, reference material, templates, and scripts, each loaded independently as the task requires. This allows a single skill to cover a broad domain without forcing the agent to load everything at once.
 
 \subsubsection{Implemented Skills}
 
-Two skills are currently deployed in the system. The
+One skill is currently deployed in the system. The
 \textbf{medical-imaging} skill covers any task involving medical image
 data. Its \texttt{SKILL.md} functions as a workflow router: it presents
 two available workflows (DICOM analysis with report generation, and
 whole slide image tumour detection) and instructs the agent to load
 the corresponding reference document before proceeding. Each reference
-document contains the complete step-by-step protocol for that workflow,
-including which tools to call, in what order, how to handle errors, and
-what the expected outputs are. This separation between the router and
-the protocol documents means that new imaging workflows can be added to
-the skill without modifying the router or any code.
+document specifies which tools to call, in what order, what guard
+conditions apply (for example, aborting if a DICOM series is not a 3D
+volume), how to handle intermediate results, and what the expected
+output is. This separation between the router and the workflow
+documents means that new imaging workflows can be added to the skill
+without modifying the router or any code.
 
-The \textbf{clinical-reports} skill covers structured documentation
-across a range of report types, including radiology and pathology
-diagnostic reports, case reports following CARE guidelines, clinical
-trial reports following ICH-E3 and related regulatory standards, and
-patient documentation formats such as SOAP notes, H\&P documents, and
-discharge summaries. It encodes compliance requirements (HIPAA, FDA,
-ICH-GCP) and provides templates and validation guidance that the agent
-applies when generating documentation. Unlike the medical-imaging
-skill, which was developed specifically for this work, the
-clinical-reports skill is a publicly available skill integrated without
-modification, demonstrating that third-party skills can be adopted
-into the system without any code changes.
 
 \subsubsection{Governance}
 
 A key property of this design is that skill files are plain text and
-can be updated by domain experts (clinicians, radiologists,
-pathologists) without touching the agent, the MCP servers, or any
-other part of the codebase. When a clinical protocol changes, the
-relevant reference document is updated and the agent adopts the new
-behaviour immediately on the next session, with no software deployment
-required. This operationalises the skills-as-updatable-protocol
-concept described by Xu and Yan~\cite{agentskillslargelanguage} in a
-concrete clinical setting, and directly addresses the governance gap
-they identified: the question of who maintains skill files and how they
-are kept current with clinical practice.
+can be updated without touching the agent, the MCP servers, or any
+other part of the codebase. When a workflow step changes (a
+different tool call order, a new guard condition, a revised output
+format) the relevant reference document is edited and the agent
+adopts the new behaviour immediately on the next session, with no
+software deployment required. This separates workflow maintenance from
+software development, which is relevant in clinical settings where the
+people who understand the correct procedure are not necessarily the
+people who maintain the codebase.
 
 
 % the repetition guard needs to be explained why its in place, why the doube repetition was a problem, how we fixed it

@@ -113,13 +113,21 @@ Skills address this layer. Xu and Yan (2026) formalize agent skills as composabl
 
 \subsection{System Architecture Overview}
 
+
+% idk why you put this as a placeholder when the image doesn't have this name and is already there??
+% anyways i altered it
+
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\columnwidth]{images/architecture.png}
+  \includegraphics[width=\columnwidth]{images/AgenticArchitecture.png}
   \caption{MedGov-AI system architecture.}
   \label{fig:arch}
 \end{figure}
 
+
+% there's some repetition in some content about ollama vs gemini
+% the part regarding "both backends implement the same internal interface" is a bit confusing and we should show how the interface looks if we're mentioninig it
+% also we have a table mentioning the fhir server but we dont talk about it *for now*
 
 MedGov-AI is organized into three layers: a React frontend, a FastAPI
 orchestrator, and a set of MCP tool servers. Each layer has a clearly
@@ -233,6 +241,12 @@ registering it in the configuration file. The agent, the orchestrator,
 and every existing server remain unchanged. This is the property that makes MCP a viable interoperability layer rather than yet another bespoke integration approach.
 
 
+% as i said before we dont mention the fhir and i dont know if we should
+% the part where you descrribe the analyze image is not fully correct because you say it detects body part and modality automatically from pixel statistics and file metadata, but in reality it reads teh dicom tags and metadata, the pixel statistics as we talked about when I implemented this were a fallback heuristic method that we can explain more if needed and found relevant
+% we should explain more the sliding window strategy, because as the teacher said,this has to be to all readers, and they need to learn with this
+% for example you could say: its a technique that applies the model to overlapping sub volumes and makes a prediction, avoiding gpu memory overflow on large scans and allowing for variable input sizes, which is a common challenge in 3D medical imaging
+% the mcp skills we pass shell=true which is a security risk, and you say runs a shell command but maybe you should say a predefined script associated to a skill, because the system doesnt accept shell inputs and it might  seem like it
+
 \subsection{MCP Server Layer}
 
 Each MCP server encapsulates a distinct clinical capability and exposes
@@ -308,6 +322,15 @@ a report template. \texttt{execute\_script} runs a shell command
 defined within a skill and returns its output. The skills system is
 described in detail in Section~\ref{sec:skills}.
 
+
+% tihs part is very nice, but also since you were more in debt into this i cant critique it as much
+% just we dont really show results regarding the skills and maybe it would be relevant to do so
+% we need more graphs and results about execution
+% one thing is when you say publicly available or reffer literature you should put references, specially it being a published skill so the reader can check it himself
+% for references as thee teacher said, this system we keep 2026 and 2025 and maybe late 2024 but algorithms or standardized things can be older
+% this reffeering to the cite thats empty, and im sure you can find a paper regarding it liek any prompt engineering study idk
+% also you say clinicaians can udpdate skill files without touching the agent? but how? they'd still need the code and to what point does the debug mode in our application signals to something the general medic should ahve access to? why and how would they update skills on what grounds, what information
+% and when altering skills, how would those be verified? we need to think this through if its worth mentioning , how it would be reviewed, if reviewed, the impact it would have, why was it done this way
 
 \subsection{Skills System}
 \label{sec:skills}
@@ -398,6 +421,11 @@ they identified: the question of who maintains skill files and how they
 are kept current with clinical practice.
 
 
+% the repetition guard needs to be explained why its in place, why the doube repetition was a problem, how we fixed it
+% wew should clarify more the behavior on the multiple tool calls being returned ina  single llm response
+% we should explain more the debug mode, or if its worth mentioning and if it should even go to the final paper, as a real mode or something jsut for the developers?
+
+
 \subsection{****Agentic Execution Loop****}
 
 The agent's operation is governed by an iterative execution loop that drives the system from a natural language goal to a set of completed deliverables, calling MCP tools at each step based on the LLM's reasoning about what to do next.
@@ -420,11 +448,26 @@ Alongside the MCP tools discovered at startup, the agent has access to a set of 
 The system supports two operating modes that can be selected per session. In \textbf{autonomous mode}, the agent executes tool calls without interruption from goal receipt to completion. This is the intended mode for event-driven workflows triggered by the workspace watcher, where no user is present to intervene. In \textbf{assisted mode} (referred to in the codebase as debug mode), the loop pauses before each tool call and returns a \texttt{confirmation\_required} response to the frontend, which presents the proposed tool name and arguments to the user for approval or rejection before execution resumes.
 
 
+
+% ill write this part i just wanna point out that we're still making changes so it might not be worth it finishing this right now
 \subsection{Background Task Queue}
 % long-running operations (MONAI inference, Cellpose) queued to thread pool
 % state machine: queued, running, completed/failed, persisted in SQLite
 % SSE notifications to frontend on completion
 % semaphore: only one inference runs at a time to prevent memory crashes
+
+
+% you didnt fill the clinical relevance
+% in this part we should also mention limitations of teh system, but im also wondering if these sections are needed and if the error handling is worth mentioning
+% its an architectural thing of course, but its mostly by choice and for debugging
+
+% we could talk about the watcher error handling, when a path becomes unavailable
+% 503 errors
+% periodic polling for the mcps and healthchecks
+% watchdog 
+% talk about configurable intervals etc
+
+
 
 \subsection{****Workspace Monitoring and Event-Driven Triggering****}
 
@@ -440,9 +483,11 @@ When a new file is detected, the service does not trigger the agent immediately.
 
 When the debounce window closes, the watcher copies the incoming files from the watched directory into the corresponding workspace directory and constructs a goal prompt that includes the workspace name, the list of received files, and the preconfigured prompt for that workspace. It then invokes the agent in autonomous mode, since no user is present to confirm tool calls. The agent proceeds through its standard execution loop: reading the appropriate skill file (if needed), parsing the files, running the required analysis, and producing the configured outputs. The entire activity log, including file detection events, agent actions, and results, is streamed to the frontend via SSE under the workspace's dedicated console channel, giving an operator real-time visibility even when the workflow was triggered without user interaction.
 
+
+% in the clinical relevance we talk about use cases? because its weird in a subsection from system architecture...
 \subsubsection{Clinical Relevance}
 
-
+% here well have to put the machine that were working on depoyment and its stats and also yours
 
 \subsection{Evaluation Setup}
 % the 3 experimental phases defined in the March 2026 meeting with the teacher

@@ -403,12 +403,13 @@ The agent's operation is governed by an iterative execution loop that drives the
 
 \subsubsection{System Prompt and Session Initialisation}
 
-At the start of each session the agent receives a system prompt that establishes its role, its available tools, and its behavioural rules. The system prompt includes the list of available skills in structured XML, injected at startup after dynamic discovery, so the agent knows what clinical domains it can operate in before any user message arrives. It also includes explicit rules for tool usage: when to read a skill file before acting, when to queue a long-running operation to the background task runner rather than calling it inline, how to handle DICOM series directories versus individual files, and how to avoid repeating failed tool calls. Two variants of the system prompt exist: one for autonomous mode, which omits confirmation-related guidance, and one for assisted mode, which includes it.
+At the start of each session the agent receives a system prompt that establishes its role, its available tools, and its behavioural rules. The system prompt includes the list of available skills as a plain bulleted list of names and descriptions, injected at startup after dynamic discovery, so the agent knows what clinical domains it can operate in before any user message arrives. It also includes explicit rules for tool usage: when to read a skill file before acting, when to queue a long-running operation to the background task runner rather than calling it inline, how to handle DICOM series directories versus individual files, and how to avoid repeating failed tool calls. Two variants of the system prompt exist: one for autonomous mode, which omits confirmation-related guidance, and one for assisted mode, which includes it.
 
 \subsubsection{Iterative Reasoning and Tool Dispatch}
 
-Each iteration of the loop follows the same structure. The agent receives a prompt describing the current goal, any available files, and the results of all prior tool calls in the session. On the first iteration the prompt is minimal: goal, data, and file context. On subsequent iterations the prompt includes the execution history and the completion contract (described below), which the agent must evaluate before deciding its next action. The LLM responds with either one or more function calls, or a text response indicating that the goal is complete or that more information is needed. Multiple tool calls can be returned in a single LLM response and are executed sequentially within the same iteration, with all results collected and sent back to the LLM together before the next iteration begins. Function calls are parsed and dispatched to the appropriate MCP server via the tool registry. The result is appended to the execution history and the loop continues.
-A repetition guard prevents the agent from calling the same tool twice consecutively after two failures on that tool, forcing it to try a different approach rather than looping indefinitely on a broken call.
+Each iteration of the loop follows the same structure. The agent receives a prompt describing the current goal, any available files, and the results of all prior tool calls in the session. On the first iteration the prompt is minimal: goal, data, and file context. On subsequent iterations the prompt also includes the execution history, which the agent evaluates before deciding its next action. The LLM responds with either one or more function calls, or a text response indicating that the goal is complete or that more information is needed. Multiple tool calls can be returned in a single LLM response and are executed sequentially within the same iteration. All results are collected and returned to the LLM in a single message before the next iteration begins. Function calls are parsed and dispatched to the appropriate MCP server via the tool registry, and the result is appended to the execution history.
+
+A repetition guard addresses a failure mode observed during development in which the agent would attempt the same failing tool call repeatedly rather than trying an alternative approach, consuming iterations without making progress. The guard inspects the execution history before each tool call: if the same tool has failed twice in a row, the third attempt is blocked and an error message is injected into the history instructing the agent to try a different tool or approach.
 
 \subsubsection{Built-in Tools}
 
@@ -417,7 +418,6 @@ Alongside the MCP tools discovered at startup, the agent has access to a set of 
 \subsubsection{Operating Modes}
 
 The system supports two operating modes that can be selected per session. In \textbf{autonomous mode}, the agent executes tool calls without interruption from goal receipt to completion. This is the intended mode for event-driven workflows triggered by the workspace watcher, where no user is present to intervene. In \textbf{assisted mode} (referred to in the codebase as debug mode), the loop pauses before each tool call and returns a \texttt{confirmation\_required} response to the frontend, which presents the proposed tool name and arguments to the user for approval or rejection before execution resumes.
-
 
 
 % ill write this part i just wanna point out that we're still making changes so it might not be worth it finishing this right now
@@ -442,7 +442,7 @@ The system supports two operating modes that can be selected per session. In \te
 
 \subsection{****Workspace Monitoring and Event-Driven Triggering****}
 
-Clinical imaging data does not arrive through a chat interface; it is deposited into directories by PACS exporters, scanners, and laboratory instruments as part of existing institutional workflows. The workspace monitoring system bridges this gap by turning filesystem events into agent triggers, allowing MedGov-AI to participate in clinical workflows without requiring any modification to upstream systems.
+Not all clinical workflows are initiated by a user interacting with a chat interface. In many settings, imaging files are deposited into shared directories as part of existing institutional processes, with no operator present to trigger analysis manually. The workspace monitoring system addresses this by turning filesystem events into agent triggers, allowing MedGov-AI to process incoming files automatically without requiring modification to upstream workflows.
 
 \subsubsection{Architecture}
 
@@ -455,17 +455,23 @@ When a new file is detected, the service does not trigger the agent immediately.
 When the debounce window closes, the watcher copies the incoming files from the watched directory into the corresponding workspace directory and constructs a goal prompt that includes the workspace name, the list of received files, and the preconfigured prompt for that workspace. It then invokes the agent in autonomous mode, since no user is present to confirm tool calls. The agent proceeds through its standard execution loop: reading the appropriate skill file (if needed), parsing the files, running the required analysis, and producing the configured outputs. The entire activity log, including file detection events, agent actions, and results, is streamed to the frontend via SSE under the workspace's dedicated console channel, giving an operator real-time visibility even when the workflow was triggered without user interaction.
 
 
-% in the clinical relevance we talk about use cases? because its weird in a subsection from system architecture...
-\subsubsection{Clinical Relevance}
+\subsection{Use Cases}
 
-% here well have to put the machine that were working on depoyment and its stats and also yours
+Two clinical workflows were selected to evaluate the system. Together they cover the two imaging modalities the system targets, radiology and pathology, and exercise the full tool stack: DICOM parsing, segmentation inference, report generation, and whole slide image analysis. Both workflows can be initiated interactively through the chat interface or triggered automatically when files arrive in a monitored directory.
+
+\subsubsection{Radiology: DICOM Analysis and Report Generation}
+
+A clinician or automated trigger provides a DICOM file or series. The system identifies the study type, runs the appropriate segmentation model, and produces a structured preliminary radiology report matched to the modality and anatomy. Success is defined as a correctly identified study type, a completed segmentation, and a filled report template with findings mapped to the appropriate fields.
+
+\subsubsection{Pathology: Whole Slide Image Analysis}
+
+A whole slide image is provided. The system runs tumour detection and cell segmentation, returning segmentation results and a summary of the detected region. Success is defined as a completed segmentation run with quantitative output, specifically the detected region and cell count, returned without manual intervention.
 
 \subsection{Evaluation Setup}
-% the 3 experimental phases defined in the March 2026 meeting with the teacher
-% hardware: NVIDIA GeForce RTX 3050 6GB, MONAI 1.5.1, PyTorch 2.5.1
-% data: public DICOM datasets (Cancer Imaging Archive, Medical Segmentation Decathlon)
-% LLM backends tested: Gemini 2.0/2.5 Flash (API), Ollama deepseek-r1:7b and llama3.1:8b
 
+Evaluation was structured in three phases. Phase 1 evaluates both API-based and locally hosted language models for tool-calling reliability in clinical workflows. Phase 2 assesses skill-guided execution qualitatively, examining whether the agent correctly loaded the applicable skill, followed the prescribed workflow order, and avoided the failure modes the skill is designed to prevent. Phase 3 runs the two use cases end to end, comparing autonomous and manual workflows, evaluated by task completion and qualitative assessment of outputs, specifically whether the radiology report was correctly filled and whether segmentation completed successfully.
+
+All experiments were run on a machine with an NVIDIA GeForce RTX 3050 6~GB GPU, using MONAI 1.5.1 and PyTorch 2.5.1 for inference. Input data consisted of publicly available DICOM datasets from the Cancer Imaging Archive~\cite{tcia} and the Medical Segmentation Decathlon~\cite{decathlon}. Two categories of language model were tested: large API-based models (Gemini 2.0 Flash and Gemini 2.5 Flash) and locally hosted open-source models of significantly smaller scale (deepseek-r1:7b and llama3.1:8b via Ollama). [TODO: specify which datasets/tasks (e.g. which organ/modality from Decathlon, which collection from TCIA) — also add references.] 
 \section{Results}
 
 \subsection{Phase 1 - Model Experimentation}

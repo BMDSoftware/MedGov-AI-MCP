@@ -213,7 +213,7 @@ environment). Tool names are prefixed with the server name
 (e.g., \texttt{monai.run\_inference}, \texttt{radlex.generate\_report}),
 providing unambiguous namespacing across servers. All servers
 communicate over stdio transport. The available servers and their
-clinical functions are listed in Table~\ref{tab:mcp-servers}.
+clinical functions are listed in Table~\ref{tab:mcp-servers}, exposing 33 tools in total.
 
 \begin{table}[t]
   \caption{MCP Servers and Clinical Functions}
@@ -248,77 +248,62 @@ and every existing server remain unchanged. This is the property that makes MCP 
 \subsection{MCP Server Layer}
 
 Each MCP server encapsulates a distinct clinical capability and exposes
-it as a set of named, schema-defined tools. The agent has no hardcoded
+it as a set of named, schema-defined tools (Table~\ref{tab:mcp-servers}). The agent has no hardcoded
 knowledge of any server's internals. It discovers available tools at
 startup and selects among them based on context.
 
 \textbf{Mcp-monai} is the medical image inference server, built on the
 MONAI framework~\cite{monai} with PyTorch as the underlying deep
-learning backend. \texttt{analyze\_image} detects the imaging modality
-and body part automatically from pixel statistics and file metadata,
-and returns a ranked list of recommended models. \texttt{list\_models}
-filters the model catalogue by modality, body part, or category.
-\texttt{download\_model} retrieves a MONAI bundle from HuggingFace Hub
-and caches it locally. \texttt{run\_inference} executes a segmentation
-or detection model using a sliding window strategy to handle the
-variable dimensions of 3D medical volumes, and submits the job to the
-background task queue to avoid blocking the session.
-\texttt{get\_monai\_info} returns the current MONAI and PyTorch version
-and GPU availability. Bundled models cover spleen segmentation on CT,
-pancreas and tumour segmentation on CT, lung nodule detection on CT,
-brain tumour segmentation on multi-channel MRI, whole-body CT
-segmentation across 104 anatomical structures, and kidney segmentation
-using the UNEsT architecture.
+learning backend. It detects the imaging modality and body part
+automatically from pixel statistics and file metadata, returning a
+ranked list of recommended models. The model catalogue can be filtered
+by modality, body part, or category, and bundles are retrieved from
+HuggingFace Hub and cached locally on demand. Inference uses a sliding
+window strategy to handle the variable dimensions of 3D medical volumes. Bundled models cover spleen segmentation on CT, pancreas and
+tumour segmentation on CT, lung nodule detection on CT, brain tumour
+segmentation on multi-channel MRI, whole-body CT segmentation across
+104 anatomical structures, and kidney segmentation using the UNEsT
+architecture.
 
 \textbf{Mcp-radlex} provides structured radiology reporting through
-integration with the RadLex terminology standard.
-\texttt{list\_subspecialties} returns available radiological
-subspecialties. \texttt{find\_templates} searches the template
-catalogue by subspecialty or keyword. \texttt{get\_template\_schema}
-fetches the full field structure of a given template, including
-required and optional fields. \texttt{generate\_report} populates a
-template with agent-provided findings and returns a structured,
-validated report. This server closes the loop between inference output
-and clinical documentation: the agent receives segmentation results,
-interprets them, and produces a report conforming to a standard
-radiological schema rather than free text.
+integration with the RadLex terminology standard. The agent can browse
+available radiological subspecialties, search the template catalogue by
+subspecialty or keyword. When populating a report from raw inference
+results, the server uses MCP sampling to delegate the mapping of
+segmentation outputs to template fields back to the host LLM, which
+also generates the findings narrative, impression, and recommendations.
+This closes the loop between inference output and clinical
+documentation: the agent receives segmentation results, interprets
+them, and produces a report conforming to a standard radiological
+schema rather than free text.
 
 \textbf{Mcp-utils} provides general-purpose filesystem and DICOM
-operations that underpin every clinical workflow. \texttt{parse\_dicom}
-extracts the full metadata of a single DICOM file (modality, body
-part, patient identifiers, acquisition parameters, and pixel data
-statistics) while \texttt{parse\_dicom\_directory} applies the same
-extraction across an entire directory. On the filesystem side, the
-server exposes tools for reading, writing, moving, copying, and
-deleting files, listing directory contents, and searching by pattern.
+operations that underpin every clinical workflow. It extracts the full
+metadata of a DICOM file, including modality, body part, patient
+identifiers, acquisition parameters, and pixel data statistics, and can
+apply the same extraction across an entire directory. On the filesystem side, the
+server supports reading, writing, moving, copying, and deleting files,
+listing directory contents, and searching by pattern.
 
 \textbf{Mcp-cellpose} provides cell segmentation for pathology
-workflows using the Cellpose universal model (cpsam, v4). It exposes
-segmentation tools for both 2D and 3D inputs, handling the different
-dimensionalities encountered in histology and volumetric imaging.
-\texttt{save\_overlay} composites the predicted cell mask onto the
-original image and writes the result to disk. GPU availability is
-detected at startup with automatic CPU fallback.
+workflows using the Cellpose universal model (cpsam, v4). It supports
+both 2D and 3D inputs, handling the different dimensionalities
+encountered in histology and volumetric imaging, and can composite the
+predicted cell mask onto the original image for visual inspection. GPU
+availability is detected at startup with automatic CPU fallback.
 
 \textbf{Mcp-ipath} integrates with the iPath telepathology platform,
-which aggregates whole slide images (WSI) and DICOM series via
-Dicoogle and DICOMweb. \texttt{fetch\_thumbnail} retrieves a scaled
-preview of a WSI by UID\@. \texttt{get\_slide\_dimensions} returns full
-pixel dimensions. \texttt{scale\_roi\_to\_slide} converts a
-region-of-interest across resolution levels. \texttt{fetch\_roi}
-retrieves a specific region at a given resolution without downloading
-the full WSI\@. \texttt{fetch\_dicom\_instance} and
-\texttt{get\_series\_instances} provide access to individual DICOM
-frames and series.
+which aggregates whole slide images (WSI) and DICOM series via Dicoogle
+and DICOMweb. It supports thumbnail retrieval, resolution-level
+coordinate mapping, and region-of-interest extraction at arbitrary
+resolution levels without downloading the full WSI, as well as access
+to individual DICOM frames and series.
 
 \textbf{Mcp-skills} exposes the skill system to the agent as callable
-tools. \texttt{read\_skill\_file} loads a skill's entry point and
-returns its full content. \texttt{read\_references} retrieves a
-reference document stored alongside a skill.
-\texttt{read\_asset} returns an asset associated with a skill, such as
-a report template. \texttt{execute\_script} runs a shell command
-defined within a skill and returns its output. The skills system is
-described in detail in Section~\ref{sec:skills}.
+tools, allowing it to load a skill's entry point and its associated
+reference documents and assets, and to execute predefined scripts
+associated with a skill. The skills system is described in detail in
+Section~\ref{sec:skills}.
 
 
 % tihs part is very nice, but also since you were more in debt into this i cant critique it as much
@@ -469,7 +454,7 @@ A whole slide image is provided. The system runs tumour detection and cell segme
 
 \subsection{Evaluation Setup}
 
-Evaluation was structured in three phases. Phase 1 evaluates both API-based and locally hosted language models for tool-calling reliability in clinical workflows. Phase 2 assesses skill-guided execution qualitatively, examining whether the agent correctly loaded the applicable skill, followed the prescribed workflow order, and avoided the failure modes the skill is designed to prevent. Phase 3 runs the two use cases end to end, comparing autonomous and manual workflows, evaluated by task completion and qualitative assessment of outputs, specifically whether the radiology report was correctly filled and whether segmentation completed successfully.
+Evaluation was structured in three phases. Phase 1 evaluates both API-based and locally hosted language models for tool-calling reliability in clinical workflows. Phase 2 evaluates whether the agent can operate autonomously in clinical workflows. It first examines how skills provide the workflow constraints that make autonomous execution reliable, showing that the agent follows the correct tool sequence and guard conditions without human intervention. It then compares assisted and autonomous execution of the same task to assess whether human-in-the-loop confirmation changes the outcome, or whether the agent produces equivalent results in both modes. Phase 3 runs the two use cases end to end, comparing autonomous and manual workflows, evaluated by task completion and qualitative assessment of outputs, specifically whether the radiology report was correctly filled and whether segmentation completed successfully.
 
 All experiments were run on a machine with an NVIDIA GeForce RTX 3050 6~GB GPU, using MONAI 1.5.1 and PyTorch 2.5.1 for inference. Input data consisted of publicly available DICOM datasets from the Cancer Imaging Archive~\cite{tcia} and the Medical Segmentation Decathlon~\cite{decathlon}. Two categories of language model were tested: large API-based models (Gemini 2.0 Flash and Gemini 2.5 Flash) and locally hosted open-source models of significantly smaller scale (deepseek-r1:7b and llama3.1:8b via Ollama). [TODO: specify which datasets/tasks (e.g. which organ/modality from Decathlon, which collection from TCIA) — also add references.] 
 \section{Results}
@@ -478,9 +463,18 @@ All experiments were run on a machine with an NVIDIA GeForce RTX 3050 6~GB GPU, 
 % Gemini vs Ollama for tool calling in clinical workflows
 % local versus API, limitations, pros and cons
 
-\subsection{Phase 2 - MCP Tools and Skills}
-% tool discovery at startup, dynamic registration
-% skills experimentation: advantages, disadvantages, findings
+\subsection{Phase 2 - Autonomous Agent Execution}
+
+\subsubsection{Skill-Guided Execution}
+% show the skill providing workflow constraints for autonomous execution
+% trace Use Case 2 with skill active: correct tool sequence, guard conditions followed
+% argue that skills are what make autonomous mode trustworthy
+
+\subsubsection{Assisted vs Autonomous Mode}
+% run the same task in both modes
+% show the tool call sequence was identical in both
+% conclusion: assisted mode is a transparency mechanism, not a correction mechanism
+% this validates autonomous mode for event-driven workflows (Use Case 2)
 
 
 

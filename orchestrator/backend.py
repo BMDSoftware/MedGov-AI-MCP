@@ -1868,6 +1868,17 @@ async def run_diagnostics():
     else:
         results["monai_stderr"] = None
 
+    # Last Cellpose stderr (crash output from subprocess)
+    cellpose_log = app_root / "orchestrator" / "data" / "cellpose_stderr.log"
+    if cellpose_log.exists():
+        try:
+            text = cellpose_log.read_text(errors="replace")
+            results["cellpose_stderr"] = text[-4000:] if len(text) > 4000 else text
+        except Exception as e:
+            results["cellpose_stderr"] = f"error reading log: {e}"
+    else:
+        results["cellpose_stderr"] = None
+
     # Uploads directory
     uploads = app_root / "orchestrator" / "data" / "uploads"
     try:

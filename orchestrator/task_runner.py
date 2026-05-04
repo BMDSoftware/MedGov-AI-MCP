@@ -573,8 +573,16 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
         env={**os.environ, **cellpose_cfg.get("env", {})},
     )
 
+    stderr_log = Path(__file__).parent / "data" / "cellpose_stderr.log"
+    stderr_log.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(stderr_log, "a") as _errfp:
+        _errfp.write(f"\n--- cellpose start: {image_path} ({model_type}) ---\n")
+
     async with AsyncExitStack() as stack:
-        read, write = await stack.enter_async_context(stdio_client(params))
+        errlog = open(stderr_log, "a")  # noqa: WPS515, kept open for subprocess lifetime
+        stack.callback(errlog.close)
+        read, write = await stack.enter_async_context(stdio_client(params, errlog=errlog))
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
 

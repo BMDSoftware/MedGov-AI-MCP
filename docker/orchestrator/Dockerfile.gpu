@@ -60,7 +60,7 @@ RUN python3.11 -m venv mcp-cellpose/venv \
        else TORCH_CUDA=cu118; fi \
     && echo "CUDA ${CUDA_VERSION} detected → pre-installing PyTorch ${TORCH_CUDA}" \
     && mcp-cellpose/venv/bin/pip install \
-       torch torchvision \
+       "torch==2.11.0" torchvision \
        --index-url https://download.pytorch.org/whl/${TORCH_CUDA} \
     && mcp-cellpose/venv/bin/pip install -r mcp-cellpose/requirements.txt
 

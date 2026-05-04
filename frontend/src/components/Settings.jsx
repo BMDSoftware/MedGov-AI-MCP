@@ -391,6 +391,21 @@ function Settings({ onModeChange, appMode }) {
                 </div>
               )}
 
+              {/* Cellpose stderr */}
+              {diagData.cellpose_stderr !== undefined && (
+                <div className={`diag-section ${diagData.cellpose_stderr ? '' : 'diag-ok'}`}>
+                  <div className="diag-section-title">
+                    <span className="diag-dot" />
+                    Cellpose segmentation log (last 4KB)
+                    {!diagData.cellpose_stderr && <span className="diag-badge">NO LOG YET</span>}
+                  </div>
+                  {diagData.cellpose_stderr
+                    ? <pre className="diag-pre">{diagData.cellpose_stderr}</pre>
+                    : <p className="diag-empty">Run a segmentation first, crash output will appear here.</p>
+                  }
+                </div>
+              )}
+
               {/* Uploads */}
               {diagData.uploads && (
                 <div className={`diag-section ${diagData.uploads.exists ? 'diag-ok' : 'diag-err'}`}>

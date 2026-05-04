@@ -318,49 +318,56 @@ Section~\ref{sec:skills}.
 \subsection{Skills System}
 \label{sec:skills}
 
-MCP defines what tools are available to the agent; it does not define
-how those tools should be used together for a given task. This gap
-becomes significant in workflows that span multiple MCP servers, where
-the agent must coordinate tools from different servers in a specific
-order to reach a result. The correct sequence of operations for a
-DICOM analysis workflow (parse the file with \texttt{mcp-utils},
-analyze the image and run inference with \texttt{mcp-monai}, then
-locate a template and generate a report with \texttt{mcp-radlex})
-is not derivable from tool schemas alone. It requires explicit
-sequencing constraints, guard conditions, and cross-server coordination
-patterns that sit above the capability level of any individual tool.
-The skills system encodes this workflow-level knowledge in a form the
-agent can load on demand without any retraining.
-
-This workflow knowledge could in principle be embedded directly in the
-system prompt, but doing so has two drawbacks. First, it increases
-token consumption on every request, including those that do not
-require that domain. Second, a large system prompt increases the risk
-of the LLM overlooking or misapplying specific instructions, a
-well-documented failure mode in prompt engineering~\cite{jaroslawicz2025ifscale}. Skills
-address both problems by keeping the system prompt minimal and loading
-workflow detail only when the agent determines it is needed for the
-current task.
+The skills system provides a mechanism for encoding domain-specific
+behavioral guidance that the agent loads on demand. A skill body can
+take different forms depending on the domain: a step-by-step workflow
+protocol with sequencing constraints and cross-server coordination, or
+a body of domain knowledge such as regulatory standards, clinical
+report templates, and API usage patterns. What these forms share is
+that the guidance cannot be derived from MCP tool schemas alone and is
+too domain-specific or voluminous to embed permanently in the system
+prompt. Embedding it permanently would increase token consumption on
+every request, including those that do not require that domain, and
+would increase the risk of the LLM overlooking or misapplying
+instructions buried in a large prompt, a well-documented failure mode
+in prompt engineering~\cite{jaroslawicz2025ifscale}. Skills address
+both problems by keeping the system prompt minimal and loading domain
+detail only when the agent determines it is needed for the current
+task.
 
 \subsubsection{Structure}
-A skill separates awareness from detail. Every available skill is surfaced to the agent at startup through a short name and natural language description kept permanently in the system prompt, while the full skill body remains unloaded until needed. When a request arrives, the agent reasons over these descriptions to identify the applicable skill, then loads its body on demand as operating instructions for that task. This enables progressive disclosure: the context window carries only a lightweight index at rest, expanding to include full workflow detail only for the domain currently in use.
+A skill separates awareness from detail. Every available skill is
+surfaced to the agent at startup through a short name and natural
+language description kept permanently in the system prompt, while the
+full skill body remains unloaded until needed. When a request arrives,
+the agent reasons over these descriptions to identify the applicable
+skill, then loads its body on demand as operating instructions for that
+task. This enables progressive disclosure: the context window carries
+only a lightweight index at rest, expanding to include full domain
+detail only for the domain currently in use.
 
-A skill body can itself be hierarchical, containing an entry-level document that routes to more specific sub-documents, reference material, templates, and scripts, each loaded independently as the task requires. This allows a single skill to cover a broad domain without forcing the agent to load everything at once.
+A skill body can itself be hierarchical, containing an entry-level
+document that routes to more specific sub-documents, reference
+material, templates, and scripts, each loaded independently as the
+task requires. This allows a single skill to cover a broad domain
+without forcing the agent to load everything at once.
 
 \subsubsection{Implemented Skills}
 
-One skill is currently deployed in the system. The
-\textbf{medical-imaging} skill covers any task involving medical image
-data. Its \texttt{SKILL.md} functions as a workflow router: it presents
-two available workflows (DICOM analysis with report generation, and
-whole slide image tumour detection) and instructs the agent to load
-the corresponding reference document before proceeding. Each reference
-document specifies which tools to call, in what order, what guard
-conditions apply (for example, aborting if a DICOM series is not a 3D
-volume), how to handle intermediate results, and what the expected
-output is. This separation between the router and the workflow
-documents means that new imaging workflows can be added to the skill
-without modifying the router or any code.
+Four skills are currently deployed in the system. The
+\textbf{dicom-analysis} skill encodes the tool sequence and guard
+conditions for DICOM analysis ending in a radiology report; the
+\textbf{wsi-tumor-detection} skill encodes the visual inspection and
+cell-counting workflow for whole-slide pathology images. The
+\textbf{clinical-reports} and \textbf{pydicom} skills are publicly
+available community skills~\cite{kdense_scientific_skills}: clinical-reports encodes
+regulatory standards and structured templates for clinical
+documentation, and pydicom provides API guidance for reading, writing,
+anonymizing, and manipulating DICOM files programmatically. The imaging
+skills illustrate skills as workflow protocols; the community skills
+illustrate skills as domain knowledge packages, showing that the same
+mechanism covers both forms of guidance and that externally maintained
+skills can be adopted without modification.
 
 
 \subsubsection{Governance}
@@ -375,7 +382,6 @@ software deployment required. This separates workflow maintenance from
 software development, which is relevant in clinical settings where the
 people who understand the correct procedure are not necessarily the
 people who maintain the codebase.
-
 
 % the repetition guard needs to be explained why its in place, why the doube repetition was a problem, how we fixed it
 % wew should clarify more the behavior on the multiple tool calls being returned ina  single llm response

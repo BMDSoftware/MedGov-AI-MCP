@@ -202,7 +202,7 @@ for local inference. Both backends implement the same internal
 interface.
 
 \subsubsection*{MCP Server Layer}
-The tool layer consists of seven MCP servers, each running as an
+The tool layer consists of six MCP servers, each running as an
 independent process in its own isolated Python virtual environment.
 Isolation at the process level is a deliberate design choice: it
 prevents dependency conflicts between servers with incompatible
@@ -211,10 +211,9 @@ installation required by \texttt{mcp-monai} and the CPU-only
 installation used elsewhere, which cannot coexist in a single
 environment). Tool names are prefixed with the server name
 (e.g., \texttt{monai.run\_inference}, \texttt{radlex.generate\_report}),
-providing unambiguous namespacing across servers. Six servers
-communicate over stdio transport; the FHIR server uses HTTP transport
-to connect to an external endpoint. The available servers and their
-clinical functions are listed in Table~\ref{tab:mcp-servers}.
+providing unambiguous namespacing across servers. All servers
+communicate over stdio transport. The available servers and their
+clinical functions are listed in Table~\ref{tab:mcp-servers}, exposing 33 tools in total.
 
 \begin{table}[t]
   \caption{MCP Servers and Clinical Functions}
@@ -230,7 +229,6 @@ clinical functions are listed in Table~\ref{tab:mcp-servers}.
     mcp-skills   & stdio & Skill workflow loading and execution \\
     mcp-ipath    & stdio & iPath telepathology integration \\
     mcp-cellpose & stdio & 2D/3D cell segmentation (Cellpose) \\
-    mcp-fhir     & HTTP  & FHIR patient data retrieval \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -250,77 +248,62 @@ and every existing server remain unchanged. This is the property that makes MCP 
 \subsection{MCP Server Layer}
 
 Each MCP server encapsulates a distinct clinical capability and exposes
-it as a set of named, schema-defined tools. The agent has no hardcoded
+it as a set of named, schema-defined tools (Table~\ref{tab:mcp-servers}). The agent has no hardcoded
 knowledge of any server's internals. It discovers available tools at
 startup and selects among them based on context.
 
 \textbf{Mcp-monai} is the medical image inference server, built on the
 MONAI framework~\cite{monai} with PyTorch as the underlying deep
-learning backend. \texttt{analyze\_image} detects the imaging modality
-and body part automatically from pixel statistics and file metadata,
-and returns a ranked list of recommended models. \texttt{list\_models}
-filters the model catalogue by modality, body part, or category.
-\texttt{download\_model} retrieves a MONAI bundle from HuggingFace Hub
-and caches it locally. \texttt{run\_inference} executes a segmentation
-or detection model using a sliding window strategy to handle the
-variable dimensions of 3D medical volumes, and submits the job to the
-background task queue to avoid blocking the session.
-\texttt{get\_monai\_info} returns the current MONAI and PyTorch version
-and GPU availability. Bundled models cover spleen segmentation on CT,
-pancreas and tumour segmentation on CT, lung nodule detection on CT,
-brain tumour segmentation on multi-channel MRI, whole-body CT
-segmentation across 104 anatomical structures, and kidney segmentation
-using the UNEsT architecture.
+learning backend. It detects the imaging modality and body part
+automatically from pixel statistics and file metadata, returning a
+ranked list of recommended models. The model catalogue can be filtered
+by modality, body part, or category, and bundles are retrieved from
+HuggingFace Hub and cached locally on demand. Inference uses a sliding
+window strategy to handle the variable dimensions of 3D medical volumes. Bundled models cover spleen segmentation on CT, pancreas and
+tumour segmentation on CT, lung nodule detection on CT, brain tumour
+segmentation on multi-channel MRI, whole-body CT segmentation across
+104 anatomical structures, and kidney segmentation using the UNEsT
+architecture.
 
 \textbf{Mcp-radlex} provides structured radiology reporting through
-integration with the RadLex terminology standard.
-\texttt{list\_subspecialties} returns available radiological
-subspecialties. \texttt{find\_templates} searches the template
-catalogue by subspecialty or keyword. \texttt{get\_template\_schema}
-fetches the full field structure of a given template, including
-required and optional fields. \texttt{generate\_report} populates a
-template with agent-provided findings and returns a structured,
-validated report. This server closes the loop between inference output
-and clinical documentation: the agent receives segmentation results,
-interprets them, and produces a report conforming to a standard
-radiological schema rather than free text.
+integration with the RadLex terminology standard. The agent can browse
+available radiological subspecialties, search the template catalogue by
+subspecialty or keyword. When populating a report from raw inference
+results, the server uses MCP sampling to delegate the mapping of
+segmentation outputs to template fields back to the host LLM, which
+also generates the findings narrative, impression, and recommendations.
+This closes the loop between inference output and clinical
+documentation: the agent receives segmentation results, interprets
+them, and produces a report conforming to a standard radiological
+schema rather than free text.
 
 \textbf{Mcp-utils} provides general-purpose filesystem and DICOM
-operations that underpin every clinical workflow. \texttt{parse\_dicom}
-extracts the full metadata of a single DICOM file (modality, body
-part, patient identifiers, acquisition parameters, and pixel data
-statistics) while \texttt{parse\_dicom\_directory} applies the same
-extraction across an entire directory. On the filesystem side, the
-server exposes tools for reading, writing, moving, copying, and
-deleting files, listing directory contents, and searching by pattern.
+operations that underpin every clinical workflow. It extracts the full
+metadata of a DICOM file, including modality, body part, patient
+identifiers, acquisition parameters, and pixel data statistics, and can
+apply the same extraction across an entire directory. On the filesystem side, the
+server supports reading, writing, moving, copying, and deleting files,
+listing directory contents, and searching by pattern.
 
 \textbf{Mcp-cellpose} provides cell segmentation for pathology
-workflows using the Cellpose universal model (cpsam, v4). It exposes
-segmentation tools for both 2D and 3D inputs, handling the different
-dimensionalities encountered in histology and volumetric imaging.
-\texttt{save\_overlay} composites the predicted cell mask onto the
-original image and writes the result to disk. GPU availability is
-detected at startup with automatic CPU fallback.
+workflows using the Cellpose universal model (cpsam, v4). It supports
+both 2D and 3D inputs, handling the different dimensionalities
+encountered in histology and volumetric imaging, and can composite the
+predicted cell mask onto the original image for visual inspection. GPU
+availability is detected at startup with automatic CPU fallback.
 
 \textbf{Mcp-ipath} integrates with the iPath telepathology platform,
-which aggregates whole slide images (WSI) and DICOM series via
-Dicoogle and DICOMweb. \texttt{fetch\_thumbnail} retrieves a scaled
-preview of a WSI by UID\@. \texttt{get\_slide\_dimensions} returns full
-pixel dimensions. \texttt{scale\_roi\_to\_slide} converts a
-region-of-interest across resolution levels. \texttt{fetch\_roi}
-retrieves a specific region at a given resolution without downloading
-the full WSI\@. \texttt{fetch\_dicom\_instance} and
-\texttt{get\_series\_instances} provide access to individual DICOM
-frames and series.
+which aggregates whole slide images (WSI) and DICOM series via Dicoogle
+and DICOMweb. It supports thumbnail retrieval, resolution-level
+coordinate mapping, and region-of-interest extraction at arbitrary
+resolution levels without downloading the full WSI, as well as access
+to individual DICOM frames and series.
 
 \textbf{Mcp-skills} exposes the skill system to the agent as callable
-tools. \texttt{read\_skill\_file} loads a skill's entry point and
-returns its full content. \texttt{read\_references} retrieves a
-reference document stored alongside a skill.
-\texttt{read\_asset} returns an asset associated with a skill, such as
-a report template. \texttt{execute\_script} runs a shell command
-defined within a skill and returns its output. The skills system is
-described in detail in Section~\ref{sec:skills}.
+tools, allowing it to load a skill's entry point and its associated
+reference documents and assets, and to execute predefined scripts
+associated with a skill. The skills system is described in detail in
+Section~\ref{sec:skills}.
 
 
 % tihs part is very nice, but also since you were more in debt into this i cant critique it as much
@@ -335,91 +318,70 @@ described in detail in Section~\ref{sec:skills}.
 \subsection{Skills System}
 \label{sec:skills}
 
-MCP defines what tools are available to the agent; it does not define
-how those tools should be used in a given clinical domain. The correct
-sequence of operations for a CT lung workflow (parse DICOM, detect
-modality, select an appropriate segmentation model, run inference,
-retrieve results, fill a RadLex report template) is not derivable
-from tool schemas alone. It requires domain knowledge about clinical
-protocols, sequencing constraints, and the interpretation of
-intermediate results. The skills system encodes this knowledge in a
-form the agent can load on demand without any retraining.
-
-This knowledge could in principle be embedded directly in the system
-prompt, but doing so has two drawbacks. First, it increases token
-consumption on every request, including those that do not require that
-domain. Second, a large system prompt increases the risk of the LLM
-overlooking or misapplying specific instructions, a well-documented
-failure mode in prompt engineering~\cite{}. Skills address both
-problems by keeping the system prompt minimal and loading
-domain-specific protocol only when the agent determines it is needed
-for the current task.
+The skills system provides a mechanism for encoding domain-specific
+behavioral guidance that the agent loads on demand. A skill body can
+take different forms depending on the domain: a step-by-step workflow
+protocol with sequencing constraints and cross-server coordination, or
+a body of domain knowledge such as regulatory standards, clinical
+report templates, and API usage patterns. What these forms share is
+that the guidance cannot be derived from MCP tool schemas alone and is
+too domain-specific or voluminous to embed permanently in the system
+prompt. Embedding it permanently would increase token consumption on
+every request, including those that do not require that domain, and
+would increase the risk of the LLM overlooking or misapplying
+instructions buried in a large prompt, a well-documented failure mode
+in prompt engineering~\cite{jaroslawicz2025ifscale}. Skills address
+both problems by keeping the system prompt minimal and loading domain
+detail only when the agent determines it is needed for the current
+task.
 
 \subsubsection{Structure}
+A skill separates awareness from detail. Every available skill is
+surfaced to the agent at startup through a short name and natural
+language description kept permanently in the system prompt, while the
+full skill body remains unloaded until needed. When a request arrives,
+the agent reasons over these descriptions to identify the applicable
+skill, then loads its body on demand as operating instructions for that
+task. This enables progressive disclosure: the context window carries
+only a lightweight index at rest, expanding to include full domain
+detail only for the domain currently in use.
 
-Each skill is a directory containing a \texttt{SKILL.md} file as its
-entry point, written in YAML-frontmatter Markdown. The frontmatter
-defines the skill's name and a natural language description that is
-injected into the agent's system prompt at startup. When the agent
-encounters a task that matches a skill's description, it calls
-\texttt{skills.read\_skill\_file} to load the full content before
-taking any action in that domain. The skill file then acts as the
-agent's operating instructions for that workflow.
-
-The skill directory can contain additional resources alongside
-\texttt{SKILL.md}: reference documents that detail specific
-sub-workflows, assets such as report templates or annotated examples,
-and executable scripts that can be invoked via
-\texttt{skills.execute\_script}. This structure allows a single skill
-to encode multiple related workflows, with \texttt{SKILL.md} acting as
-a router that directs the agent to the appropriate reference file based
-on the user's request. This filesystem-based architecture enables
-progressive disclosure: the agent loads only the router at first, then
-fetches deeper protocol detail on demand, keeping the context window
-focused and avoiding unnecessary token consumption on workflows that
-are not relevant to the current task.
+A skill body can itself be hierarchical, containing an entry-level
+document that routes to more specific sub-documents, reference
+material, templates, and scripts, each loaded independently as the
+task requires. This allows a single skill to cover a broad domain
+without forcing the agent to load everything at once.
 
 \subsubsection{Implemented Skills}
 
-Two skills are currently deployed in the system. The
-\textbf{medical-imaging} skill covers any task involving medical image
-data. Its \texttt{SKILL.md} functions as a workflow router: it presents
-two available workflows (DICOM analysis with report generation, and
-whole slide image tumour detection) and instructs the agent to load
-the corresponding reference document before proceeding. Each reference
-document contains the complete step-by-step protocol for that workflow,
-including which tools to call, in what order, how to handle errors, and
-what the expected outputs are. This separation between the router and
-the protocol documents means that new imaging workflows can be added to
-the skill without modifying the router or any code.
+Four skills are currently deployed in the system. The
+\textbf{dicom-analysis} skill encodes the tool sequence and guard
+conditions for DICOM analysis ending in a radiology report; the
+\textbf{wsi-tumor-detection} skill encodes the visual inspection and
+cell-counting workflow for whole-slide pathology images. The
+\textbf{clinical-reports} and \textbf{pydicom} skills are publicly
+available community skills~\cite{kdense_scientific_skills}: clinical-reports encodes
+regulatory standards and structured templates for clinical
+documentation, and pydicom provides API guidance for reading, writing,
+anonymizing, and manipulating DICOM files programmatically. The imaging
+skills illustrate skills as workflow protocols; the community skills
+illustrate skills as domain knowledge packages, showing that the same
+mechanism covers both forms of guidance and that externally maintained
+skills can be adopted without modification.
 
-The \textbf{clinical-reports} skill covers structured documentation
-across a range of report types, including radiology and pathology
-diagnostic reports, case reports following CARE guidelines, clinical
-trial reports following ICH-E3 and related regulatory standards, and
-patient documentation formats such as SOAP notes, H\&P documents, and
-discharge summaries. It encodes compliance requirements (HIPAA, FDA,
-ICH-GCP) and provides templates and validation guidance that the agent
-applies when generating documentation. Unlike the medical-imaging
-skill, which was developed specifically for this work, the
-clinical-reports skill is a publicly available skill integrated without
-modification, demonstrating that third-party skills can be adopted
-into the system without any code changes.
 
 \subsubsection{Governance}
 
 A key property of this design is that skill files are plain text and
-can be updated by domain experts (clinicians, radiologists,
-pathologists) without touching the agent, the MCP servers, or any
-other part of the codebase. When a clinical protocol changes, the
-relevant reference document is updated and the agent adopts the new
-behaviour immediately on the next session, with no software deployment
-required. This operationalises the skills-as-updatable-protocol
-concept described by Xu and Yan~\cite{agentskillslargelanguage} in a
-concrete clinical setting, and directly addresses the governance gap
-they identified: the question of who maintains skill files and how they
-are kept current with clinical practice.
-
+can be updated without touching the agent, the MCP servers, or any
+other part of the codebase. When a workflow step changes (a
+different tool call order, a new guard condition, a revised output
+format) the relevant reference document is edited and the agent
+adopts the new behaviour immediately on the next session, with no
+software deployment required. This separates workflow maintenance from
+software development, which is relevant in clinical settings where the
+people who understand the correct procedure are not necessarily the
+people who maintain the codebase.
 
 % the repetition guard needs to be explained why its in place, why the doube repetition was a problem, how we fixed it
 % wew should clarify more the behavior on the multiple tool calls being returned ina  single llm response
@@ -432,12 +394,13 @@ The agent's operation is governed by an iterative execution loop that drives the
 
 \subsubsection{System Prompt and Session Initialisation}
 
-At the start of each session the agent receives a system prompt that establishes its role, its available tools, and its behavioural rules. The system prompt includes the list of available skills in structured XML, injected at startup after dynamic discovery, so the agent knows what clinical domains it can operate in before any user message arrives. It also includes explicit rules for tool usage: when to read a skill file before acting, when to queue a long-running operation to the background task runner rather than calling it inline, how to handle DICOM series directories versus individual files, and how to avoid repeating failed tool calls. Two variants of the system prompt exist: one for autonomous mode, which omits confirmation-related guidance, and one for assisted mode, which includes it.
+At the start of each session the agent receives a system prompt that establishes its role, its available tools, and its behavioural rules. The system prompt includes the list of available skills as a plain bulleted list of names and descriptions, injected at startup after dynamic discovery, so the agent knows what clinical domains it can operate in before any user message arrives. It also includes explicit rules for tool usage: when to read a skill file before acting, when to queue a long-running operation to the background task runner rather than calling it inline, how to handle DICOM series directories versus individual files, and how to avoid repeating failed tool calls. Two variants of the system prompt exist: one for autonomous mode, which omits confirmation-related guidance, and one for assisted mode, which includes it.
 
 \subsubsection{Iterative Reasoning and Tool Dispatch}
 
-Each iteration of the loop follows the same structure. The agent receives a prompt describing the current goal, any available files, and the results of all prior tool calls in the session. On the first iteration the prompt is minimal: goal, data, and file context. On subsequent iterations the prompt includes the execution history and the completion contract (described below), which the agent must evaluate before deciding its next action. The LLM responds with either one or more function calls, or a text response indicating that the goal is complete or that more information is needed. Multiple tool calls can be returned in a single LLM response and are executed sequentially within the same iteration, with all results collected and sent back to the LLM together before the next iteration begins. Function calls are parsed and dispatched to the appropriate MCP server via the tool registry. The result is appended to the execution history and the loop continues.
-A repetition guard prevents the agent from calling the same tool twice consecutively after two failures on that tool, forcing it to try a different approach rather than looping indefinitely on a broken call.
+Each iteration of the loop follows the same structure. The agent receives a prompt describing the current goal, any available files, and the results of all prior tool calls in the session. On the first iteration the prompt is minimal: goal, data, and file context. On subsequent iterations the prompt also includes the execution history, which the agent evaluates before deciding its next action. The LLM responds with either one or more function calls, or a text response indicating that the goal is complete or that more information is needed. Multiple tool calls can be returned in a single LLM response and are executed sequentially within the same iteration. All results are collected and returned to the LLM in a single message before the next iteration begins. Function calls are parsed and dispatched to the appropriate MCP server via the tool registry, and the result is appended to the execution history.
+
+A repetition guard addresses a failure mode observed during development in which the agent would attempt the same failing tool call repeatedly rather than trying an alternative approach, consuming iterations without making progress. The guard inspects the execution history before each tool call: if the same tool has failed twice in a row, the third attempt is blocked and an error message is injected into the history instructing the agent to try a different tool or approach.
 
 \subsubsection{Built-in Tools}
 
@@ -446,7 +409,6 @@ Alongside the MCP tools discovered at startup, the agent has access to a set of 
 \subsubsection{Operating Modes}
 
 The system supports two operating modes that can be selected per session. In \textbf{autonomous mode}, the agent executes tool calls without interruption from goal receipt to completion. This is the intended mode for event-driven workflows triggered by the workspace watcher, where no user is present to intervene. In \textbf{assisted mode} (referred to in the codebase as debug mode), the loop pauses before each tool call and returns a \texttt{confirmation\_required} response to the frontend, which presents the proposed tool name and arguments to the user for approval or rejection before execution resumes.
-
 
 
 % ill write this part i just wanna point out that we're still making changes so it might not be worth it finishing this right now
@@ -471,7 +433,7 @@ The system supports two operating modes that can be selected per session. In \te
 
 \subsection{****Workspace Monitoring and Event-Driven Triggering****}
 
-Clinical imaging data does not arrive through a chat interface; it is deposited into directories by PACS exporters, scanners, and laboratory instruments as part of existing institutional workflows. The workspace monitoring system bridges this gap by turning filesystem events into agent triggers, allowing MedGov-AI to participate in clinical workflows without requiring any modification to upstream systems.
+Not all clinical workflows are initiated by a user interacting with a chat interface. In many settings, imaging files are deposited into shared directories as part of existing institutional processes, with no operator present to trigger analysis manually. The workspace monitoring system addresses this by turning filesystem events into agent triggers, allowing MedGov-AI to process incoming files automatically without requiring modification to upstream workflows.
 
 \subsubsection{Architecture}
 
@@ -484,26 +446,41 @@ When a new file is detected, the service does not trigger the agent immediately.
 When the debounce window closes, the watcher copies the incoming files from the watched directory into the corresponding workspace directory and constructs a goal prompt that includes the workspace name, the list of received files, and the preconfigured prompt for that workspace. It then invokes the agent in autonomous mode, since no user is present to confirm tool calls. The agent proceeds through its standard execution loop: reading the appropriate skill file (if needed), parsing the files, running the required analysis, and producing the configured outputs. The entire activity log, including file detection events, agent actions, and results, is streamed to the frontend via SSE under the workspace's dedicated console channel, giving an operator real-time visibility even when the workflow was triggered without user interaction.
 
 
-% in the clinical relevance we talk about use cases? because its weird in a subsection from system architecture...
-\subsubsection{Clinical Relevance}
+\subsection{Use Cases}
 
-% here well have to put the machine that were working on depoyment and its stats and also yours
+Two clinical workflows were selected to evaluate the system. Together they cover the two imaging modalities the system targets, radiology and pathology, and exercise the full tool stack: DICOM parsing, segmentation inference, report generation, and whole slide image analysis. Both workflows can be initiated interactively through the chat interface or triggered automatically when files arrive in a monitored directory.
+
+\subsubsection{Radiology: DICOM Analysis and Report Generation}
+
+A clinician or automated trigger provides a DICOM file or series. The system identifies the study type, runs the appropriate segmentation model, and produces a structured preliminary radiology report matched to the modality and anatomy. Success is defined as a correctly identified study type, a completed segmentation, and a filled report template with findings mapped to the appropriate fields.
+
+\subsubsection{Pathology: Whole Slide Image Analysis}
+
+A whole slide image is provided. The system runs tumour detection and cell segmentation, returning segmentation results and a summary of the detected region. Success is defined as a completed segmentation run with quantitative output, specifically the detected region and cell count, returned without manual intervention.
 
 \subsection{Evaluation Setup}
-% the 3 experimental phases defined in the March 2026 meeting with the teacher
-% hardware: NVIDIA GeForce RTX 3050 6GB, MONAI 1.5.1, PyTorch 2.5.1
-% data: public DICOM datasets (Cancer Imaging Archive, Medical Segmentation Decathlon)
-% LLM backends tested: Gemini 2.0/2.5 Flash (API), Ollama deepseek-r1:7b and llama3.1:8b
 
+Evaluation was structured in three phases. Phase 1 evaluates both API-based and locally hosted language models for tool-calling reliability in clinical workflows. Phase 2 evaluates whether the agent can operate autonomously in clinical workflows. It first examines how skills provide the workflow constraints that make autonomous execution reliable, showing that the agent follows the correct tool sequence and guard conditions without human intervention. It then compares assisted and autonomous execution of the same task to assess whether human-in-the-loop confirmation changes the outcome, or whether the agent produces equivalent results in both modes. Phase 3 runs the two use cases end to end, comparing autonomous and manual workflows, evaluated by task completion and qualitative assessment of outputs, specifically whether the radiology report was correctly filled and whether segmentation completed successfully.
+
+All experiments were run on a machine with an NVIDIA GeForce RTX 3050 6~GB GPU, using MONAI 1.5.1 and PyTorch 2.5.1 for inference. Input data consisted of publicly available DICOM datasets from the Cancer Imaging Archive~\cite{tcia} and the Medical Segmentation Decathlon~\cite{decathlon}. Two categories of language model were tested: large API-based models (Gemini 2.0 Flash and Gemini 2.5 Flash) and locally hosted open-source models of significantly smaller scale (deepseek-r1:7b and llama3.1:8b via Ollama). [TODO: specify which datasets/tasks (e.g. which organ/modality from Decathlon, which collection from TCIA) — also add references.] 
 \section{Results}
 
 \subsection{Phase 1 - Model Experimentation}
 % Gemini vs Ollama for tool calling in clinical workflows
 % local versus API, limitations, pros and cons
 
-\subsection{Phase 2 - MCP Tools and Skills}
-% tool discovery at startup, dynamic registration
-% skills experimentation: advantages, disadvantages, findings
+\subsection{Phase 2 - Autonomous Agent Execution}
+
+\subsubsection{Skill-Guided Execution}
+% show the skill providing workflow constraints for autonomous execution
+% trace Use Case 2 with skill active: correct tool sequence, guard conditions followed
+% argue that skills are what make autonomous mode trustworthy
+
+\subsubsection{Assisted vs Autonomous Mode}
+% run the same task in both modes
+% show the tool call sequence was identical in both
+% conclusion: assisted mode is a transparency mechanism, not a correction mechanism
+% this validates autonomous mode for event-driven workflows (Use Case 2)
 
 
 

@@ -1873,7 +1873,7 @@ async def run_diagnostics():
     if cellpose_log.exists():
         try:
             text = cellpose_log.read_text(errors="replace")
-            results["cellpose_stderr"] = text[-4000:] if len(text) > 4000 else text
+            results["cellpose_stderr"] = text[-16000:] if len(text) > 16000 else text
         except Exception as e:
             results["cellpose_stderr"] = f"error reading log: {e}"
     else:

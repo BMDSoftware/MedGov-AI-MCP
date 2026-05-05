@@ -523,7 +523,7 @@ def _handle_cellpose(input_data: Dict, session_id: str) -> Dict:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        _MAX_CELLPOSE_SECS = 30 * 60  # 30 minutes hard cap
+        _MAX_CELLPOSE_SECS = 24 * 60 * 60  # 24 hour hard cap
 
         async def _run():
             if task_id:
@@ -636,6 +636,8 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
         # Hard 60s timeout — outlines_list can be slow on large images but should never
         # block indefinitely. If it times out we skip the overlay and return masks only.
         if isinstance(result, dict) and "output_path" in result:
+            with open(stderr_log, "a") as _f:
+                _f.write(f"[overlay start] mask={result['output_path']}\n")
             try:
                 overlay_result = await asyncio.wait_for(
                     session.call_tool(
@@ -654,8 +656,15 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
                     result["output_path"] = overlay_data["overlay_path"]
             except asyncio.TimeoutError:
                 print("[task_runner] Overlay generation timed out (>60s) — returning masks only")
+                with open(stderr_log, "a") as _f:
+                    _f.write("[overlay timeout] timed out after 60s\n")
             except Exception as overlay_err:
                 print(f"[task_runner] Overlay generation failed (non-fatal): {overlay_err}")
+                with open(stderr_log, "a") as _f:
+                    _f.write(f"[overlay error] {overlay_err}\n")
+            else:
+                with open(stderr_log, "a") as _f:
+                    _f.write("[overlay done]\n")
 
         return result
 

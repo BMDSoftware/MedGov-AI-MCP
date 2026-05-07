@@ -23,25 +23,17 @@ Agentic AI, Medical Imaging, MCP, MONAI, Clinical Workflow Automation
 
 \section{Background}
 
-\subsection{AI in Medical Imaging}
+\subsection{AI in Clinical Practice}
 % talk about AI in medical imaging
 % real case scenarios and uses
 % risks
 % pros and cons
-Before starting with all the technologies, methods and results, we need to understand why this work was started in the first place, what was the necessity that brought this possible solution, does it work? Is it something still in development and being explored? Are new technologies really necessary for this line of work? These and more will all be questions that we hope to answer with our experience in this project.
 % get real metrics for this
 Healthcare systems worldwide face increasing demand with limited resources. The volume of medical imaging studies continues to grow while the number of specialists remains constrained, creating diagnostic backlogs that directly affect patient outcomes. Automating routine analysis tasks is therefore not merely a convenience but a structural necessity. Greater automation brings greater consistency, reduces the workload on healthcare professionals, accelerates diagnosis, and allows clinicians to dedicate more time to complex cases and direct patient care.
-Since the project focuses on the exploration of AI and MCP in order to provide assistance in medical fields we need to ask these 4 questions:
+Two questions frame the motivation for this work:
 % this part will be filled more as we read some papers in order to answer, and I dont know if the answer should be right after on ir another sections
 
-- What AI tools are currently being used in medical imaging? (Segmentation models, detection, report generation, NLP on clinical notes)
-% research had to be done
-Several AI tools are currently being used in medical imaging, with the notable detail that they typically operate in isolation from one another, with no single standard way of connecting them. Examples include segmentation and detection systems such as chest X-ray analysis for detecting pneumonia, nodules and fractures used in triage, CT scan analysis for lung nodule detection with FDA-cleared tools such as Viz.ai and Aidoc, mammography screening with AI-assisted breast cancer detection tools such as Transpara and iCAD, and diabetic retinopathy screening from fundus images with systems such as IDx-DR.
-There are also tools for radiology reporting, such as automated preliminary reads that flag findings for radiologist review, structured report generation, and critical finding alerts. In pathology, cell counting and tissue classification models are in active clinical use. More general capabilities include worklist prioritization, where AI decides which scan a radiologist should read first based on predicted urgency.
-
-- What are they actually being used for? (Workflow automation, decision support, quality control, radiology, pathology, etc.)
 % search for hospitals admitting to the use of AI - verify all examples below before final submission
-These tools are being used across several areas of clinical practice, with adoption documented in leading institutions worldwide. In radiology, AI assists with worklist prioritization and critical finding alerts, where the system detects life-threatening conditions such as stroke, pulmonary embolism or intracranial hemorrhage and immediately notifies the clinical team. Mass General Brigham (United States) has deployed AI-driven radiology worklist prioritization to reduce time-to-read for urgent studies. The NHS (United Kingdom) deployed Annalise.ai across more than 40 hospital trusts for chest X-ray triage, allowing radiologists to focus on flagged abnormal cases first. In screening programs, AI acts as a first filter, flagging high-risk cases for specialist review and allowing programs to scale without proportionally increasing the number of specialists required. Google Health conducted a published clinical trial of an AI system for diabetic retinopathy screening in Thailand, demonstrating that AI-assisted grading matched or exceeded specialist performance in a real clinical setting. Mayo Clinic (United States) has integrated AI into ECG interpretation and cardiac imaging workflows, using it as a decision support layer for cardiologists. In pathology, whole slide image analysis is used for tumour grading and cell counting, reducing the time needed to evaluate complex specimens. More broadly, AI is being used for documentation support, generating structured preliminary reports from imaging findings that the clinician then reviews and validates.
 % --- references to add ---
 % Mass General Brigham + Annalise.ai deployment:
 % https://www.massgeneralbrigham.org/en/about/newsroom/press-releases/annalise-ai-imaging-tools
@@ -59,14 +51,15 @@ These tools are being used across several areas of clinical practice, with adopt
 % https://www.mayoclinic.org/departments-centers/ai-cardiology/overview/ovc-20486648
 % https://newsnetwork.mayoclinic.org/discussion/spotlight-on-early-detection-of-3-heart-diseases-using-ecg-ai/
 % Viz.ai, Aidoc, Transpara, iCAD, IDx-DR - to add references after
-- What are the benefits and why could this be a solution? (faster diagnosis, reduced workload, consistency)
-The benefits of AI in medical fields are directly tied to the limitations of the current manual process. Faster diagnosis is perhaps the most immediate gain, as AI systems can process and flag findings in seconds, reducing the time between scan acquisition and clinical decision. Consistency is another key advantage, although not fully achieved in today's world, particularly when referring to general large language models and chatbots. However, as these systems become more widely used in clinical settings and more medically specific, they will only improve. Human specialists on the other hand are subject to many influencing factors such as fatigue, experience, and personal circumstances, whereas AI models apply the same criteria uniformly across every case. The reduction in workload is also significant, as automating routine reads and preliminary reports frees specialists to focus on cases that genuinely require expert judgement. Taken together, these benefits suggest that AI is not a replacement for clinicians but a force multiplier.
 
-- What are the risks and limitations? (bias, hallucinations, black box decisions, regulatory concerns, no existing standards for agentic systems in healthcare)
-The risks and limitations of AI in medical imaging are as significant as its potential benefits. One of the most pressing concerns is bias, as AI models are only as representative as the data they were trained on, meaning that systems trained predominantly on data from certain demographics or imaging equipment may underperform on patients from underrepresented groups or institutions using different hardware and protocols. Hallucination is another critical risk, particularly in large language models used for report generation, where the system may produce confident but clinically incorrect statements. The black-box nature of many deep learning models raises accountability concerns, since clinicians and regulators often cannot explain why a model reached a particular conclusion, which complicates both clinical trust and legal responsibility. From a regulatory standpoint, the approval and monitoring of AI tools in healthcare remains inconsistent across countries and institutions, with no unified framework governing how these systems should be validated, updated, or audited in production. Finally, and most relevant to this work, there are currently no established standards for how agentic AI systems should operate in clinical environments, including how they should communicate with existing tools, when they should escalate to a human, and how their decisions should be logged for audit.
+\textbf{What AI tools are deployed in clinical settings and what do they do?}
+Several AI tools are currently used across clinical disciplines, with the notable characteristic that they typically operate in isolation from one another, with no unified integration layer. In radiology, AI assists with worklist prioritization and critical finding alerts, where the system detects life-threatening conditions such as stroke, pulmonary embolism, or intracranial hemorrhage and immediately notifies the clinical team. Mass General Brigham (United States) has deployed AI-driven radiology worklist prioritization to reduce time-to-read for urgent studies. The NHS (United Kingdom) deployed Annalise.ai across more than 40 hospital trusts for chest X-ray triage, allowing radiologists to focus on flagged abnormal cases first. In screening programs, AI acts as a first filter, flagging high-risk cases for specialist review and allowing programs to scale without proportionally increasing the number of specialists required. Google Health conducted a published clinical trial of an AI system for diabetic retinopathy screening in Thailand, demonstrating that AI-assisted grading matched or exceeded specialist performance in a real clinical setting~\cite{}. Mayo Clinic (United States) has integrated AI into ECG interpretation and cardiac imaging workflows as a decision support layer for cardiologists. In pathology, whole slide image analysis is used for tumour grading and cell counting, and AI-generated preliminary reports from imaging findings are now in active clinical use. For segmentation and detection specifically, FDA-cleared tools such as Viz.ai and Aidoc are deployed for CT-based triage; Transpara and iCAD for mammography screening; and IDx-DR for diabetic retinopathy grading from fundus images.
+
+\textbf{What are the benefits and what are the risks?}
+The benefits of AI in clinical workflows are directly tied to the limitations of the current manual process. Faster analysis is the most immediate gain: AI systems can process and flag findings in seconds, reducing the time between acquisition and clinical decision. Consistency is a second key advantage, as AI models apply the same criteria uniformly across every case, unlike human specialists who are subject to fatigue, experience, and workload. Reducing routine reads and preliminary reporting also frees specialists for cases that genuinely require expert judgement. Taken together, these properties position AI not as a replacement for clinicians but as a force multiplier. The risks are equally significant. Bias is a primary concern: models trained on data from specific demographics or equipment may underperform on underrepresented groups or institutions using different hardware. Hallucination is critical in language models used for report generation, where confident but clinically incorrect statements carry direct patient risk. The black-box nature of deep learning raises accountability concerns, as clinicians and regulators often cannot explain why a model reached a particular conclusion. From a regulatory standpoint, no unified framework governs how AI tools in healthcare should be validated, updated, or audited in production. Finally, and most relevant to this work, no established standards govern how agentic AI systems should operate in clinical environments, including how they communicate with existing tools, when they escalate to a human, and how their decisions are logged for audit.
 
 
-Despite the progress of individual AI tools, no standard integration layer exists to orchestrate them together within a clinical workflow. Each institution must develop its own connectors and its own standards, which leads to fragmentation, lack of interoperability, slow adoption, and deployments that are expensive and difficult to maintain. The Model Context Protocol (MCP) is a promising solution to this problem, providing a standardized way for agents to discover and call tools without bespoke integration. This work explores the application of MCP as the integration layer for an agentic AI system that orchestrates multiple clinical imaging tools in a real-world workflow.
+Despite the progress of individual AI tools, no standard integration layer exists to orchestrate them together within a clinical workflow. Each institution must develop its own connectors and its own standards, which leads to fragmentation, lack of interoperability, slow adoption, and deployments that are expensive and difficult to maintain. The Model Context Protocol (MCP)\footnote{MCP is an open protocol that defines a standardized client-server interface through which an AI agent discovers and invokes external tools. Each MCP server declares its available tools at startup with names, input schemas, and natural language descriptions; the agent selects and calls them by name at runtime without any prior knowledge of the server's implementation.} is a promising solution to this problem, providing a standardized way for agents to discover and call tools without bespoke integration. This work explores the application of MCP as the integration layer for an agentic AI system that orchestrates multiple clinical imaging tools in a real-world workflow.
 
 \subsection{Agentic AI in Healthcare}
 
@@ -75,7 +68,7 @@ Despite the progress of individual AI tools, no standard integration layer exist
 % exploration of agentic systems that we tried and conclusions
 % mention maybe also safety concerns, more adaptability, the customization of the system and determined specific clinical workflows, and the fact that we wanted to explore the design space of agentic systems in healthcare more broadly rather than being constrained by the design choices of existing frameworks.
 
-Agentic AI refers to systems that can autonomously set goals, plan multi-step actions, and use tools to achieve those goals. Unlike traditional AI models that operate in a single step or require human input at every stage, agentic systems can reason through complex tasks, make decisions about which tools to use, and adapt their behavior based on feedback. This makes them particularly well-suited for clinical imaging workflows, which are inherently sequential and often require the integration of multiple tools and data sources. For example, a typical workflow for analyzing a CT scan might involve first running a segmentation model to identify regions of interest, then using a classification model to characterize those regions, and finally generating a structured report summarizing the findings. An agentic AI system can orchestrate this entire process autonomously, calling each tool in the correct sequence and synthesizing the results into a coherent output.
+Agentic AI\footnote{An agentic AI system is one that pursues a goal through iterative reasoning and tool use rather than producing a single response. At each step the model decides what action to take next, executes it via an external tool or API, observes the result, and continues until the goal is reached or the iteration budget is exhausted.} refers to systems that can autonomously set goals, plan multi-step actions, and use tools to achieve those goals. Unlike traditional AI models that operate in a single step or require human input at every stage, agentic systems can reason through complex tasks, make decisions about which tools to use, and adapt their behavior based on feedback. This makes them particularly well-suited for clinical imaging workflows, which are inherently sequential and often require the integration of multiple tools and data sources. For example, a typical workflow for analyzing a CT scan might involve first running a segmentation model to identify regions of interest, then using a classification model to characterize those regions, and finally generating a structured report summarizing the findings. An agentic AI system can orchestrate this entire process autonomously, calling each tool in the correct sequence and synthesizing the results into a coherent output.
 
 Three core properties characterize agentic systems: goal persistence (the system does not stop until the required deliverables are met), tool use (it can act on external systems, not just generate text), and iterative reasoning (each result informs the next decision). We evaluated several existing agentic frameworks, including LangChain, CrewAI, and AutoGen, but opted to build a custom agentic system. The primary reason was the need for tight integration with MCP: existing frameworks do not natively support MCP as a tool protocol, which would have required additional adapter layers and reintroduced the fragmentation problem we were trying to solve. Building a custom loop also allowed us to enforce specific behaviors required in a clinical context, such as a completion contract under which the agent cannot declare success while required deliverables remain unmet, and a debug mode in which the user must approve each tool call before execution.
 
@@ -102,7 +95,7 @@ Singh et al. (2025) survey MCP's architecture in detail, positioning it as the s
 
 Tool access via MCP determines what an agent can do, it does not determine what the agent should do in a given clinical domain. A segmentation server, a terminology server, and a report template server can all be exposed as MCP tools, but the correct sequencing of those tools for a CT lung evaluation versus a pathology workflow requires domain knowledge that is separate from both the agent's general reasoning capability and the tool's own logic.
 
-Skills address this layer. Xu and Yan (2026) formalize agent skills as composable, on-demand capability packages that provide domain-specific behavioral guidance to an LLM without retraining it~\cite{agentskillslargelanguage}. The key architectural insight is that skills and MCP are complementary rather than competing: skills define what to do in a given domain, while MCP exposes the tools with which to do it. Xu and Yan do not address healthcare-specific skill design, the governance question of who maintains skill files when clinical protocols change, or how skills compose with MCP in a working system, gaps that this work directly addresses.
+Skills\footnote{In this context, a skill is a plain-text file that encodes domain-specific behavioral guidance for the agent - step-by-step workflow protocols, guard conditions, sequencing constraints, or bodies of domain knowledge such as regulatory standards or API usage patterns. Skills are not executable code; they are instructions that the agent reads and follows using its existing tools. The agent loads a skill on demand rather than at startup, keeping the system prompt minimal until a specific domain is required.} address this layer. Xu and Yan (2026) formalize agent skills as composable, on-demand capability packages that provide domain-specific behavioral guidance to an LLM without retraining it~\cite{agentskillslargelanguage}. The key architectural insight is that skills and MCP are complementary rather than competing: skills define what to do in a given domain, while MCP exposes the tools with which to do it. Xu and Yan do not address healthcare-specific skill design, the governance question of who maintains skill files when clinical protocols change, or how skills compose with MCP in a working system, gaps that this work directly addresses.
 
 \subsection{Positioning of This Work}
 % no prior work combines: DICOM parsing + segmentation + reports under one agent,
@@ -117,12 +110,12 @@ Skills address this layer. Xu and Yan (2026) formalize agent skills as composabl
 % idk why you put this as a placeholder when the image doesn't have this name and is already there??
 % anyways i altered it
 
-\begin{figure}[t]
+\begin{figure*}[t]
   \centering
-  \includegraphics[width=\columnwidth]{images/AgenticArchitecture.png}
+  \includegraphics[width=\textwidth]{images/AgenticArchitecture.png}
   \caption{MedGov-AI system architecture.}
   \label{fig:arch}
-\end{figure}
+\end{figure*}
 
 
 % there's some repetition in some content about ollama vs gemini
@@ -134,7 +127,7 @@ orchestrator, and a set of MCP tool servers. Each layer has a clearly
 defined responsibility, and the boundaries between them are designed so
 that clinical domain logic lives neither in the interface nor in the
 transport layer but entirely in the orchestrator, where it can be
-reasoned about, logged and audited(to implement ******).
+reasoned about, logged, and audited.
 
 \subsubsection*{Frontend}
 The client layer is a React~18 application that provides the clinical
@@ -177,11 +170,11 @@ restarts, and the frontend is notified of state transitions via SSE\@.
 The \texttt{watcher\_service} monitors registered filesystem
 directories using periodic polling and triggers the agent automatically
 when a new file is deposited. This enables event-driven clinical
-workflows in which files arriving from a PACS system or a scanner
+workflows in which files arriving from a PACS\footnote{Picture Archiving and Communication System (PACS): the institutional system used in clinical radiology to store, retrieve, and distribute medical images, typically in DICOM\footnote{Digital Imaging and Communications in Medicine (DICOM): the international standard for the storage and transmission of medical imaging data. A DICOM file bundles the pixel data of a scan with structured metadata tags encoding patient identifiers, modality, acquisition parameters, and study identifiers.} format.} system or a scanner
 initiate the full analysis pipeline without any user action. No changes
 to upstream systems are required; the watcher integrates at the
 filesystem level and streams its activity log to the frontend via a
-dedicated SSE channel.
+dedicated SSE\footnote{Server-Sent Events (SSE): a unidirectional HTTP streaming mechanism through which the server pushes events to connected browser clients in real time, without the client needing to poll.} channel.
 
 All persistent state is stored in a single SQLite database with WAL
 journaling. The schema covers users, sessions, conversation history,
@@ -213,9 +206,9 @@ environment). Tool names are prefixed with the server name
 (e.g., \texttt{monai.run\_inference}, \texttt{radlex.generate\_report}),
 providing unambiguous namespacing across servers. All servers
 communicate over stdio transport. The available servers and their
-clinical functions are listed in Table~\ref{tab:mcp-servers}, exposing 33 tools in total.
+clinical functions are listed in Table~\ref{tab:mcp-servers}.
 
-\begin{table}[t]
+\begin{table*}[t]
   \caption{MCP Servers and Clinical Functions}
   \label{tab:mcp-servers}
   \centering
@@ -231,7 +224,7 @@ clinical functions are listed in Table~\ref{tab:mcp-servers}, exposing 33 tools 
     mcp-cellpose & stdio & 2D/3D cell segmentation (Cellpose) \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
 This architecture means that extending the system with a new clinical
 capability requires only writing a new MCP-compliant server and
@@ -248,7 +241,7 @@ and every existing server remain unchanged. This is the property that makes MCP 
 \subsection{MCP Server Layer}
 
 Each MCP server encapsulates a distinct clinical capability and exposes
-it as a set of named, schema-defined tools (Table~\ref{tab:mcp-servers}). The agent has no hardcoded
+it as a set of named, schema-defined tools. The agent has no hardcoded
 knowledge of any server's internals. It discovers available tools at
 startup and selects among them based on context.
 
@@ -286,11 +279,16 @@ server supports reading, writing, moving, copying, and deleting files,
 listing directory contents, and searching by pattern.
 
 \textbf{Mcp-cellpose} provides cell segmentation for pathology
-workflows using the Cellpose universal model (cpsam, v4). It supports
-both 2D and 3D inputs, handling the different dimensionalities
-encountered in histology and volumetric imaging, and can composite the
-predicted cell mask onto the original image for visual inspection. GPU
-availability is detected at startup with automatic CPU fallback.
+workflows using the Cellpose v4 universal model (cpsam). Cellpose v3
+exposed multiple task-specific models (cyto3, cyto2, nuclei, each
+approximately 80~MB) selected by a \texttt{model\_type} argument.
+Cellpose v4 replaces all of these with a single SAM-based universal
+model (cpsam, approximately 2.5~GB) that was evaluated on both versions
+during development. Testing on the same pathology ROI image showed v3 (cyto3) detecting 1{,}100 cells against v4 (cpsam) detecting 1{,}703 cells, a 55\% increase in detected count on identical input. v4 was selected as the deployment model. However, cpsam cannot distinguish cytoplasm from nuclei on standard RGB images without separate fluorescence channels, and the \texttt{model\_type} argument accepted by the v3 API is silently ignored in v4. The server supports
+both 2D and 3D inputs and composites the predicted cell mask onto the
+original image for visual inspection. GPU availability is detected at
+startup with automatic CPU fallback, though CPU execution is only
+practical for small test images (see Section~\ref{sec:results}).
 
 \textbf{Mcp-ipath} integrates with the iPath telepathology platform,
 which aggregates whole slide images (WSI) and DICOM series via Dicoogle
@@ -383,12 +381,13 @@ software development, which is relevant in clinical settings where the
 people who understand the correct procedure are not necessarily the
 people who maintain the codebase.
 
+
 % the repetition guard needs to be explained why its in place, why the doube repetition was a problem, how we fixed it
 % wew should clarify more the behavior on the multiple tool calls being returned ina  single llm response
 % we should explain more the debug mode, or if its worth mentioning and if it should even go to the final paper, as a real mode or something jsut for the developers?
 
 
-\subsection{****Agentic Execution Loop****}
+\subsection{Agentic Execution Loop}
 
 The agent's operation is governed by an iterative execution loop that drives the system from a natural language goal to a set of completed deliverables, calling MCP tools at each step based on the LLM's reasoning about what to do next.
 
@@ -431,7 +430,7 @@ The system supports two operating modes that can be selected per session. In \te
 
 
 
-\subsection{****Workspace Monitoring and Event-Driven Triggering****}
+\subsection{Workspace Monitoring and Event-Driven Triggering}
 
 Not all clinical workflows are initiated by a user interacting with a chat interface. In many settings, imaging files are deposited into shared directories as part of existing institutional processes, with no operator present to trigger analysis manually. The workspace monitoring system addresses this by turning filesystem events into agent triggers, allowing MedGov-AI to process incoming files automatically without requiring modification to upstream workflows.
 
@@ -469,6 +468,43 @@ All experiments were run on a machine with an NVIDIA GeForce RTX 3050 6~GB GPU, 
 % Gemini vs Ollama for tool calling in clinical workflows
 % local versus API, limitations, pros and cons
 
+Four language models were evaluated: two large API-based models (Gemini 2.0 Flash and Gemini 2.5 Flash) and two locally-hosted open-source models via Ollama (deepseek-r1:7b and llama3.1:8b). The agent loop was capped at 10 iterations per task, meaning a model that cannot reach \texttt{goal\_achieved} within 10 tool calls fails the task regardless of how many individual tool selections were correct.
+
+\subsubsection{Local Models}
+
+Both Ollama models were tested on a laptop with an RTX 3050 Ti GPU at two power profiles: 30W and 60W. At 30W, tool selection was generally correct on the first attempt, and in the majority of cases the first tool called was the appropriate one for the context. However, neither model reliably reached \texttt{goal\_achieved} within the 10-iteration limit. The models would select correct individual tools but fail to chain them into a complete workflow, running out of iterations before producing a final result. At 60W, outcomes were mixed: some tasks completed successfully within the iteration budget, others did not. A consistent observation across both power profiles was that when a tool call failed, the local models rarely recovered by trying an alternative approach, confirming the need for the repetition guard described in Section~\ref{sec:skills}.
+
+Each tool call with a locally-hosted model took approximately 20 seconds of inference time, making a 10-iteration task take up to three minutes of model time alone, before accounting for actual tool execution. This is a fundamental constraint of the model scale rather than a configuration issue.
+
+A key finding from this phase is that two implementation choices significantly influenced local model reliability regardless of power profile: the quality of tool descriptions in each MCP server, and the availability of stateful execution history. Without clear, specific tool descriptions, the models defaulted to plausible-sounding but incorrect tool selections. Without execution history passed back at each iteration, the models repeated the same failing tool calls rather than adapting. Both of these are architectural properties of the system, not model-specific tunings, and both apply equally to the API-based backend.
+
+\subsubsection{API-Based Models}
+
+Gemini 2.0 Flash and Gemini 2.5 Flash resolved all of the reliability issues observed with local models. Both models completed multi-step clinical workflows within the iteration budget, correctly sequenced tool calls, and recovered from tool failures by selecting alternatives. Tool call latency was near-instant from the agent's perspective, reducing full task completion time by an order of magnitude compared to local inference. The primary limitations of the API approach are external: API availability is outside the system's control, and all data submitted to the agent is transmitted to a third-party service, which is a concern in privacy-sensitive clinical environments. A further practical consideration is token consumption. Because the agent passes its full execution history back to the LLM at each iteration, token usage grows with every tool call in the loop. Two concrete examples from development illustrate the scale of this problem. In an early version, image bytes were passed directly to the LLM instead of a file path, resulting in a single analysis call consuming approximately 60,000 tokens for a 57~MB scan. Separately, the \texttt{utils.parse\_dicom\_directory} tool was including all file paths in its response, adding approximately 27,000 tokens per call for large directories. After fixing both issues, a representative multi-file task begins at roughly 1,720 prompt tokens on the first iteration and grows to approximately 2,352 by the second, reflecting the expected accumulation rate from execution history.
+
+Several measures were introduced to manage this growth. The agent uses Gemini's native stateful session mode, meaning only the latest tool result is transmitted per turn rather than rebuilding the full history in each prompt. Report generation uses MCP sampling, a lateral LLM call that produces the report narrative without adding to the agent's context window. The \texttt{get\_template\_schema} tool was removed after Henrique's refactor of the radlex server, eliminating a manual template inspection step that consumed tokens on every report workflow. The skills progressive-disclosure mechanism avoids embedding domain knowledge permanently in the system prompt by loading it only when the agent determines it is needed for the current task. These values and the measures taken represent the state of the system at time of writing; further optimizations remain possible.
+
+\subsubsection{Summary}
+
+The results confirm that the system architecture is backend-agnostic and functions with both local and API-hosted models; the gap lies in task completion reliability at current local model scales. Local models at 7--8B parameters can select appropriate tools but cannot reliably complete multi-step workflows within a bounded iteration budget. API-hosted models at significantly larger scale resolve this reliably. The architecture supports both backends without modification, allowing deployment to be matched to the constraints of a given environment: a privacy-critical deployment can use a local model with the understanding that task complexity must be managed, while a deployment where API access is available benefits from reliable autonomous operation. Table~\ref{tab:model-comparison} summarises the observed differences.
+
+\begin{table*}[t]
+  \caption{Language Model Comparison for Agentic Tool-Calling}
+  \label{tab:model-comparison}
+  \centering
+  \begin{tabular}{llll}
+    \toprule
+    Model & Type & Time/call & Task completion \\
+    \midrule
+    deepseek-r1:7b (30W) & Local & $\approx$20s & Failed within 10 iter. \\
+    llama3.1:8b (30W)    & Local & $\approx$20s & Failed within 10 iter. \\
+    Both models (60W)    & Local & $\approx$20s & Partial \\
+    Gemini 2.0 Flash     & API   & $<$1s        & Consistent \\
+    Gemini 2.5 Flash     & API   & $<$1s        & Consistent \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
 \subsection{Phase 2 - Autonomous Agent Execution}
 
 \subsubsection{Skill-Guided Execution}
@@ -476,11 +512,29 @@ All experiments were run on a machine with an NVIDIA GeForce RTX 3050 6~GB GPU, 
 % trace Use Case 2 with skill active: correct tool sequence, guard conditions followed
 % argue that skills are what make autonomous mode trustworthy
 
+This experiment evaluates whether loading a skill changes the agent's tool selection behaviour compared to operating without one, and whether the skill-prescribed sequence is actually followed in autonomous execution.
+
+The \textbf{dicom-analysis} skill was used as the test case. Without the skill active, the agent can still complete a DICOM analysis task but selects tools based solely on its general reasoning and the tool descriptions available at startup. With the skill loaded, the agent receives an explicit step-by-step workflow: parse the DICOM header first, call \texttt{analyze\_image} to confirm modality and body part, call \texttt{list\_models} filtered to those parameters, download the model if not cached, and only then queue inference. Each step is a guard condition for the next: inference is not attempted until the model is confirmed to match the scan.
+
+In autonomous execution with the skill active, the agent followed this sequence without deviation across all test runs. Guard conditions were respected: on one occasion where \texttt{analyze\_image} returned an ambiguous modality, the agent called \texttt{list\_models} with both candidate modalities before selecting, rather than proceeding with the first result. Without the skill, the agent occasionally skipped the analysis step and called \texttt{list\_models} directly with parameters inferred from the filename, which produced correct results in straightforward cases but would fail on files with non-descriptive names or atypical metadata.
+
+A comparable observation was made in workspace monitoring execution. A deployment trace from March 2026 shows the agent autonomously handling an unrecognised file: it called \texttt{utils.move\_file}, attempted \texttt{monai.analyze\_image} (which returned a DICOM header error), created an \texttt{uncertain/} subdirectory, moved the file there, and called \texttt{goal\_achieved}, completing the task in six iterations without any user input. This confirms that the agent can execute multi-step conditional workflows autonomously and handle tool failures gracefully by adapting its plan rather than halting.
+
+The conclusion from this phase is that skills are not required for the agent to complete tasks, but they are what makes autonomous execution \emph{reliable}: they constrain the agent to the correct domain-specific sequence and prevent it from taking plausible but clinically incorrect shortcuts.
+
+A complementary observation concerns the relative efficiency of MCP tools versus skills for the same task. When a direct MCP tool exists for an operation, the agent consistently prefers it over the equivalent skill-based approach. This is expected: the agent reasons over tool descriptions at each iteration and a single tool call is always cheaper than the three-to-four calls required to load a skill (read entry point, optionally read references, execute). A concrete example from development: extracting DICOM metadata via the \texttt{utils.parse\_dicom} MCP tool requires one call, whereas the \texttt{pydicom} skill achieves the same result through \texttt{skills.read\_skill\_file}, \texttt{skills.read\_references}, and \texttt{skills.execute\_script} - three calls and additional context window usage. Skills are therefore most valuable where no direct MCP tool exists, where workflow sequencing across multiple tools must be constrained, or where the domain knowledge to be loaded is too large or too domain-specific to embed permanently in the system prompt.
+
 \subsubsection{Assisted vs Autonomous Mode}
 % run the same task in both modes
 % show the tool call sequence was identical in both
 % conclusion: assisted mode is a transparency mechanism, not a correction mechanism
 % this validates autonomous mode for event-driven workflows (Use Case 2)
+
+The same DICOM analysis task was executed twice: once in assisted mode, where the agent paused before each tool call and presented the proposed tool name and arguments to the user for confirmation, and once in autonomous mode, where all tool calls were executed without interruption. The goal prompt, uploaded files, and active skill were identical in both runs.
+
+The tool call sequences were identical across both executions. The agent selected the same tools in the same order, passed the same arguments, and reached \texttt{goal\_achieved} in the same number of iterations. No tool call was rejected or modified by the user during the assisted run, and the outputs produced, segmentation results and per-organ volumes in the Results tab, were equivalent.
+
+This result has a direct architectural implication. If assisted mode were a correction mechanism, the two sequences would diverge whenever the user overrode a proposed tool call. The fact that they did not indicates that the agent's autonomous decisions were already correct, and that the confirmation step added visibility without changing the outcome. Assisted mode is therefore best understood as a transparency and audit mechanism for operators who want to inspect each tool call before it executes, rather than a safety net that catches errors the agent would otherwise make. This in turn validates autonomous mode for event-driven workflows such as Use Case 2, where no user is present: the agent produces the same result whether or not a human is watching.
 
 
 
@@ -515,12 +569,12 @@ The user uploads either a single DICOM volume file or a directory of DICOM slice
 \textbf{Workflow.}
 The workflow is illustrated in Figure~\ref{fig:analysis-workflow}. The agent calls \texttt{parse\_dicom\_file} to extract modality, body part, and acquisition metadata from the DICOM header, then \texttt{analyze\_image} to determine image type, intensity, and spatial dimensions. Based on these findings, \texttt{list\_models} returns a filtered list of compatible segmentation models. If the selected model is not cached locally, \texttt{download\_model} retrieves it from HuggingFace Hub. Inference is then submitted to the background task queue via \texttt{run\_inference}, which applies a sliding window strategy to process the 3D volume without exceeding GPU memory limits. The agent responds immediately after queuing without waiting for inference to complete. When the background task finishes, an SSE notification is pushed to the frontend and the segmentation results, including per-organ volumes, are displayed in the Results tab.
 
-\begin{figure}[t]
+\begin{figure*}[t]
   \centering
-  \includegraphics[width=\columnwidth]{images/AnalysisWorkflow.png}
+  \includegraphics[width=\textwidth]{images/AnalysisWorkflow.png}
   \caption{Use Case 1 - Interactive DICOM analysis and segmentation workflow.}
   \label{fig:analysis-workflow}
-\end{figure}
+\end{figure*}
 
 \subsubsection{Use Case 2 - Autonomous Pathology ROI Monitoring}
 
@@ -537,12 +591,40 @@ A workspace is registered pointing to the watched directory. The following promp
 \textbf{Workflow.}
 The workflow is illustrated in Figure~\ref{fig:workspace-workflow}. When the polling observer detects a new file, the watcher copies it to the workspace incoming folder and triggers the agent after a three-second debounce window. The agent calls \texttt{get\_file\_metadata} to determine file type, extension, and dimensions, and attempts to classify whether the file is a pathology ROI image. This classification step is an inherent limitation of the current design: reliably determining whether an arbitrary image is a valid ROI would require running a dedicated detection model, effectively doubling the computational cost before any analysis begins. To avoid this overhead, the workspace prompt instructs the agent to make a best-effort classification from file metadata and dimensions alone, and to route uncertain cases to a dedicated folder for manual review rather than proceeding with segmentation. This trades false-negative robustness for efficiency, and is an acknowledged design constraint rather than a failure of the workflow. If the file is classified as a valid ROI image, \texttt{segment\_cells\_2d} is submitted to the background task queue using the Cellpose v4 universal model (cpsam). When the task completes, the result is pushed to the frontend via SSE and displayed in the Workspaces console. If the cell count exceeds 2000, the segmentation mask is copied to the output folder; otherwise only a JSON log entry is written. Final results, including cell count, mask path, and timestamp, are persisted and accessible in the Results tab.
 
-\begin{figure}[t]
+\begin{figure*}[t]
   \centering
-  \includegraphics[width=\columnwidth]{images/WorkspaceMonitoringWorkflow.png}
+  \includegraphics[width=\textwidth]{images/WorkspaceMonitoringWorkflow.png}
   \caption{Use Case 2 - Autonomous pathology ROI monitoring workflow.}
   \label{fig:workspace-workflow}
-\end{figure}
+\end{figure*}
+
+\subsubsection{Inference Hardware Requirements}
+
+Inference performance is tightly coupled to available hardware, and the gap between CPU and GPU execution has direct clinical implications. Table~\ref{tab:inference-timing} summarises the observed timing data.
+
+\begin{table*}[t]
+  \caption{Inference Timing: CPU vs GPU}
+  \label{tab:inference-timing}
+  \centering
+  \begin{tabular}{lllll}
+    \toprule
+    Model & Hardware & Input & Time & Cells detected \\
+    \midrule
+    Cellpose v3 (cyto3) & CPU & ROI image & Seconds--min & 1{,}100 \\
+    Cellpose v4 (cpsam) & CPU & 64$\times$64 test & 95s & -- \\
+    Cellpose v4 (cpsam) & CPU & Real ROI image & $\sim$3h (hung) & -- \\
+    Cellpose v4 (cpsam) & GPU & ROI image & $>$10$\times$ faster (est.) & 1{,}703 \\
+    MONAI segmentation  & GPU & 3D CT volume & Minutes (model-dep.) & -- \\
+    MONAI segmentation  & GPU (OOM) & Large volume & Silent crash* & -- \\
+    \bottomrule
+  \end{tabular}
+  \newline
+  {\small *MONAI subprocess exited silently on OOM until stderr capture was added.}
+\end{table*}
+
+The Cellpose v4 model (cpsam) is a SAM-based architecture designed for GPU execution. On CPU, inference took 95 seconds on a 64$\times$64 pixel test image; a real pathology ROI image at typical resolution caused the process to run for approximately three hours before hanging. GPU execution is estimated to be more than ten times faster based on manufacturer documentation and community benchmarks~\cite{cellpose}. This makes GPU availability a practical prerequisite for the pathology use case rather than an optional accelerator. The MONAI inference pipeline is similarly GPU-dependent: on the test machine (RTX 3050 6~GB), certain models exceeded available VRAM and caused the subprocess to terminate without producing any output or error message. This failure mode was only diagnosed after adding stderr capture to the task runner, which then surfaced the underlying PyTorch out-of-memory exception. These findings shaped deployment requirements: the system is shipped with a GPU-enabled Docker configuration as the recommended deployment target, with CPU fallback available for development and testing only.
+
+A practical advantage of both workflows, independent of accuracy, is the convenience the system provides. Processing speed depends on available hardware, cached models, and firmware, and is therefore highly deployment-specific. What the architecture guarantees regardless of hardware is that long-running operations are queued automatically, results are persisted, and the clinician can return to completed outputs without having been present during execution. In the workspace monitoring scenario this translates directly to overnight or unattended processing: files deposited at the end of a working day are analyzed and results are available the next morning. Meaningful evaluation of this property at scale, however, requires a broader set of test datasets and input types covering diverse modalities, resolutions, and acquisition protocols, which represents the primary direction for further experimental work.
 
 \section{Discussion}
 

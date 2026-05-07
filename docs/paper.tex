@@ -600,27 +600,28 @@ The workflow is illustrated in Figure~\ref{fig:workspace-workflow}. When the pol
 
 \subsubsection{Inference Hardware Requirements}
 
-Inference performance is tightly coupled to available hardware, and the gap between CPU and GPU execution has direct clinical implications. Table~\ref{tab:inference-timing} summarises the observed timing data.
+Inference performance is tightly coupled to available hardware, and the gap between CPU and GPU execution has direct clinical implications. % [TODO: add timing table once benchmark numbers are confirmed]
 
-\begin{table*}[t]
-  \caption{Inference Timing: CPU vs GPU}
-  \label{tab:inference-timing}
-  \centering
-  \begin{tabular}{lllll}
-    \toprule
-    Model & Hardware & Input & Time & Cells detected \\
-    \midrule
-    Cellpose v3 (cyto3) & CPU & ROI image & Seconds--min & 1{,}100 \\
-    Cellpose v4 (cpsam) & CPU & 64$\times$64 test & 95s & -- \\
-    Cellpose v4 (cpsam) & CPU & Real ROI image & $\sim$3h (hung) & -- \\
-    Cellpose v4 (cpsam) & GPU & ROI image & $>$10$\times$ faster (est.) & 1{,}703 \\
-    MONAI segmentation  & GPU & 3D CT volume & Minutes (model-dep.) & -- \\
-    MONAI segmentation  & GPU (OOM) & Large volume & Silent crash* & -- \\
-    \bottomrule
-  \end{tabular}
-  \newline
-  {\small *MONAI subprocess exited silently on OOM until stderr capture was added.}
-\end{table*}
+% \begin{table*}[t]
+%   \caption{Inference Timing: CPU vs GPU}
+%   \label{tab:inference-timing}
+%   \centering
+%   \begin{tabular}{lllll}
+%     \toprule
+%     Model & Hardware & Input & Time & Cells detected \\
+%     \midrule
+%     Cellpose v3 (cyto3) & CPU & ROI image & Seconds--min & 1{,}100 \\
+%     Cellpose v4 (cpsam) & CPU & 64$\times$64 test & 95s & -- \\
+%     Cellpose v4 (cpsam) & CPU (server) & Real ROI image & $\sim$3h & 1{,}703 \\
+%     Cellpose v4 (cpsam) & CPU (laptop) & Real ROI image & $\sim$10min & -- \\
+%     Cellpose v4 (cpsam) & GPU & ROI image & $>$10$\times$ faster (est.) & 1{,}703 \\
+%     MONAI segmentation  & GPU & 3D CT volume & Minutes (model-dep.) & -- \\
+%     MONAI segmentation  & GPU (OOM) & Large volume & Silent crash* & -- \\
+%     \bottomrule
+%   \end{tabular}
+%   \newline
+%   {\small *MONAI subprocess exited silently on OOM until stderr capture was added.}
+% \end{table*}
 
 The Cellpose v4 model (cpsam) is a SAM-based architecture designed for GPU execution. On CPU, inference took 95 seconds on a 64$\times$64 pixel test image; a real pathology ROI image at typical resolution caused the process to run for approximately three hours before hanging. GPU execution is estimated to be more than ten times faster based on manufacturer documentation and community benchmarks~\cite{cellpose}. This makes GPU availability a practical prerequisite for the pathology use case rather than an optional accelerator. The MONAI inference pipeline is similarly GPU-dependent: on the test machine (RTX 3050 6~GB), certain models exceeded available VRAM and caused the subprocess to terminate without producing any output or error message. This failure mode was only diagnosed after adding stderr capture to the task runner, which then surfaced the underlying PyTorch out-of-memory exception. These findings shaped deployment requirements: the system is shipped with a GPU-enabled Docker configuration as the recommended deployment target, with CPU fallback available for development and testing only.
 

@@ -35,7 +35,12 @@ def _detect_gpu() -> bool:
 _GPU_AVAILABLE = _detect_gpu()
 _DEVICE_LABEL = "GPU" if _GPU_AVAILABLE else "CPU"
 
-_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="task_worker")
+# max_workers: each inference/cellpose task holds a thread even while blocking on its
+# semaphore, so we need enough threads to cover concurrent blocked waiters plus any
+# lightweight tasks. Default: os.cpu_count() + 4 (matches Python's None behaviour but
+# we set explicitly so it shows up in task_queue metrics).
+_MAX_WORKERS = int(os.environ.get("TASK_MAX_WORKERS", min(32, (os.cpu_count() or 4) + 4)))
+_executor = ThreadPoolExecutor(max_workers=_MAX_WORKERS, thread_name_prefix="task_worker")
 
 # Inference tasks are CPU/memory heavy (loads a multi-GB model + sliding window).
 # Running more than one at a time causes OOM → subprocess crash → "Connection closed".

@@ -627,24 +627,42 @@ Disk     : ${diagData.system.disk_free_gb} GB free / ${diagData.system.disk_tota
             </button>
           </div>
           {systemStats ? (
-            <div className="system-stats-grid">
-              {[
-                { label: 'RAM', value: `${systemStats.ram.used_gb} / ${systemStats.ram.total_gb} GB`, pct: systemStats.ram.percent },
-                { label: 'Disk (/app)', value: `${systemStats.disk.used_gb} / ${systemStats.disk.total_gb} GB — ${systemStats.disk.free_gb} GB free`, pct: systemStats.disk.percent },
-                { label: 'CPU', value: `${systemStats.cpu_percent}%`, pct: systemStats.cpu_percent },
-              ].map(({ label, value, pct }) => (
-                <div className="system-stat-card" key={label}>
-                  <div className="system-stat-header">
-                    <span className="system-stat-label">{label}</span>
-                    <span className="system-stat-pct" style={{ color: pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#10b981' }}>{pct}%</span>
+            <>
+              <div className="system-stats-grid">
+                {[
+                  { label: 'RAM', value: `${systemStats.ram.used_gb} / ${systemStats.ram.total_gb} GB`, pct: systemStats.ram.percent },
+                  { label: 'Disk (/app)', value: `${systemStats.disk.used_gb} / ${systemStats.disk.total_gb} GB — ${systemStats.disk.free_gb} GB free`, pct: systemStats.disk.percent },
+                  { label: 'CPU', value: `${systemStats.cpu_percent}%`, pct: systemStats.cpu_percent },
+                ].map(({ label, value, pct }) => (
+                  <div className="system-stat-card" key={label}>
+                    <div className="system-stat-header">
+                      <span className="system-stat-label">{label}</span>
+                      <span className="system-stat-pct" style={{ color: pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#10b981' }}>{pct}%</span>
+                    </div>
+                    <div className="system-stat-bar-wrap">
+                      <div className="system-stat-bar" style={{ width: `${pct}%`, background: pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#10b981' }} />
+                    </div>
+                    <div className="system-stat-value">{value}</div>
                   </div>
-                  <div className="system-stat-bar-wrap">
-                    <div className="system-stat-bar" style={{ width: `${pct}%`, background: pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#10b981' }} />
-                  </div>
-                  <div className="system-stat-value">{value}</div>
+                ))}
+              </div>
+              {(systemStats.watched_dirs || systemStats.task_queue) && (
+                <div className="system-stats-extra" style={{ marginTop: '0.75rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                  {systemStats.watched_dirs && (
+                    <span className="system-stat-pill">
+                      Watched dirs: <strong>{systemStats.watched_dirs.active}</strong> active / {systemStats.watched_dirs.total} total
+                    </span>
+                  )}
+                  {systemStats.task_queue && systemStats.task_queue.active_threads !== null && (
+                    <span className="system-stat-pill">
+                      Task workers: <strong>{systemStats.task_queue.active_threads}</strong>
+                      {systemStats.task_queue.max_workers && <span> / {systemStats.task_queue.max_workers}</span>}
+                      {systemStats.task_queue.queued > 0 && <span style={{ color: '#f59e0b' }}> · {systemStats.task_queue.queued} queued</span>}
+                    </span>
+                  )}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           ) : (
             <p className="settings-mode-desc">{statsLoading ? 'Loading...' : 'Could not load system stats.'}</p>
           )}

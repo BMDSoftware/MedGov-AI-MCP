@@ -147,7 +147,7 @@ async def search_templates(
                 return [{"error": f"No templates found for query={query}, specialty={specialty}"}]
 
             approved = [t for t in templates if t.get("TLAP_Approved") == "1"]
-            return approved if approved else templates
+            return approved if approved else [{"error": f"No TLAP-approved templates found for query={query}, specialty={specialty}"}]
         except Exception as exc:
             return [{"error": f"Search failed: {exc}"}]
 
@@ -336,11 +336,21 @@ async def generate_report(
 
     if inference_results is not None:
         system_prompt = SPECIALTY_SYSTEM_PROMPTS.get(specialty, SPECIALTY_SYSTEM_PROMPTS["general"])
-        field_descriptions = [
-            f"{key} (type={f.get('control_type', 'text')}, "
-            f"section={f.get('section', '')}, aliases={f.get('aliases', [])})"
-            for key, f in schema["all_fields"].items()
-        ]
+        field_descriptions = []
+        for key, f in schema["all_fields"].items():
+            ctrl = f.get("control_type", "text")
+            desc = (
+                f"{key} (type={ctrl}, "
+                f"section={f.get('section', '')}, aliases={f.get('aliases', [])})"
+            )
+            if ctrl in {"select", "radio"} and f.get("options"):
+                opts = ", ".join(
+                    f'"{o["value"]}" ({o["label"]})'
+                    for o in f["options"]
+                    if o.get("value") is not None
+                )
+                desc += f" — allowed values: {opts}"
+            field_descriptions.append(desc)
         user_message = (
             f"Template: {schema['title']}\n\n"
             f"Available template fields:\n"
@@ -349,6 +359,8 @@ async def generate_report(
             f"Raw inference results:\n{json.dumps(inference_results, indent=2)}\n\n"
             "Map each relevant inference finding to the most appropriate template field key "
             "from the list above. Use exact key names.\n"
+            "IMPORTANT: For select/radio fields, the value MUST be the exact quoted value string "
+            "listed after 'allowed values' — do not use labels, grades, or free text.\n"
             "Respond with valid JSON only, with exactly these keys:\n"
             '{"field_mappings": {"<field_key>": "<value>", ...}, '
             '"findings_narrative": "<string>", "impression": "<string>", "recommendations": "<string>"}'
@@ -382,14 +394,7 @@ async def generate_report(
                     "recommendations": parsed.get("recommendations"),
                 }
         except Exception as exc:
-            logging.warning(f"[radlex] Sampling failed ({exc}), falling back to flat key mapping")
-            for item in inference_results:
-                for s in item.get("structures", []):
-                    key = s.get("name", "").replace(" ", "_")
-                    if s.get("volume_cm3") is not None:
-                        mapped_findings[key] = f"{s['volume_cm3']} cm³"
-                    elif s.get("voxel_count") is not None:
-                        mapped_findings[key] = f"{s['voxel_count']:,} voxels"
+            return {"error": f"Sampling failed: {exc}", "error_type": "sampling_error"}
 
     elif findings is not None:
         mapped_findings = findings

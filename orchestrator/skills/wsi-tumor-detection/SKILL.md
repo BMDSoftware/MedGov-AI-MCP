@@ -1,3 +1,8 @@
+---
+name: wsi-tumor-detection
+description: Use this skill when the user wants to find tumors or suspicious regions in any organ image or tissue sample identified by a UID, slide ID, or accession number — and wants tumor detection, localization, or a pathology report. Covers the full workflow: visual inspection of the slide, zooming into the most suspicious region, cell counting, and report generation.
+---
+
 # Whole-Slide Image (WSI) Tumor Detection Workflow (iPath)
 
 **Goal:** Given a slide UID, locate the most suspicious region visually and retrieve a high-resolution view of it for cell-level analysis.

@@ -13,6 +13,7 @@ from .builtin_tools import (
     handle_queue_task,
     handle_inference_as_task,
     save_radlex_report,
+    save_markdown_report,
 )
 
 
@@ -277,7 +278,7 @@ class ExecutionMixin:
                 parts.append("Files: " + ", ".join(file_paths))
             if dicom_dir_paths:
                 parts.append(
-                    "DICOM series directories (treat each as a single 3D volume — pass the directory path directly to MONAI tools): "
+                    "DICOM series directories (treat each as a single 3D volume): "
                     + ", ".join(f"[DICOM SERIES DIR] {p}" for p in dicom_dir_paths)
                 )
             image_context = "\n\nFILES AVAILABLE: Yes\n" + "\n".join(parts)
@@ -637,6 +638,7 @@ class ExecutionMixin:
                 self.logger.info(f"  Summary: {result_summary}")
 
                 save_radlex_report(session_id, tool_name, result, arguments)
+                save_markdown_report(session_id, tool_name, arguments)
                 turn_results.append((tool_name, result))
 
             elif result and is_error:

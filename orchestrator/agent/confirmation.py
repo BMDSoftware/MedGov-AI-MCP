@@ -7,6 +7,7 @@ from .builtin_tools import (
     handle_queue_task,
     handle_inference_as_task,
     save_radlex_report,
+    save_markdown_report,
 )
 
 
@@ -67,6 +68,7 @@ class ConfirmationMixin:
             self.logger.info(f"  Summary: {result_summary}")
 
             save_radlex_report(session_id, tool_name, result, arguments)
+            save_markdown_report(session_id, tool_name, arguments)
 
             confirmed_result = result
         else:

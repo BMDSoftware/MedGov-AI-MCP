@@ -1,4 +1,4 @@
-import yaml
+import re
 
 from .constants import SKILL_DIR_PATH
 
@@ -27,10 +27,11 @@ class SkillsMixin:
                     parts = content.split("---", 2)
                     if len(parts) >= 3:
                         frontmatter = parts[1]
-                        metadata = yaml.safe_load(frontmatter)
+                        name_match = re.search(r"^name:\s*(.+)$", frontmatter, re.MULTILINE)
+                        desc_match = re.search(r"^description:\s*(.+)$", frontmatter, re.MULTILINE)
 
-                        skill_name = metadata.get("name", skill_folder.name)
-                        skill_description = metadata.get("description", "No description")
+                        skill_name = name_match.group(1).strip().strip('"') if name_match else skill_folder.name
+                        skill_description = desc_match.group(1).strip().strip('"') if desc_match else "No description"
                         skills_text.append(f"- **{skill_name}**: {skill_description}")
                 except Exception as e:
                     print(f"Error loading skill {skill_folder.name}: {e}")

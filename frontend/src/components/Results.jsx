@@ -1,6 +1,7 @@
 import { apiFetch, authEventSourceUrl } from '../apiFetch';
 import { getToken } from '../auth';
 import { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import './Results.css';
 
 import { API_URL } from '../config.js';
@@ -89,13 +90,22 @@ function Results({ refreshSignal, currentSessionId }) {
       </div>
 
       <div className="results-filters">
-        {['all', 'inference', 'cellpose', 'report', 'queued', 'done', 'failed'].map(f => (
+        {[
+          { key: 'all', label: 'All' },
+          { key: 'inference', label: 'Inference' },
+          { key: 'cellpose', label: 'Cellpose' },
+          { key: 'report', label: 'Report' },
+          { key: 'markdown_report', label: 'File Reports' },
+          { key: 'queued', label: 'Queued' },
+          { key: 'done', label: 'Done' },
+          { key: 'failed', label: 'Failed' },
+        ].map(({ key, label }) => (
           <button
-            key={f}
-            className={`filter-btn ${filter === f ? 'active' : ''}`}
-            onClick={() => setFilter(f)}
+            key={key}
+            className={`filter-btn ${filter === key ? 'active' : ''}`}
+            onClick={() => setFilter(key)}
           >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
+            {label}
           </button>
         ))}
       </div>
@@ -328,9 +338,40 @@ function TaskResult({ task }) {
     );
   }
 
+  if (task.task_type === 'markdown_report') {
+    return <MarkdownReportResult result={result} />;
+  }
+
   // Generic fallback
   return (
     <pre className="task-result-raw">{JSON.stringify(result, null, 2)}</pre>
+  );
+}
+
+function MarkdownReportResult({ result }) {
+  const content = result?.content || '';
+  const filename = result?.filename || 'report.md';
+
+  const handleDownload = () => {
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="task-result-report">
+      <div className="report-template-header">
+        <span className="report-template-title">{filename}</span>
+        <button className="report-preview-toggle" onClick={handleDownload}>Download</button>
+      </div>
+      <div className="markdown-report-body">
+        <ReactMarkdown>{content}</ReactMarkdown>
+      </div>
+    </div>
   );
 }
 

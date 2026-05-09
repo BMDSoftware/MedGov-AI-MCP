@@ -195,6 +195,18 @@ def handle_inference_as_task(
     return result, result_summary
 
 
+def save_markdown_report(session_id: Optional[str], tool_name: str, arguments: Dict) -> None:
+    """Persist a utils.write_file result to the DB so it appears in the Results tab."""
+    if not session_id or tool_name != "utils.write_file":
+        return
+    path = arguments.get("path", "")
+    content = arguments.get("content", "")
+    filename = Path(path).name if path else "report"
+    tid = db.create_task(session_id, "markdown_report", f"Report: {filename}", {"path": path})
+    db.update_task(tid, "done", result={"file_path": path, "filename": filename, "content": content})
+    print(f"[agent] Saved markdown report '{filename}' to DB as task {tid[:8]}")
+
+
 def save_radlex_report(session_id: Optional[str], tool_name: str, result: Any, arguments: Dict) -> None:
     """Persist a radlex report to the DB so it appears in the Report tab."""
     if not session_id or tool_name != "radlex.generate_report":

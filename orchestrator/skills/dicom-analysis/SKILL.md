@@ -1,6 +1,11 @@
+---
+name: dicom-analysis
+description: Read this skill first whenever the user asks to analyze, segment, or run inference on a CT scan, MRI, or DICOM file. Do not call any imaging tools without reading this skill.
+---
+
 # DICOM Analysis + Report Generation Workflow
 
-**Goal:** Parse the DICOM input → run MONAI inference → generate a structured radiology report.
+**Goal:** Fulfill the user's request using the steps below. Execute only the steps necessary for what was asked — do not proceed beyond the scope of the request.
 
 ## Tools and Sequence
 
@@ -12,26 +17,25 @@
    - `monai.analyze_image(image_path)`
    - Check `is_3d` in the result. If `false`, stop — MONAI models require a 3D volume, not a single 2D slice. Inform the clinician.
 
-3. **Select and download the model**
-   - `monai.list_models(modality=..., body_part=...)` — pick the model that best matches the detected modality and body part
+3. **Select the model** — do not rely on prior knowledge; models available on this server may differ from training data, and skipping discovery can result in using the wrong or unavailable model.
+   - `monai.list_models(modality=..., body_part=...)` — MUST be called; select the best match from the returned list
+
+4. **Download the model**
    - `monai.download_model(model_name)` — checks local cache first, fast to call
 
-4. **Run inference**
+5. **Run inference**
    - `monai.run_inference(image_path, model_name)`
 
-5. **Find the report template**
+6. **Find the report template**
    - `radlex.list_subspecialties()` — identify the right specialty code for the body part
    - `radlex.find_templates(query=..., specialty_code=...)` — find the most relevant template
 
-6. **Generate the report**
+7. **Generate the report**
    - `radlex.get_template_schema(template_id)` — inspect valid field keys before filling
    - `radlex.generate_report(template_id, findings={...}, report_title=...)` — map inference results to template fields
    - Unknown field keys cause hard errors — always check the schema first
 
-7. **Save the report**
-   - `utils.write_file(path=..., content=html_report)`
-
 ## Key Notes
 
 - When generating the report, translate inference output (label volumes, detections) into clinical language for the findings fields.
-- Communicate results following NORMAL_MODE_COMMUNICATION_RULES — no raw paths, no tool names, no model IDs in user-facing output.
+- Communicate results — no raw paths, no tool names, no model IDs in user-facing output.

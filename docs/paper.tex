@@ -457,6 +457,52 @@ A clinician or automated trigger provides a DICOM file or series. The system ide
 
 A whole slide image is provided. The system runs tumour detection and cell segmentation, returning segmentation results and a summary of the detected region. Success is defined as a completed segmentation run with quantitative output, specifically the detected region and cell count, returned without manual intervention.
 
+\subsubsection{Use Case 1 - Interactive DICOM Analysis and Segmentation}
+
+\textbf{Clinical context.}
+A clinician has a DICOM scan and needs segmentation without knowing which model to use or how to chain the required tools, or simply wants to accelerate their work by dropping the DICOM files and looking directly at the processed and interpreted data.
+
+% here is where i dont know if we mentino debug and normal or just do one because i put both in the diagram
+
+\textbf{Setup.}
+The user uploads either a single DICOM volume file or a directory of DICOM slices forming a 3D series through the frontend file selector, and enters the following prompt in the chat to initiate the workflow:
+
+\begin{quote}
+\textit{``Analyze this CT scan and run the appropriate segmentation model.''}
+\end{quote}
+
+\textbf{Workflow.}
+The workflow is illustrated in Figure~\ref{fig:analysis-workflow}. The agent calls \texttt{parse\_dicom\_file} to extract modality, body part, and acquisition metadata from the DICOM header, then \texttt{analyze\_image} to determine image type, intensity, and spatial dimensions. Based on these findings, \texttt{list\_models} returns a filtered list of compatible segmentation models. If the selected model is not cached locally, \texttt{download\_model} retrieves it from HuggingFace Hub. Inference is then submitted to the background task queue via \texttt{run\_inference}, which applies a sliding window strategy to process the 3D volume without exceeding GPU memory limits. The agent responds immediately after queuing without waiting for inference to complete. When the background task finishes, an SSE notification is pushed to the frontend and the segmentation results, including per-organ volumes, are displayed in the Results tab.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{images/AnalysisWorkflow.png}
+  \caption{Use Case 1 - Interactive DICOM analysis and segmentation workflow.}
+  \label{fig:analysis-workflow}
+\end{figure*}
+
+\subsubsection{Use Case 2 - Autonomous Pathology ROI Monitoring}
+
+\textbf{Clinical context.}
+A pathology instrument or PACS system exports region-of-interest (ROI) images to a local directory as part of its standard output. No human is available to initiate analysis for each arriving file. The goal is for the system to detect each new file, run cell segmentation automatically, and route the result based on a configurable cell count threshold, without any user interaction. Files can also be deposited manually through the Workspaces tab in the frontend, which provides a console showing detection events and agent activity in real time.
+
+\textbf{Setup.}
+A workspace is registered pointing to the watched directory. The following prompt is configured for that workspace, defining the agent's behaviour for every arriving file:
+
+\begin{quote}
+\textit{``When a new file arrives, check whether it is a pathology ROI image. If it is, run Cellpose cell segmentation and count the cells. If the cell count exceeds 2000, copy the segmentation mask to the output folder and log the result. If the file is not a valid ROI image, move it to the uncertain folder.''}
+\end{quote}
+
+\textbf{Workflow.}
+The workflow is illustrated in Figure~\ref{fig:workspace-workflow}. When the polling observer detects a new file, the watcher copies it to the workspace incoming folder and triggers the agent after a three-second debounce window. The agent calls \texttt{get\_file\_metadata} to determine file type, extension, and dimensions, and attempts to classify whether the file is a pathology ROI image. This classification step is an inherent limitation of the current design: reliably determining whether an arbitrary image is a valid ROI would require running a dedicated detection model, effectively doubling the computational cost before any analysis begins. To avoid this overhead, the workspace prompt instructs the agent to make a best-effort classification from file metadata and dimensions alone, and to route uncertain cases to a dedicated folder for manual review rather than proceeding with segmentation. This trades false-negative robustness for efficiency, and is an acknowledged design constraint rather than a failure of the workflow. If the file is classified as a valid ROI image, \texttt{segment\_cells\_2d} is submitted to the background task queue using the Cellpose v4 universal model (cpsam). When the task completes, the result is pushed to the frontend via SSE and displayed in the Workspaces console. If the cell count exceeds 2000, the segmentation mask is copied to the output folder; otherwise only a JSON log entry is written. Final results, including cell count, mask path, and timestamp, are persisted and accessible in the Results tab.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{images/WorkspaceMonitoringWorkflow.png}
+  \caption{Use Case 2 - Autonomous pathology ROI monitoring workflow.}
+  \label{fig:workspace-workflow}
+\end{figure*}
+
 \subsection{Evaluation Setup}
 
 Evaluation was structured in three phases. Phase 1 evaluates both API-based and locally hosted language models for tool-calling reliability in clinical workflows. Phase 2 evaluates whether the agent can operate autonomously in clinical workflows. It first examines how skills provide the workflow constraints that make autonomous execution reliable, showing that the agent follows the correct tool sequence and guard conditions without human intervention. It then compares assisted and autonomous execution of the same task to assess whether human-in-the-loop confirmation changes the outcome, or whether the agent produces equivalent results in both modes. Phase 3 runs the two use cases end to end, comparing autonomous and manual workflows, evaluated by task completion and qualitative assessment of outputs, specifically whether the radiology report was correctly filled and whether segmentation completed successfully.
@@ -549,54 +595,60 @@ This result has a direct architectural implication. If assisted mode were a corr
 % screenshots? etc
 
 
-% should we consider the reprot generation? is what appears in the result tab the report? or should we consider something else? because we just get voxels so...
-% is the report even rich enough to be considered? and henrique changed the radlex so i need further testing now to see if its relevant enough but for now ill only mention the segementation and the result generated
-% leaving out the generat report part for now
-\subsubsection{Use Case 1 - Interactive DICOM Analysis and Segmentation}
-
-\textbf{Clinical context.}
-A clinician has a DICOM scan and needs segmentation without knowing which model to use or how to chain the required tools, or simply wants to accelerate their work by dropping the DICOM files and looking directly at the processed and interpreted data.
-
-% here is where i dont know if we mentino debug and normal or just do one because i put both in the diagram
-
-\textbf{Setup.}
-The user uploads either a single DICOM volume file or a directory of DICOM slices forming a 3D series through the frontend file selector, and enters the following prompt in the chat to initiate the workflow:
+\subsubsection{Use Case 1 Results}
+Task 1 was initiated with a publicly available DICOM series from the Cancer Imaging Archive and the following prompt:
 
 \begin{quote}
-\textit{``Analyze this CT scan and run the appropriate segmentation model.''}
+\textit{``Analyze this DICOM series and run the appropriate segmentation model. Use the spleen model and make a report with the findings.''}
 \end{quote}
 
-\textbf{Workflow.}
-The workflow is illustrated in Figure~\ref{fig:analysis-workflow}. The agent calls \texttt{parse\_dicom\_file} to extract modality, body part, and acquisition metadata from the DICOM header, then \texttt{analyze\_image} to determine image type, intensity, and spatial dimensions. Based on these findings, \texttt{list\_models} returns a filtered list of compatible segmentation models. If the selected model is not cached locally, \texttt{download\_model} retrieves it from HuggingFace Hub. Inference is then submitted to the background task queue via \texttt{run\_inference}, which applies a sliding window strategy to process the 3D volume without exceeding GPU memory limits. The agent responds immediately after queuing without waiting for inference to complete. When the background task finishes, an SSE notification is pushed to the frontend and the segmentation results, including per-organ volumes, are displayed in the Results tab.
-
-\begin{figure*}[t]
-  \centering
-  \includegraphics[width=\textwidth]{images/AnalysisWorkflow.png}
-  \caption{Use Case 1 - Interactive DICOM analysis and segmentation workflow.}
-  \label{fig:analysis-workflow}
-\end{figure*}
-
-\subsubsection{Use Case 2 - Autonomous Pathology ROI Monitoring}
-
-\textbf{Clinical context.}
-A pathology instrument or PACS system exports region-of-interest (ROI) images to a local directory as part of its standard output. No human is available to initiate analysis for each arriving file. The goal is for the system to detect each new file, run cell segmentation automatically, and route the result based on a configurable cell count threshold, without any user interaction. Files can also be deposited manually through the Workspaces tab in the frontend, which provides a console showing detection events and agent activity in real time.
-
-\textbf{Setup.}
-A workspace is registered pointing to the watched directory. The following prompt is configured for that workspace, defining the agent's behaviour for every arriving file:
+Task 2 was initiated without a file upload and the following prompt:
 
 \begin{quote}
-\textit{``When a new file arrives, check whether it is a pathology ROI image. If it is, run Cellpose cell segmentation and count the cells. If the cell count exceeds 2000, copy the segmentation mask to the output folder and log the result. If the file is not a valid ROI image, move it to the uncertain folder.''}
+\textit{``Find the tumor in this lung thumbnail (UID: 2.25.338247016696998394111485786182386609869). Identify and localize any suspicious regions consistent with tumor presence. Within the detected tumor area, estimate and count the number of cells. Then generate a structured report summarizing the findings, including tumor location, size (if inferable), cell count estimate, and any relevant observations or limitations.''}
 \end{quote}
 
-\textbf{Workflow.}
-The workflow is illustrated in Figure~\ref{fig:workspace-workflow}. When the polling observer detects a new file, the watcher copies it to the workspace incoming folder and triggers the agent after a three-second debounce window. The agent calls \texttt{get\_file\_metadata} to determine file type, extension, and dimensions, and attempts to classify whether the file is a pathology ROI image. This classification step is an inherent limitation of the current design: reliably determining whether an arbitrary image is a valid ROI would require running a dedicated detection model, effectively doubling the computational cost before any analysis begins. To avoid this overhead, the workspace prompt instructs the agent to make a best-effort classification from file metadata and dimensions alone, and to route uncertain cases to a dedicated folder for manual review rather than proceeding with segmentation. This trades false-negative robustness for efficiency, and is an acknowledged design constraint rather than a failure of the workflow. If the file is classified as a valid ROI image, \texttt{segment\_cells\_2d} is submitted to the background task queue using the Cellpose v4 universal model (cpsam). When the task completes, the result is pushed to the frontend via SSE and displayed in the Workspaces console. If the cell count exceeds 2000, the segmentation mask is copied to the output folder; otherwise only a JSON log entry is written. Final results, including cell count, mask path, and timestamp, are persisted and accessible in the Results tab.
+Each task was executed under two conditions. In the skilled condition, the agent loads the corresponding skill file and follows its prescribed sequence as a workflow protocol. In the unskilled condition, the agent selects tools based solely on its general reasoning over the available tool descriptions. Results are summarised in Table~\ref{tab:uc1-results}.
 
-\begin{figure*}[t]
+\begin{table*}[t]
+  \caption{Use Case 1 --- Execution Metrics and Outcomes}
+  \label{tab:uc1-results}
   \centering
-  \includegraphics[width=\textwidth]{images/WorkspaceMonitoringWorkflow.png}
-  \caption{Use Case 2 - Autonomous pathology ROI monitoring workflow.}
-  \label{fig:workspace-workflow}
-\end{figure*}
+  \small
+  \begin{tabular}{lrrrcp{6.5cm}}
+    \toprule
+    Condition & Iterations & Total tokens & Time (s) & Completed & Incorrect tool calls \\
+    \midrule
+    Task 1 without skill & 6 & 80{,}961 & 58.3  & Yes     & None \\
+    Task 1 with skill    & 8 & 90{,}973 & 95.1  & Yes     & None \\
+    Task 2 without skill & 8 & 95{,}942 & 117.9 & Partial & \texttt{scale\_roi\_to\_slide} called with 200$\times$200~px bbox (30~px max, ignored by agent); \texttt{radlex.generate\_radiology\_report} applied to pathology specimen \\
+    Task 2 with skill    & 9 & 135{,}842 & 129.6 & Yes    & None \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\textbf{Task 1: DICOM Analysis and Report Generation.}
+Both conditions completed successfully. The agent parsed the DICOM directory, identified the study as an abdominal CT, selected a compatible segmentation model, and submitted inference to the background task queue. Spleen segmentation completed correctly in both runs, yielding a volume of 192.51~cm³. A structured radiology report was produced using a valid RadLex template in each case. The two conditions selected different templates from the catalogue, both appropriate for the study type (Figure~\ref{fig:task1-report}). First-iteration token counts were nearly identical across conditions (8,204 without skill, 8,251 with skill), consistent with on-demand skill loading. The skilled condition required two additional iterations for the steps prescribed by the workflow protocol (\texttt{analyze\_image} and \texttt{download\_model}), increasing total token consumption from 80,961 to 90,973 and wall-clock time from 58.3~s to 95.1~s, with no difference in clinical output.
+
+\textbf{Task 2: Whole-Slide Image Tumor Detection.}
+Both conditions executed the full cell segmentation sequence: thumbnail retrieval, slide dimension acquisition, ROI coordinate scaling, region extraction, and Cellpose inference. In the unskilled condition, the agent called \texttt{ipath.scale\_roi\_to\_slide} with a 200$\times$200~px bounding box, exceeding the 30~px maximum documented in the tool description. The constraint was present in the tool description and available to the agent, but was overridden by the agent's own spatial estimate. Given the dimensions of the test image (108,000$\times$75,140~px), a 200~px bounding box in thumbnail coordinates maps to a slide region substantially larger than the 2,700$\times$2,700~px retrieval limit of \texttt{ipath.fetch\_roi}, resulting in a region that was both potentially mislocated and spatially clipped rather than the intended ROI.
+
+Independently, the unskilled condition produced a domain-incorrect report at the final step. The agent called \texttt{radlex.generate\_radiology\_report} on a whole-slide pathology image, yielding a radiology template with fields structured for radiology studies and inapplicable to a tissue specimen (Figure~\ref{fig:task2-noskill-report}). The task is classified as partial: cell segmentation completed but the final report was produced in the wrong clinical domain.
+
+With the \textbf{wsi-tumor-detection} skill active, the agent followed the prescribed workflow sequence without deviation. Cell segmentation yielded 428 cells detected in the 2,700$\times$2,700~px ROI. The final report was generated using the pathology template from the \textbf{clinical-reports} skill, with fields appropriate to a tissue specimen including specimen information, microscopic description, and diagnosis (Figure~\ref{fig:task2-skill-report}). The skilled condition consumed 135,842 total tokens against 95,942 in the unskilled condition, reflecting the additional context from loading two skill files, with wall-clock times of 129.6~s and 117.9~s respectively.
+
+Both tasks completed end-to-end without manual intervention, producing clinically structured outputs from raw imaging inputs. Task 1 confirmed that the system correctly orchestrates DICOM parsing, model selection, inference, and report generation autonomously. Task 2 confirmed the same for whole-slide image analysis and cell segmentation, with the additional observation that the skill was necessary to produce a domain-correct report at the final step.
+
+% TODO: figures
+% \ref{fig:task1-report}       — radiology report from Task 1 (correct domain, correct output)
+% \ref{fig:task2-noskill-report} — radiology template applied to pathology specimen (wrong domain)
+% \ref{fig:task2-skill-report}  — pathology report with correct structure
+
+\subsubsection{Use Case 2 Results}
+
+% TODO: Use Case 2 results — autonomous workspace monitoring
+% Cover: file detection, agent trigger, classification step, cellpose execution, routing by cell count threshold
+% Include timing and any observations on the autonomous execution trace
 
 \subsubsection{Inference Hardware Requirements}
 

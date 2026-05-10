@@ -32,7 +32,7 @@ description: Read this skill first whenever the user asks to analyze, segment, o
 
 7. **Generate the report**
    - `radlex.get_template_schema(template_id)` — inspect valid field keys before filling
-   - `radlex.generate_report(template_id, findings={...}, report_title=...)` — map inference results to template fields
+   - `radlex.generate_radiology_report(template_id, findings={...}, report_title=...)` — map inference results to template fields
    - Unknown field keys cause hard errors — always check the schema first
 
 ## Key Notes

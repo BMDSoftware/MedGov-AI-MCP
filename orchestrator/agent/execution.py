@@ -25,7 +25,7 @@ class ExecutionMixin:
         goal: str,
         data: Any = None,
         fileList: Any = None,
-        max_iterations: int = 10,
+        max_iterations: int = 20,
         metadata: Dict = None,
         _resume_history: List = None,
         _resume_response: Optional[Any] = None,
@@ -542,9 +542,11 @@ class ExecutionMixin:
                 turn_results.append((tool_name, result))
                 continue
 
-            # Cellpose segmentation always runs as a background task, never call directly.
-            # Calling the MCP tool inline hangs the agent loop on GPU stalls in deployment.
-            if tool_name in ("cellpose.segment_cells_2d", "cellpose.segment_cells_3d", "cellpose.segment_cells_batch"):
+            # Cellpose segmentation runs as a background task in normal operation to avoid
+            # hanging the agent loop on GPU stalls in deployment. In autonomous/test mode
+            # (queue_task disabled) it runs inline so callers get the result synchronously.
+            if tool_name in ("cellpose.segment_cells_2d", "cellpose.segment_cells_3d", "cellpose.segment_cells_batch") \
+                    and not self.is_agent_autonomous and "queue_task" in self.agent_tools:
                 image_path = arguments.get("image_path", "")
                 fname = Path(image_path).name if image_path else "image"
                 result, result_summary = handle_queue_task(session_id, {
@@ -561,8 +563,8 @@ class ExecutionMixin:
                     "success": True,
                 }
 
-            # Inference always runs in background (non-autonomous mode)
-            if tool_name == "monai.run_inference" and not self.is_agent_autonomous:
+            # Inference always runs in background (non-autonomous mode), unless queue_task is disabled
+            if tool_name == "monai.run_inference" and not self.is_agent_autonomous and "queue_task" in self.agent_tools:
                 result, result_summary = handle_inference_as_task(
                     session_id, arguments, self.session_context.entries, inference_queued
                 )

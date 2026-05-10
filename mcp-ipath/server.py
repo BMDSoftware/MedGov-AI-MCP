@@ -133,7 +133,7 @@ def scale_roi_to_slide(
 
     Args:
         thumb_x, thumb_y: Top-left of bbox in thumbnail pixels
-        thumb_w, thumb_h: Size of bbox in thumbnail pixels
+        thumb_w, thumb_h: Size of bbox in thumbnail pixels (max 30 each — larger values produce unusable ROIs)
         thumb_img_w, thumb_img_h: Thumbnail dimensions (from fetch_thumbnail)
         slide_w, slide_h: Full slide dimensions (from get_slide_dimensions)
     """
@@ -209,6 +209,7 @@ def get_series_instances(series_uid: str) -> Dict[str, Any]:
     Args:
         series_uid: Series Instance UID to query (digits and dots only)
     """
+    series_uid = normalize_uid(series_uid)
     if not _validate_uid(series_uid):
         return {"success": False, "error": "invalid arguments"}
 
@@ -219,32 +220,32 @@ def get_series_instances(series_uid: str) -> Dict[str, Any]:
             r = client.get(url, params={"SeriesInstanceUID": series_uid})
             r.raise_for_status()
         data = r.json()
+
+        # Build flat list: top-level entry first, then subresolutions (already ordered large->small)
+        instances = [
+            {
+                "sop_instance_uid": data["SOPInstanceUID"],
+                "width": data["width"],
+                "height": data["height"],
+                "ntiles": data.get("ntiles"),
+                "level": 0,
+            }
+        ]
+        for i, sub in enumerate(data.get("subresolution_images", []), start=1):
+            instances.append(
+                {
+                    "sop_instance_uid": sub["SOPInstanceUID"],
+                    "width": sub["width"],
+                    "height": sub["height"],
+                    "ntiles": sub.get("ntiles"),
+                    "level": i,
+                }
+            )
+
+        smallest = instances[-1] if instances else None
+        return {"success": True, "instances": instances, "smallest": smallest}
     except Exception as e:
         return {"success": False, "error": str(e)}
-
-    # Build flat list: top-level entry first, then subresolutions (already ordered large->small)
-    instances = [
-        {
-            "sop_instance_uid": data["SOPInstanceUID"],
-            "width": data["width"],
-            "height": data["height"],
-            "ntiles": data.get("ntiles"),
-            "level": 0,
-        }
-    ]
-    for i, sub in enumerate(data.get("subresolution_images", []), start=1):
-        instances.append(
-            {
-                "sop_instance_uid": sub["SOPInstanceUID"],
-                "width": sub["width"],
-                "height": sub["height"],
-                "ntiles": sub.get("ntiles"),
-                "level": i,
-            }
-        )
-
-    smallest = instances[-1] if instances else None
-    return {"success": True, "instances": instances, "smallest": smallest}
 
 
 @mcp.tool()

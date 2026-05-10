@@ -791,7 +791,57 @@ def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
         }
 
     try:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Redirect stdout to stderr for the entire inference block.
+        # PyTorch/MONAI may print warnings to stdout, which corrupts the
+        # stdio JSON-RPC channel the MCP client reads from.
+        sys.stdout.flush()
+        _orig_stdout = sys.stdout
+        sys.stdout = sys.stderr
+
+        try:
+            return _run_inference_inner(image_path, model_name)
+        finally:
+            sys.stdout.flush()
+            sys.stdout = _orig_stdout
+
+    except BaseException as e:
+        import traceback
+        log(f"Inference failed ({type(e).__name__}): {str(e)}\n{traceback.format_exc()}")
+        return {
+            "error": f"Inference failed: {str(e)}",
+            "traceback": traceback.format_exc(),
+            "model_name": model_name,
+            "image_path": image_path
+        }
+
+
+def _run_inference_inner(image_path: str, model_name: str) -> Dict[str, Any]:
+    """Inner inference logic, called with stdout already redirected to stderr."""
+    if not os.path.exists(image_path) and not os.path.isdir(image_path):
+        return {"error": f"Image not found: {image_path}"}
+
+    model_name = _resolve_model_name(model_name)
+    if model_name not in MODEL_REGISTRY:
+        return {
+            "error": f"Unknown model: {model_name}",
+            "available_models": list(MODEL_REGISTRY.keys())
+        }
+
+    model_info = MODEL_REGISTRY[model_name]
+    bundle_name = model_info["bundle_name"]
+    bundle_path = BUNDLE_ROOT / bundle_name
+
+    if not bundle_path.exists():
+        return {
+            "error": f"Model not downloaded. Call download_model('{model_name}') first.",
+            "model_name": model_name
+        }
+
+    try:
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        else:
+            device = torch.device("cpu")
         log(f"Running inference on {device}...")
 
         # Load the model

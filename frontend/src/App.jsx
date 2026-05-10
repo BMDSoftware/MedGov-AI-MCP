@@ -321,7 +321,7 @@ function App() {
     const response = await apiFetch(getApiUrl(API_CONFIG.ENDPOINTS.PROCESS_WORKFLOW), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'generate_report', analysis: sessionContext.lastAnalysis })
+      body: JSON.stringify({ action: 'generate_radiology_report', analysis: sessionContext.lastAnalysis })
     });
     setMessages(prev => prev.filter(m => !m.isLoading));
     if (response?.ok) {

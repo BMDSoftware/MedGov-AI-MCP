@@ -417,7 +417,7 @@ async def _async_radlex_report(query: str, findings: list, patient_context: Dict
 
         # 2. Pass raw findings so the server-side sampling does the mapping
         gen_result = await session.call_tool(
-            "generate_report",
+            "generate_radiology_report",
             arguments={
                 "template_id": template_id,
                 "inference_results": findings,

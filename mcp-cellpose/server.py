@@ -104,7 +104,6 @@ def describe_models(model_names: list[str]) -> dict:
     }
 
 
-@mcp.tool()
 def cellpose_diagnostics(model_type: str = "cyto3") -> dict:
     """Run a step-by-step diagnostic and return results for each stage.
 

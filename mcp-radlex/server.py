@@ -263,10 +263,34 @@ SPECIALTY_SYSTEM_PROMPTS = {
 
 # --- MCP Tool Definitions ---
 
+_SUBSPECIALTIES_WITH_TEMPLATES = [
+    {"code": "CA", "name": "Cardiac Radiology"},
+    {"code": "CH", "name": "Chest Radiology"},
+    {"code": "CT", "name": "Computed Tomography"},
+    {"code": "ER", "name": "Emergency Radiology"},
+    {"code": "GI", "name": "Gastrointestinal Radiology"},
+    {"code": "GU", "name": "Genitourinary Radiology"},
+    {"code": "HN", "name": "Head and Neck"},
+    {"code": "IR", "name": "Interventional Radiology"},
+    {"code": "MK", "name": "Musculoskeletal Radiology"},
+    {"code": "MR", "name": "Magnetic Resonance Imaging"},
+    {"code": "NM", "name": "Nuclear Medicine"},
+    {"code": "NR", "name": "Neuroradiology"},
+    {"code": "OB", "name": "OB/GYN Radiology"},
+    {"code": "OI", "name": "Oncologic Imaging"},
+    {"code": "PD", "name": "Pediatric Radiology"},
+    {"code": "QI", "name": "Quality Improvement"},
+    {"code": "RS", "name": "Research"},
+    {"code": "US", "name": "Ultrasound"},
+    {"code": "VI", "name": "Vascular Imaging"},
+]
+
+
 @mcp.tool()
 async def list_subspecialties() -> List[Dict[str, str]]:
-    """Get valid radiology specialty codes (e.g., NR for Neuroradiology, CH for Chest)."""
-    return await get_subspecialties()
+    """Get valid radiology specialty codes (e.g., NR for Neuroradiology, CH for Chest).
+    Only includes subspecialties confirmed to have TLAP-approved templates available."""
+    return _SUBSPECIALTIES_WITH_TEMPLATES
 
 
 @mcp.tool()
@@ -290,7 +314,7 @@ async def find_templates(
 
 
 @mcp.tool()
-async def generate_report(
+async def generate_radiology_report(
     template_id: str,
     ctx: Context,
     output_path: str = "",

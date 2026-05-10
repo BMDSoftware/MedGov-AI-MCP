@@ -42,7 +42,6 @@ The agent acts as the vision model — there is no AI detection tool. Visual ins
 7. **Generate a pathology report**
    - Radlex (RadReport-Pro) is for radiology only — it is not appropriate here
    - Instead, load the pathology report structure from the clinical-reports skill: `skills.read_skill_file("clinical-reports")`
-   - Use the Pathology Report section: Patient Info, Specimen Info, Clinical History, Gross Description, Microscopic Description, Diagnosis, Comments
    - Save with `utils.write_file(path=..., content=...)`
 
 ## Key Notes

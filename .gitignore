@@ -33,6 +33,7 @@ Thumbs.db
 orchestrator/logs/
 
 # LaTeX build artifacts
+texput.log
 docs/*.aux
 docs/*.fdb_latexmk
 docs/*.fls

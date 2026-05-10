@@ -1786,6 +1786,11 @@ async def system_stats():
     import psutil
     vm = psutil.virtual_memory()
     disk = psutil.disk_usage("/app")
+    all_dirs = db.list_watched_directories_all()
+    watched_active = sum(1 for d in all_dirs if watcher_service.is_watching(d["id"]))
+    executor = task_runner._executor
+    queue_size = executor._work_queue.qsize() if hasattr(executor, "_work_queue") else None
+    active_threads = len([t for t in executor._threads if t.is_alive()]) if hasattr(executor, "_threads") else None
     return {
         "ram": {
             "total_gb": round(vm.total / 1e9, 2),
@@ -1800,6 +1805,8 @@ async def system_stats():
             "percent": disk.percent,
         },
         "cpu_percent": psutil.cpu_percent(interval=0.2),
+        "watched_dirs": {"total": len(all_dirs), "active": watched_active},
+        "task_queue": {"active_threads": active_threads, "queued": queue_size, "max_workers": task_runner._MAX_WORKERS},
     }
 
 

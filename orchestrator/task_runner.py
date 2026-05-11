@@ -512,9 +512,12 @@ def _handle_cellpose(input_data: Dict, session_id: str) -> Dict:
     Serialised by _cellpose_semaphore — only one run at a time to prevent OOM
     when multiple users submit concurrent segmentation tasks.
     """
+    if "image_path" not in input_data:
+        raise ValueError("cellpose task requires image_path in input_data - submit one task per file")
     image_path = input_data["image_path"]
     # Cellpose v4 only supports cpsam — force it regardless of what the agent requested
     model_type = "cpsam"
+    input_data = {**input_data, "model_type": "cpsam"}
     task_id = input_data.get("_task_id")
 
     _cellpose_semaphore.acquire()

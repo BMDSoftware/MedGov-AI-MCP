@@ -507,7 +507,28 @@ The workflow is illustrated in Figure~\ref{fig:workspace-workflow}. When the pol
 
 Evaluation was structured in three phases. Phase 1 evaluates both API-based and locally hosted language models for tool-calling reliability in clinical workflows. Phase 2 evaluates whether the agent can operate autonomously in clinical workflows. It first examines how skills provide the workflow constraints that make autonomous execution reliable, showing that the agent follows the correct tool sequence and guard conditions without human intervention. It then compares assisted and autonomous execution of the same task to assess whether human-in-the-loop confirmation changes the outcome, or whether the agent produces equivalent results in both modes. Phase 3 runs the two use cases end to end, comparing autonomous and manual workflows, evaluated by task completion and qualitative assessment of outputs, specifically whether the radiology report was correctly filled and whether segmentation completed successfully.
 
-All experiments were run on a machine with an NVIDIA GeForce RTX 3050 6~GB GPU, using MONAI 1.5.1 and PyTorch 2.5.1 for inference. Input data consisted of publicly available DICOM datasets from the Cancer Imaging Archive~\cite{tcia} and the Medical Segmentation Decathlon~\cite{decathlon}. Two categories of language model were tested: large API-based models (Gemini 2.0 Flash and Gemini 2.5 Flash) and locally hosted open-source models of significantly smaller scale (deepseek-r1:7b and llama3.1:8b via Ollama). [TODO: specify which datasets/tasks (e.g. which organ/modality from Decathlon, which collection from TCIA) — also add references.] 
+Language model experiments were run on a laptop with an AMD Ryzen 5 8645HS CPU, 16~GB DDR5 RAM, and an NVIDIA GeForce RTX 3050 6~GB GPU. MONAI inference benchmarks were run on two configurations: the same local machine using CUDA (GPU), and a shared deployment server using CPU-only inference, using MONAI 1.5.1 and PyTorch 2.6.0. Two categories of language model were tested: large API-based models (Gemini 2.0 Flash and Gemini 2.5 Flash) and locally hosted open-source models of significantly smaller scale (deepseek-r1:7b and llama3.1:8b via Ollama).
+
+The primary imaging dataset used for Use Case 1 evaluation is the \textbf{Pancreas-CT} collection from the Cancer Imaging Archive (TCIA)~\cite{tcia}, specifically subject \texttt{PANCREAS\_0001}. The series consists of \textbf{240 DICOM files} totalling \textbf{121~MB}, acquired as an abdominal CT volume. All files follow the DICOM standard and were used without modification. Three MONAI segmentation models were evaluated against this series on both hardware configurations, with results summarised in Table~\ref{tab:inference-results}.
+
+\begin{table*}[t]
+  \caption{MONAI Inference Times --- PANCREAS\_0001 (240 DICOM files, 121~MB). GPU: local RTX 3050 6~GB (CUDA). CPU (local): Ryzen 5 8645HS. CPU (server): shared deployment server.}
+  \label{tab:inference-results}
+  \centering
+  \small
+  \begin{tabular}{llrrrcccc}
+    \toprule
+    Model & Structure & Voxels & Volume (cm$^3$) & \% of Scan & Time (GPU) & Time (CPU, local) & Time (CPU, server) \\
+    \midrule
+    \texttt{spleen\_ct\_segmentation}          & Spleen         & 57{,}284 & 257.78 & 0.55\% & 9~s   & 27~s    & 25~s \\
+    \multirow{3}{*}{\texttt{wholeBody\_ct\_segmentation}} & Spleen        & 43{,}402 & 195.31 & 0.42\% & \multirow{3}{*}{18~s} & \multirow{3}{*}{3~m 56~s} & \multirow{3}{*}{3~m 53~s} \\
+                                               & Kidney (right) & 30{,}118 & 135.53 & 0.29\% & & & \\
+                                               & Kidney (left)  & 17{,}865 &  80.39 & 0.17\% & & & \\
+    \texttt{pancreas\_ct\_dints\_segmentation} & Pancreas       & 10{,}962 &  49.33 & 0.11\% & 27~s  & 15~m 47~s & 14~m 22~s \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
 \section{Results}
 
 \subsection{Phase 1 - Model Experimentation}
@@ -646,13 +667,36 @@ Both tasks completed end-to-end without manual intervention, producing clinicall
 
 \subsubsection{Use Case 2 Results}
 
-% TODO: Use Case 2 results — autonomous workspace monitoring
-% Cover: file detection, agent trigger, classification step, cellpose execution, routing by cell count threshold
-% Include timing and any observations on the autonomous execution trace
+Initial testing of the workspace monitoring system used two workspaces configured to validate both the watcher trigger pipeline and the agent's ability to follow workspace-specific instructions without cross-contamination between workspaces.
+
+The first workspace, \textbf{CELLPOSE}, was configured with the prompt:
+
+\begin{quote}
+\textit{``Do nothing, just a placeholder for images.''}
+\end{quote}
+
+This prompt was deliberately minimal to test whether the agent would respect a no-op instruction rather than defaulting to unsolicited analysis when a file arrived. Files deposited into this workspace produced no agent action, confirming that the model does not exhibit a bias toward running tools when the prompt does not call for it.
+
+The second workspace, \textbf{ROI}, was configured with the following prompt, provided verbatim to demonstrate replicability:
+
+\begin{quote}
+\textit{``To this folder there will arrive ROI images, I want you to count the number of cells for each image that arrives and I want that if the number of cells counted is above 100 to send the image to the folder in /app/workspaces/CELLPOSE.''}
+\end{quote}
+
+When \texttt{ROI\_TEST\_IMAGE.jpeg} (2{,}352$\times$2{,}673~px, H\&E-stained pathology ROI) was deposited into the ROI workspace, the following sequence was observed and is visible in the workspace console (Figure~\ref{fig:workspace-use-case}): the watcher detected the file within seconds, triggered the agent after the three-second debounce window, and the agent autonomously called \texttt{cellpose.segment\_cells\_2d} without any user interaction. The model reported 1{,}706 detected cells and, since this exceeded the threshold of 100, moved the image to \texttt{/app/workspaces/CELLPOSE} as instructed. The full sequence from file drop to analysis completion took approximately 30 seconds on a local GPU (RTX 3050).
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{images/workspace_use_case.png}
+  \caption{Workspace console showing autonomous detection and routing: ROI\_TEST\_IMAGE.jpeg detected, 1{,}706 cells counted, image moved to CELLPOSE workspace.}
+  \label{fig:workspace-use-case}
+\end{figure}
+
+This test confirmed end-to-end operation of the watcher service, the debounce trigger, the agent's tool selection, and cross-workspace file routing via a plain-language threshold rule.
 
 \subsubsection{Inference Hardware Requirements}
 
-Inference performance is tightly coupled to available hardware, and the gap between CPU and GPU execution has direct clinical implications. % [TODO: add timing table once benchmark numbers are confirmed]
+Inference performance is tightly coupled to available hardware, and the gap between CPU and GPU execution has direct clinical implications. Table~\ref{tab:inference-results} summarises measured times across GPU and CPU configurations for both the local development machine and the shared deployment server.
 
 % \begin{table*}[t]
 %   \caption{Inference Timing: CPU vs GPU}
@@ -675,7 +719,7 @@ Inference performance is tightly coupled to available hardware, and the gap betw
 %   {\small *MONAI subprocess exited silently on OOM until stderr capture was added.}
 % \end{table*}
 
-The Cellpose v4 model (cpsam) is a SAM-based architecture designed for GPU execution. On CPU, inference took 95 seconds on a 64$\times$64 pixel test image; a real pathology ROI image at typical resolution caused the process to run for approximately three hours before hanging. GPU execution is estimated to be more than ten times faster based on manufacturer documentation and community benchmarks~\cite{cellpose}. This makes GPU availability a practical prerequisite for the pathology use case rather than an optional accelerator. The MONAI inference pipeline is similarly GPU-dependent: on the test machine (RTX 3050 6~GB), certain models exceeded available VRAM and caused the subprocess to terminate without producing any output or error message. This failure mode was only diagnosed after adding stderr capture to the task runner, which then surfaced the underlying PyTorch out-of-memory exception. These findings shaped deployment requirements: the system is shipped with a GPU-enabled Docker configuration as the recommended deployment target, with CPU fallback available for development and testing only.
+The Cellpose v4 model (cpsam) is a SAM-based architecture designed for GPU execution. On CPU, inference took 95 seconds on a 64$\times$64 pixel test image. A real pathology ROI image at typical resolution (2{,}352$\times$2{,}673~px) completed in \textbf{12 minutes 37 seconds} on a local Ryzen 5 8645HS CPU, and ran for approximately three hours on the deployment server before hanging. The contrast with the MONAI inference times in Table~\ref{tab:inference-results} is notable: MONAI times are nearly identical across both machines because the server is configured with \texttt{OMP\_NUM\_THREADS=1} and \texttt{MKL\_NUM\_THREADS=1}, pinning it to a single thread where per-core speed is comparable. Cellpose on CPU is unrestricted and scales with core count and clock speed; the Ryzen 5 8645HS provides substantially more parallel compute than the shared deployment server, explaining the order-of-magnitude difference. On the same local machine with an RTX 3050 GPU (CUDA), the same image completed in \textbf{30 seconds}. GPU execution is therefore not an optional accelerator but a practical prerequisite for the pathology use case~\cite{cellpose}. This makes GPU availability a practical prerequisite for the pathology use case rather than an optional accelerator. The MONAI inference pipeline is similarly GPU-dependent: on the test machine (RTX 3050 6~GB), certain models exceeded available VRAM and caused the subprocess to terminate without producing any output or error message. This failure mode was only diagnosed after adding stderr capture to the task runner, which then surfaced the underlying PyTorch out-of-memory exception. These findings shaped deployment requirements: the system is shipped with a GPU-enabled Docker configuration as the recommended deployment target, with CPU fallback available for development and testing only.
 
 A practical advantage of both workflows, independent of accuracy, is the convenience the system provides. Processing speed depends on available hardware, cached models, and firmware, and is therefore highly deployment-specific. What the architecture guarantees regardless of hardware is that long-running operations are queued automatically, results are persisted, and the clinician can return to completed outputs without having been present during execution. In the workspace monitoring scenario this translates directly to overnight or unattended processing: files deposited at the end of a working day are analyzed and results are available the next morning. Meaningful evaluation of this property at scale, however, requires a broader set of test datasets and input types covering diverse modalities, resolutions, and acquisition protocols, which represents the primary direction for further experimental work.
 

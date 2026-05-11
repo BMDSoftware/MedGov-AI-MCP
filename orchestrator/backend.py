@@ -79,6 +79,20 @@ _user_states: Dict[str, UserState] = {}
 _agents: Dict[str, AgenticAgent] = {}
 _agents_lock = asyncio.Lock()
 
+# Cellpose v4 only uses cpsam; the restoration/training/listing tools from cellpose-mcp
+# are not needed and add ~1,500 tokens to every Gemini prompt, increasing latency.
+_DEFAULT_DISABLED_TOOLS = {
+    "cellpose.denoise_image",
+    "cellpose.deblur_image",
+    "cellpose.upsample_image",
+    "cellpose.restore_and_segment",
+    "cellpose.train_segmentation_model",
+    "cellpose.list_available_models",
+    "cellpose.estimate_cell_diameter",
+    "cellpose.save_masks",
+    "cellpose.load_image_info",
+}
+
 
 def _get_user_state(user_id: str) -> UserState:
     if user_id not in _user_states:
@@ -92,9 +106,11 @@ async def get_or_create_agent(user_id: str) -> AgenticAgent:
         if user_id not in _agents:
             agent = AgenticAgent()
             await agent._initialize_components()
-            # Apply this user's disabled tools from DB
+            # Apply this user's disabled tools from DB, then system-level defaults
             disabled = db.get_disabled_tools_for_user(user_id)
             for t in disabled:
+                agent.agent_tools.discard(t)
+            for t in _DEFAULT_DISABLED_TOOLS:
                 agent.agent_tools.discard(t)
             agent._refresh_agent_components()
             agent.set_mode(_app_settings.get("mode", "debug"))
@@ -146,6 +162,7 @@ async def _poll_mcp_tools(interval: int = 300):
             for agent in agents_snapshot:
                 try:
                     servers = list(agent.tool_registry.sessions.keys())
+                    tools_changed = False
                     for name in servers:
                         try:
                             old_keys = set(k for k in agent.available_tools if k.startswith(f"{name}."))
@@ -158,13 +175,17 @@ async def _poll_mcp_tools(interval: int = 300):
                                 agent.agent_tools.discard(k)
                             agent.available_tools.update(new_tools)
                             agent.agent_tools.update(new_keys)
+                            agent.agent_tools -= _DEFAULT_DISABLED_TOOLS
                             for k in added:
                                 _push_notification("tool_added", f"New tool available: {k}")
+                                tools_changed = True
                             for k in removed:
                                 _push_notification("tool_removed", f"Tool removed: {k}")
+                                tools_changed = True
                         except Exception:
                             pass
-                    agent._refresh_agent_components()
+                    if tools_changed:
+                        agent._refresh_agent_components()
                 except Exception:
                     pass
         except Exception:
@@ -257,26 +278,32 @@ async def _watcher_execute(dir_id: str, files: list):
     original_require_confirmation = agent.require_confirmation
     agent.require_confirmation = False
     allowed_tools = wd.get("allowed_tools")
-    original_agent_tools = None
+    original_agent_tools = set(agent.agent_tools)
     if allowed_tools is not None:
-        original_agent_tools = set(agent.agent_tools)
         agent.agent_tools = original_agent_tools & set(allowed_tools)
-        agent._refresh_agent_components()
+    else:
+        agent.agent_tools = original_agent_tools.copy()
+    # Workspace execution is already a background job — sub-queuing tasks means the
+    # agent can't act on results (e.g. routing by cell count). Force direct tool calls.
+    agent.agent_tools.discard("queue_task")
+    agent._refresh_agent_components()
     try:
         # Do NOT pass fileList — workspace files are text/DICOM, not vision inputs.
         # The agent must use read_file / parse_dicom tools via the paths in the goal prompt.
         # Passing fileList with b"" contents causes Gemini to say it can't access the file
         # and hallucinate the original watched-directory path from session context.
-        result = await agent.execute_task(goal, session_id=state.current_session_id, user_id=user_id)
+        # Give the agent enough iterations to handle every file: 3 per file (segment + decide + move)
+        # plus a fixed overhead of 5 for any list/init steps. Minimum 20.
+        max_iter = max(20, len(files) * 3 + 5)
+        result = await agent.execute_task(goal, max_iterations=max_iter, session_id=state.current_session_id, user_id=user_id)
     except Exception as e:
         watcher_service.push_console(dir_id, f"[ERROR] AI execution failed: {e}")
         return
     finally:
         agent.set_agent_type(False)
         agent.require_confirmation = original_require_confirmation
-        if original_agent_tools is not None:
-            agent.agent_tools = original_agent_tools
-            agent._refresh_agent_components()
+        agent.agent_tools = original_agent_tools
+        agent._refresh_agent_components()
     if result and result.get("answer"):
         watcher_service.push_console(dir_id, f"[AI] {result['answer']}")
     watcher_service.push_console(dir_id, "[AI] Analysis complete.")
@@ -411,6 +438,8 @@ async def set_mode(data: dict = Body(...), current_user: dict = Depends(get_curr
     mode = data.get("mode", "debug")
     if mode not in ("debug", "normal"):
         raise HTTPException(status_code=400, detail="mode must be 'debug' or 'normal'")
+    if mode == _app_settings.get("mode"):
+        return {"mode": mode}
     _app_settings["mode"] = mode
     _save_settings(_app_settings)
     # Update all active agents

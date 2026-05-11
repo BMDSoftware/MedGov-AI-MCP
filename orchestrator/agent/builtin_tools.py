@@ -30,7 +30,7 @@ BUILTIN_TOOLS: Dict[str, Dict] = {
                 },
                 "input_data": {
                     "type": "object",
-                    "description": "Task-specific inputs as a JSON object. For 'inference': {image_path, model_name}. For 'report': {task_ids, patient_context}.",
+                    "description": "Task-specific inputs as a JSON object. For 'inference': {image_path, model_name}. For 'cellpose': {image_path} - one file per task, call once per file. For 'report': {task_ids, patient_context}.",
                 },
             },
             "required": ["task_type", "description", "input_data"],

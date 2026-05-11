@@ -87,6 +87,8 @@ class AgenticAgent(
 
     def set_mode(self, mode: str):
         """Switch between 'debug' and 'normal' mode."""
+        if mode == self.mode:
+            return
         self.mode = mode
         if mode == 'normal':
             self.require_confirmation = False

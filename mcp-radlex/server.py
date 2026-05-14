@@ -316,8 +316,8 @@ async def find_templates(
 @mcp.tool()
 async def generate_radiology_report(
     template_id: str,
+    output_path: str,
     ctx: Context,
-    output_path: str = "",
     findings: Optional[Dict[str, Any]] = None,
     inference_results: Optional[List[Dict]] = None,
     patient_context: Optional[Dict] = None,
@@ -335,7 +335,8 @@ async def generate_radiology_report(
 
     Args:
         template_id: RadReport template ID (from find_templates).
-        output_path: File path to save the HTML report. Omit or pass "" to skip saving.
+        output_path: File path to save the HTML report. Required — the report will not be
+            returned in full in the tool response; it must be saved to disk to be accessible.
         findings: Pre-mapped field key/value dict (legacy path).
         inference_results: Raw inference results list, each with 'description', 'model',
             'structures' keys (structures have 'name', 'volume_cm3', 'voxel_count').

@@ -83,6 +83,7 @@ AI ones
 - `[ ]` [Benchmarking LLM-Based Agent Systems for Clinical Decision Tasks](https://www.nature.com/articles/s41746-026-02443-6) - npj Digital Medicine
 - `[ ]` [AI Agent in Healthcare: Applications, Evaluations, and Future Directions](https://www.nature.com/articles/s44387-026-00076-4) - npj Artificial Intelligence
 - `[ ]` [Healthcare Agent: Eliciting the Power of LLMs for Medical Consultation](https://www.nature.com/articles/s44387-025-00021-x) - npj Artificial Intelligence
+- `[ ]` [DxDirector: an agentic large language model driving the full-process clinical diagnosis](https://www.nature.com/articles/s41467-026-71928-5) - Nature Communications
 
 ### Radiology (RSNA)
 

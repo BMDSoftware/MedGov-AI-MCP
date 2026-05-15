@@ -65,6 +65,8 @@ AI ones
 
 ### IEEE
 
+- `[ ]` [https://ieeexplore.ieee.org/document/11319419](https://ieeexplore.ieee.org/document/11319419) - IEEE Journal of Biomedical and Health Informatics ?
+- `[ ]` [A Review of Methods for Trustworthy AI in Medical Imaging: The FUTURE-AI Guidelines](https://ieeexplore.ieee.org/document/11183651) - IEEE
 - `[ ]` [Agentic AI in Healthcare and Medicine: A Seven-Dimensional Taxonomy for Empirical Evaluation of LLM-Based Agents](https://ieeexplore.ieee.org/document/11329025/) - IEEE Access
 - `[ ]` [Agentic AI: A Comprehensive Survey of Technologies](https://ieeexplore.ieee.org/iel8/6287639/10820123/11071266.pdf) - IEEE Access
 - `[ ]` [Artificial General Intelligence for Medical Imaging Analysis](https://ieeexplore.ieee.org/abstract/document/10746601) - IEEE Journal
@@ -78,12 +80,17 @@ AI ones
 
 ### Nature / npj
 
+- `[ ]` [Acquisition parameters influence AI recognition of race in chest x-rays and mitigating these factors reduces underdiagnosis bias](https://www.nature.com/articles/s41467-024-52003-3) - Nature Communications
+
 - `[ ]` [LLM-based Agentic Systems in Medicine and Healthcare](https://www.nature.com/articles/s42256-024-00944-1) - Nature Machine Intelligence
 - `[ ]` [The Role of Agentic AI in Healthcare: A Scoping Review](https://www.nature.com/articles/s41746-026-02517-5) - npj Digital Medicine
 - `[ ]` [Benchmarking LLM-Based Agent Systems for Clinical Decision Tasks](https://www.nature.com/articles/s41746-026-02443-6) - npj Digital Medicine
 - `[ ]` [AI Agent in Healthcare: Applications, Evaluations, and Future Directions](https://www.nature.com/articles/s44387-026-00076-4) - npj Artificial Intelligence
 - `[ ]` [Healthcare Agent: Eliciting the Power of LLMs for Medical Consultation](https://www.nature.com/articles/s44387-025-00021-x) - npj Artificial Intelligence
+- `[ ]` [Autonomous artificial intelligence prescribing a drug to prevent severe acute graft-versus-host disease in HLA-haploidentical transplants](https://www.nature.com/articles/s41467-025-62926-0) - Nature Communications
 - `[ ]` [DxDirector: an agentic large language model driving the full-process clinical diagnosis](https://www.nature.com/articles/s41467-026-71928-5) - Nature Communications
+- `[ ]` [Large Language Models lack essential metacognition for reliable medical reasoning](https://www.nature.com/articles/s41467-024-55628-6) - Nature Communications
+  - **Use in Section I.A (risks paragraph):** cite for the hallucination/overconfidence claim — models give confident answers even when correct options are absent, directly supporting "hallucination is critical in language models used for report generation"
 
 ### Radiology (RSNA)
 

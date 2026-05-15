@@ -31,12 +31,12 @@ AI ones
 
 ### IEEE 4th International Conference 2025
 
-- `[ ]` [MCP-PUF: A Context-Hardened, ML-Assisted Authentication Protocol for Secure Healthcare IoT](https://ieeexplore.ieee.org/abstract/document/11467437) - 2025 IEEE 4th International Conference (IEEE)
+- `[x]` [MCP-PUF: A Context-Hardened, ML-Assisted Authentication Protocol for Secure Healthcare IoT](https://ieeexplore.ieee.org/abstract/document/11467437) - 2025 IEEE 4th International Conference (IEEE) DONT REFERENCE
 
 ### 2025 International Conference (IEEE)
 
-- `[ ]` [Multi-Context Protocol (MCP) Hosts provide secure and real-time integration of AI tools](https://ieeexplore.ieee.org/document/11430968) - 2025 International Conference (IEEE)
-- `[ ]` [Blockchain Integration for Trust and Consent Management in MCP-Enabled FHIR Systems](https://ieeexplore.ieee.org/document/11466653) - 2025 IEEE International Conference (IEEE)
+- `[X]` [Multi-Context Protocol (MCP) Hosts provide secure and real-time integration of AI tools](https://ieeexplore.ieee.org/document/11430968) - 2025 International Conference (IEEE)
+- `[x]` [Blockchain Integration for Trust and Consent Management in MCP-Enabled FHIR Systems](https://ieeexplore.ieee.org/document/11466653) - 2025 IEEE International Conference (IEEE) DONT REFERENCE
 - `[ ]` [The Privacy Protector: MCP-based LLM agent for Health Support](https://ieeexplore.ieee.org/abstract/document/11406275) - 2025 8th International Conference (IEEE)
 
 ### IEEE ICIP 2022
@@ -69,10 +69,10 @@ AI ones
 - `[ ]` [A Review of Methods for Trustworthy AI in Medical Imaging: The FUTURE-AI Guidelines](https://ieeexplore.ieee.org/document/11183651) - IEEE
 - `[ ]` [Agentic AI in Healthcare and Medicine: A Seven-Dimensional Taxonomy for Empirical Evaluation of LLM-Based Agents](https://ieeexplore.ieee.org/document/11329025/) - IEEE Access
 - `[ ]` [Agentic AI: A Comprehensive Survey of Technologies](https://ieeexplore.ieee.org/iel8/6287639/10820123/11071266.pdf) - IEEE Access
-- `[ ]` [Artificial General Intelligence for Medical Imaging Analysis](https://ieeexplore.ieee.org/abstract/document/10746601) - IEEE Journal
+- `[x]` [Artificial General Intelligence for Medical Imaging Analysis](https://ieeexplore.ieee.org/abstract/document/10746601) - IEEE Journal
 - `[ ]` [LLM-Based Generative AI in Medicine: Analysis of Current Research Trends](https://ieeexplore.ieee.org/abstract/document/11151540) - IEEE
 - `[ ]` [Redefining Elderly Care With Agentic AI: Challenges and Opportunities](https://doi.org/10.1109/OJCS.2026.3650842) - IEEE Open Journal of the Computer Society, 2026
-- `[ ]` [Building Trustworthy AI in Healthcare](https://doi.org/10.1109/ACCESS.2025.3648410) - IEEE Access, 2026
+- `[x]` [Building Trustworthy AI in Healthcare](https://doi.org/10.1109/ACCESS.2025.3648410) - IEEE Access, 2026
 
 ### Nature Methods
 

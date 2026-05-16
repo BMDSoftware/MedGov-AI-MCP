@@ -1,5 +1,7 @@
 # Paper Notes
 
+
+# 2026-05-15
 ---
 
 ## Collaco et al. (2026) — npj Digital Medicine 9:345
@@ -115,3 +117,89 @@ Instantiates the FUTURE-AI framework (Fairness, Universality, Traceability, Usab
 **Page 2, Introduction:**
 "Overreliance on AI systems can lead to automation bias, where clinicians accept model outputs without sufficient critical review, even when incorrect."
 → Section I.A — if discussing why human oversight is needed
+
+---
+
+# 2026-05-16
+---
+
+## Cozzolino et al. (2025) — Artificial Intelligence in Medicine 165:103137
+*Are AI-based surveillance systems for healthcare-associated infections ready for clinical practice?*
+https://doi.org/10.1016/j.artmed.2025.103137
+
+Systematic review and meta-analysis of 249 AI studies on hospital infection surveillance. PRISMA, PROSPERO-registered. Main finding: only 9 out of 249 studies (3.6%) were tested in real clinical practice. Not imaging — HAI surveillance. Cite only for the general clinical AI deployment gap.
+
+**Abstract:**
+"Only 30 studies deployed the model in a user-friendly tool, and 9 tested it in real clinical practice."
+→ Section I.A — number for the deployment gap (9/249 = 3.6%)
+
+**Page 19:**
+"introducing a well-performing AI model in clinical settings does not automatically yield positive results. It is crucial to consider how the model fits into the clinical workflow."
+
+---
+
+## Jia et al. (2025) — Computers in Biology and Medicine 192:110237
+*A deployment safety case for AI-assisted prostate cancer diagnosis*
+https://doi.org/10.1016/j.compbiomed.2025.110237
+
+Prospective study in 3 UK NHS hospitals deploying Paige Prostate Suite, an FDA-approved AI for prostate cancer. Applies hazard and risk analysis to the clinical deployment workflow. Main finding: new hazards arise in deployment that regulatory approval does not catch.
+
+**Discussion (Page 15):**
+"Obtaining regulatory approval for AI/ML-based medical devices marks a crucial milestone in ensuring their safety. However, it is imperative to recognise that regulatory approval is only the initial step in assuring safety."
+
+**Conclusion (Page 17):**
+"we identified new hazards which arise from the deployment, which cannot be identified in the development, and hence would not be addressed by regulatory approvals."
+→ Section I.A — for the regulatory gap claim
+
+---
+
+## Chen et al. (2025) — Nature Communications 16:8391
+*Autonomous artificial intelligence prescribing a drug to prevent severe acute graft-versus-host disease*
+https://doi.org/10.1038/s41467-025-62926-0
+
+Prospective phase-2 clinical trial. Deployed daGOAT, an autonomous AI agent, in a hospital information system to prescribe ruxolitinib for preventing GvHD after transplantation. 110 patients, 98% initial compliance with AI prescriptions. Severe GvHD rate: 5.5% vs 16% in controls. Not imaging — hematology. Use as positive autonomous AI deployment example.
+
+**Introduction (Page 1):**
+"Autonomous AI models for deciding treatment strategies are available but rarely applied prospectively in clinical settings."
+→ Section I.A — supports deployment gap from the positive side
+
+**Abstract:**
+"many physicians and patients are receptive to using conditional autonomous AI to prescribe a drug."
+→ Section I.A — positive deployment result
+
+---
+
+## Abramoff et al. (2024) — npj Digital Medicine 7:369
+*Mitigation of AI adoption bias through an improved autonomous AI system for diabetic retinal disease*
+https://www.nature.com/articles/s41746-024-01389-x
+
+> Abstract only read.
+
+Preregistered trial of FDA-authorized autonomous AI for diabetic retinopathy screening in primary care. 626 participants, racially diverse. All non-inferiority endpoints met, no racial or sex bias. Use only as a citation for deployed autonomous AI.
+
+---
+
+## Wolf et al. (2024) — Nature Communications 15:421
+*Autonomous artificial intelligence increases screening and follow-up for diabetic retinopathy in youth: the ACCESS randomized control trial*
+https://doi.org/10.1038/s41467-023-44676-z
+
+RCT at Johns Hopkins, 164 participants. Autonomous AI (FDA De Novo authorized, IDx-DR) vs standard care for diabetic eye exams in youth. Primary result: 100% exam completion in AI group vs 22% in control (p<0.001). First RCT of autonomous AI closing a guideline-based care gap. Not imaging — ophthalmology. Use as positive autonomous AI deployment example.
+
+**Discussion (Page 4):**
+"To our knowledge, the present study is the first RCT to evaluate the role of autonomous AI in closing a guideline-based care gap."
+→ Section I.A — supports rarity of prospective autonomous AI deployments
+
+---
+
+## Savage et al. (2024) — American Journal of Roentgenology 223:e2431639
+*Prospective Evaluation of AI Triage of Intracranial Hemorrhage on Noncontrast Head CT*
+https://ajronline.org/doi/epdf/10.2214/AJR.24.31639
+
+Prospective single-center study (9,954 head CTs, 7,371 patients). FDA-cleared AI triage system deployed in real clinical radiology. Main finding: AI did not improve radiologist performance or turnaround times. Radiologists alone outperformed AI alone (99.5% vs 93.0%). Use as negative deployment example to show that AI IS being deployed but narrow deployments fall short.
+
+**Page 1, Introduction:**
+"Research on the interaction between radiologists and AI is scarce, leaving AI systems' true utility in real-world workflows poorly understood."
+→ Section I.A — deployment gap. Means: while AI tools are being deployed, researchers have not studied how radiologists and AI actually interact in real workflows. Most studies only test AI accuracy in isolation, not whether it helps the radiologist in practice. This is exactly what Savage et al. confirmed — the AI was accurate alone but added no value when combined with radiologists.
+
+**Conclusion:**
+"An AI triage system for ICH detection did not improve radiologists' diagnostic performance or report turnaround times."

@@ -84,15 +84,21 @@ AI ones
 
 - `[ ]` [LLM-based Agentic Systems in Medicine and Healthcare](https://www.nature.com/articles/s42256-024-00944-1) - Nature Machine Intelligence
 - `[x]` [The Role of Agentic AI in Healthcare: A Scoping Review](https://www.nature.com/articles/s41746-026-02517-5) - npj Digital Medicine
+- `[x]` [Mitigation of AI adoption bias through an improved autonomous AI system for diabetic retinal disease](https://www.nature.com/articles/s41746-024-01389-x) - npj Digital Medicine, 2024 — abstract only, use only as deployed AI citation
+- `[x]` [Autonomous artificial intelligence increases screening and follow-up for diabetic retinopathy in youth: the ACCESS randomized control trial](https://www.nature.com/articles/s41467-023-44676-z) - Nature Communications, 2024
 - `[ ]` [Benchmarking LLM-Based Agent Systems for Clinical Decision Tasks](https://www.nature.com/articles/s41746-026-02443-6) - npj Digital Medicine
 - `[ ]` [AI Agent in Healthcare: Applications, Evaluations, and Future Directions](https://www.nature.com/articles/s44387-026-00076-4) - npj Artificial Intelligence
 - `[ ]` [Healthcare Agent: Eliciting the Power of LLMs for Medical Consultation](https://www.nature.com/articles/s44387-025-00021-x) - npj Artificial Intelligence
-- `[ ]` [Autonomous artificial intelligence prescribing a drug to prevent severe acute graft-versus-host disease in HLA-haploidentical transplants](https://www.nature.com/articles/s41467-025-62926-0) - Nature Communications
+- `[x]` [Autonomous artificial intelligence prescribing a drug to prevent severe acute graft-versus-host disease in HLA-haploidentical transplants](https://www.nature.com/articles/s41467-025-62926-0) - Nature Communications
 - `[ ]` [DxDirector: an agentic large language model driving the full-process clinical diagnosis](https://www.nature.com/articles/s41467-026-71928-5) - Nature Communications
 - `[x]` [Large Language Models lack essential metacognition for reliable medical reasoning](https://www.nature.com/articles/s41467-024-55628-6) - Nature Communications
   - **Use in Section I.A (risks paragraph):** cite for the hallucination/overconfidence claim — models give confident answers even when correct options are absent, directly supporting "hallucination is critical in language models used for report generation"
 
-### Radiology (RSNA)
+### American Journal of Roentgenology (AJR)
+
+- `[x]` [Prospective Evaluation of AI Triage of Intracranial Hemorrhage on Noncontrast Head CT](https://ajronline.org/doi/epdf/10.2214/AJR.24.31639) - AJR 2024
+
+### Radiology (RSNA) No UA access to RSNA articles
 
 - `[ ]` [Agentic AI in Radiology](https://pubs.rsna.org/doi/10.1148/radiol.252730) - Radiology
 - `[ ]` [Agentic AI in Radiology: Evolution from LLMs to Future Clinical Integration](https://doi.org/10.1148/ryai.250651) - Radiology: Artificial Intelligence
@@ -105,6 +111,8 @@ AI ones
 
 ### Elsevier
 
+- `[x]` [Are AI-based surveillance systems for healthcare-associated infections ready for clinical practice?](https://doi.org/10.1016/j.artmed.2025.103137) - Artificial Intelligence in Medicine, Elsevier, 2025
+- `[x]` [A deployment safety case for AI-assisted prostate cancer diagnosis](https://doi.org/10.1016/j.compbiomed.2025.110237) - Computers in Biology and Medicine, Elsevier, 2025
 - `[ ]` [Agentic LLM for anonymizing healthcare data with contextual awareness](https://doi.org/10.1016/j.knosys.2026.116034) - Knowledge-Based Systems, Elsevier, 2026
 - `[ ]` [Review of Agentic AI in Radiology: From Current Clinical Integration to Future Innovations](https://www.sciencedirect.com/article/abs/pii/S0009926026001273) - Clinical Radiology
 - `[ ]` [Evaluating LLMs and Agents in Healthcare: Key Challenges in Clinical Applications](https://mednexus.org/doi/10.1016/j.imed.2025.03.002) - Intelligent Medicine

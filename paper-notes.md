@@ -66,6 +66,21 @@ Short commentary. Not a research article — use only as supporting context, not
 "agentic AI is not yet broadly used in daily clinical radiology practice"
 → Section I.B — deployment gap, alongside Collaco et al.
 
+**"Navigating hurdles" section, page 2 — regulatory liability:**
+"Agentic systems, which may autonomously suggest clinical actions, reprioritize studies, or recommend workflow changes, introduce new complexities regarding liability and responsibility."
+→ Section I.A — regulatory gap claim
+
+**"Navigating hurdles" section, page 2 — human oversight mandate:**
+"Radiologists must maintain ultimate oversight and decision-making authority, but institutions will need clear policies defining the acceptable boundaries of AI-initiated actions."
+→ Section I.A — why human-in-the-loop is needed
+
+**Page 3 — integration challenge:**
+"Agentic AI will require seamless, secure interoperability with these platforms to function effectively without disrupting clinical care."
+→ MCP as the interoperability layer
+
+**Table 1, page 2 — Traditional vs Agentic AI comparison:**
+Formally distinguishes Traditional AI (reactive, static, narrow autonomy, radiologist reviews outputs) from Agentic AI (autonomous, dynamic, supervisory oversight needed, radiologist supervises and can override). 
+
 **References to pursue from inside this paper:**
 - Ref 8: Wiklund & Medson (2023) — DOI 10.1148/ryai.220286 — deep learning for pulmonary embolism detection and triage
 - Ref 9: Savage et al. (2024) — DOI 10.2214/AJR.24.31639 — AI triage for intracranial hemorrhage
@@ -129,6 +144,8 @@ https://doi.org/10.1016/j.artmed.2025.103137
 
 Systematic review and meta-analysis of 249 AI studies on hospital infection surveillance. PRISMA, PROSPERO-registered. Main finding: only 9 out of 249 studies (3.6%) were tested in real clinical practice. Not imaging — HAI surveillance. Cite only for the general clinical AI deployment gap.
 
+**9 out of 249 studies (3.6%) were tested in real clinical practice.**
+
 **Abstract:**
 "Only 30 studies deployed the model in a user-friendly tool, and 9 tested it in real clinical practice."
 → Section I.A — number for the deployment gap (9/249 = 3.6%)
@@ -143,6 +160,8 @@ Systematic review and meta-analysis of 249 AI studies on hospital infection surv
 https://doi.org/10.1016/j.compbiomed.2025.110237
 
 Prospective study in 3 UK NHS hospitals deploying Paige Prostate Suite, an FDA-approved AI for prostate cancer. Applies hazard and risk analysis to the clinical deployment workflow. Main finding: new hazards arise in deployment that regulatory approval does not catch.
+
+**deployed in 3 UK NHS hospitals**
 
 **Discussion (Page 15):**
 "Obtaining regulatory approval for AI/ML-based medical devices marks a crucial milestone in ensuring their safety. However, it is imperative to recognise that regulatory approval is only the initial step in assuring safety."
@@ -159,7 +178,7 @@ https://doi.org/10.1038/s41467-025-62926-0
 
 Prospective phase-2 clinical trial. Deployed daGOAT, an autonomous AI agent, in a hospital information system to prescribe ruxolitinib for preventing GvHD after transplantation. 110 patients, 98% initial compliance with AI prescriptions. Severe GvHD rate: 5.5% vs 16% in controls. Not imaging — hematology. Use as positive autonomous AI deployment example.
 
-**Introduction (Page 1):**
+**Abstract (Page 1):**
 "Autonomous AI models for deciding treatment strategies are available but rarely applied prospectively in clinical settings."
 → Section I.A — supports deployment gap from the positive side
 
@@ -188,6 +207,10 @@ RCT at Johns Hopkins, 164 participants. Autonomous AI (FDA De Novo authorized, I
 **Discussion (Page 4):**
 "To our knowledge, the present study is the first RCT to evaluate the role of autonomous AI in closing a guideline-based care gap."
 → Section I.A — supports rarity of prospective autonomous AI deployments
+
+**Discussion, page 4 — scalability:**
+"The advantages of autonomous AI are its point-of-care procedure, immediate results, and its scalability as it does not require additional clinical experts, ophthalmic oversight, or highly skilled operators."
+→ Scalability or Section II — supports the argument that autonomous AI reduces dependency on specialized human resources. Note: refers to a locked single-task AI.
 
 ---
 

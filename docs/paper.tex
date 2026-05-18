@@ -655,10 +655,19 @@ With the \textbf{wsi-tumor-detection} skill active, the agent followed the presc
 
 Both use cases completed end-to-end without manual intervention, producing clinically structured outputs from raw imaging inputs. Use Case 1 confirmed that the system correctly orchestrates DICOM parsing, model selection, inference, and report generation autonomously. Use Case 2 confirmed the same for whole-slide image analysis and cell segmentation, with the additional observation that the skill was necessary to produce a domain-correct report at the final step.
 
-% TODO: figures
-% \ref{fig:task1-report}: radiology report from Use Case 1 (correct domain, correct output)
-% \ref{fig:task2-noskill-report}: radiology template applied to pathology specimen (wrong domain)
-% \ref{fig:task2-skill-report}: pathology report with correct structure
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{images/uc2-noskill-report.png}
+  \caption{Use Case 2: the agent applied \texttt{radlex.generate\_radiology\_report} to a pathology specimen, producing a radiology template with fields inapplicable to tissue analysis.}
+  \label{fig:task2-noskill-report}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{images/uc2-skill-report.png}
+  \caption{Use Case 2 with skill: the \textbf{wsi-tumor-detection} skill directed the agent to use the pathology template from \textbf{clinical-reports}, producing a report with specimen information, microscopic description, and diagnosis fields appropriate to a tissue specimen.}
+  \label{fig:task2-skill-report}
+\end{figure}
 
 \subsubsection{Use Case 2 Results}
 

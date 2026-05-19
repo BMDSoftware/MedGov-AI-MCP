@@ -16,7 +16,7 @@
 \maketitle
 
 \begin{abstract}
-Clinical AI tools for medical imaging are increasingly capable but remain largely isolated from one another, requiring custom integration work that slows adoption and creates fragmented, difficult-to-maintain deployments. This paper presents MedGov-AI, an agentic AI system that addresses the integration and orchestration problem directly by using the Model Context Protocol (MCP) as a standardized interoperability layer. Rather than hardcoding workflow logic, MedGov-AI uses a large language model as an autonomous orchestrator that discovers and invokes clinical tools at runtime through a set of MCP servers covering DICOM parsing, CT segmentation (MONAI), whole-slide image cell segmentation (Cellpose), radiology report generation (RadLex), and digital pathology (iPath). Domain-specific workflow governance is provided through skill files, plain-text protocol documents that encode step-by-step clinical sequences and guard conditions without retraining the model. The system supports both interactive and event-driven operation: in workspace monitoring mode, files deposited into a configured directory trigger autonomous agent execution without any user input. Two end-to-end use cases were evaluated: DICOM-based CT analysis with structured report generation, and whole-slide pathology tumor detection with automated cell segmentation and cross-workspace file routing. Results show that API-hosted large language models complete multi-step clinical workflows reliably within a bounded iteration budget, while locally-hosted 7-8B parameter models do not, revealing a current tension between privacy and reliability in clinical deployment. Skill-guided execution prevented domain-incorrect tool selection in the pathology use case, confirming that skills are necessary at decision forks where plausible but clinically incorrect options exist. Assisted and autonomous modes produced identical tool sequences, validating unattended autonomous operation. Six MCP servers were integrated without any agent-side connector code: each server wraps its underlying tool in the MCP protocol, and the agent discovers and invokes all of them through the same standard interface, supporting the argument that MCP can reduce the integration overhead that currently limits clinical AI adoption.
+Clinical AI tools for medical imaging are increasingly capable but remain largely isolated from one another, requiring custom integration work that slows adoption and creates fragmented, difficult-to-maintain deployments. This paper presents MedGov-AI, an agentic AI system that addresses the integration and orchestration problem directly by using the Model Context Protocol (MCP) as a standardized interoperability layer. Rather than hardcoding workflow logic, MedGov-AI uses a large language model as an autonomous orchestrator that discovers and invokes clinical tools at runtime through a set of MCP servers covering DICOM parsing, CT segmentation (MONAI), whole-slide image cell segmentation (Cellpose), radiology report generation (RadLex), and digital pathology (iPath). Domain-specific workflow governance is provided through skill files, plain-text protocol documents that encode step-by-step clinical sequences and guard conditions without retraining the model. The system supports both interactive and event-driven operation: in workspace monitoring mode, files deposited into a configured directory trigger autonomous agent execution without any user input. Three end-to-end use cases were evaluated: DICOM-based CT analysis with structured report generation; interactive whole-slide pathology tumor detection via iPath with cell segmentation and structured pathology reporting; and autonomous workspace monitoring with Cellpose cell segmentation and cross-workspace file routing. Results show that API-hosted large language models complete multi-step clinical workflows reliably within a bounded iteration budget, while locally-hosted 7-8B parameter models do not, revealing a current tension between privacy and reliability in clinical deployment. Skill-guided execution prevented domain-incorrect tool selection in the pathology use case, confirming that skills are necessary at decision forks where plausible but clinically incorrect options exist. Assisted and autonomous modes produced identical tool sequences, validating unattended autonomous operation. Six MCP servers were integrated without any agent-side connector code: each server wraps its underlying tool in the MCP protocol, and the agent discovers and invokes all of them through the same standard interface, supporting the argument that MCP can reduce the integration overhead that currently limits clinical AI adoption.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -441,7 +441,7 @@ When the debounce window closes, the watcher copies the incoming files from the 
 
 \subsection{Use Cases}
 
-Two clinical workflows were selected to evaluate the system. Together they cover the two imaging modalities the system targets, radiology and pathology, and exercise the full tool stack: DICOM parsing, segmentation inference, report generation, and whole slide image analysis. Both workflows can be initiated interactively through the chat interface or triggered automatically when files arrive in a monitored directory.
+Three clinical workflows were selected to evaluate the system. Together they cover the two imaging modalities the system targets, radiology and pathology, and exercise the full tool stack: DICOM parsing, segmentation inference, report generation, whole slide image analysis, and event-driven workspace monitoring. Use Cases 1 and 2 are initiated interactively through the chat interface; Use Case 3 is triggered automatically when files arrive in a monitored directory.
 
 \subsubsection{Radiology: DICOM Analysis and Report Generation}
 
@@ -449,7 +449,7 @@ A clinician or automated trigger provides a DICOM file or series. The system ide
 
 \subsubsection{Pathology: Whole Slide Image Analysis}
 
-A whole slide image is provided. The system runs tumour detection and cell segmentation, returning segmentation results and a summary of the detected region. Success is defined as a completed segmentation run with quantitative output, specifically the detected region and cell count, returned without manual intervention.
+Two pathology workflows are evaluated. In the interactive scenario (Use Case 2), a slide UID is provided and the system retrieves a region of interest from the remote iPath platform, runs cell segmentation, and produces a structured pathology report. In the autonomous scenario (Use Case 3), ROI images arrive in a monitored directory and the system detects each file, runs cell segmentation, and routes the result based on a configurable cell count threshold. Success in both cases is defined as a completed segmentation run with quantitative output returned without manual intervention.
 
 \subsubsection{Use Case 1 - Interactive DICOM Analysis and Segmentation}
 
@@ -462,7 +462,7 @@ A clinician has a DICOM scan and needs segmentation without knowing which model 
 The user uploads either a single DICOM volume file or a directory of DICOM slices forming a 3D series through the frontend file selector, and enters the following prompt in the chat to initiate the workflow:
 
 \begin{quote}
-\textit{``Analyze this CT scan and run the appropriate segmentation model.''}
+\textit{``Analyze this DICOM series and run the appropriate segmentation model. Make a report with the findings.''}
 \end{quote}
 
 \textbf{Workflow.}
@@ -475,7 +475,19 @@ The workflow is illustrated in Figure~\ref{fig:analysis-workflow}. The agent cal
   \label{fig:analysis-workflow}
 \end{figure*}
 
-\subsubsection{Use Case 2 - Autonomous Pathology ROI Monitoring}
+\subsubsection{Use Case 2 - Interactive WSI Tumor Detection}
+
+\textbf{Clinical context.}
+A pathologist or researcher has access to a whole-slide image hosted on the iPath telepathology platform and needs to localize a suspicious region, quantify the cells within it, and produce a structured pathology report, without manually navigating the WSI viewer.
+
+\textbf{Setup.}
+The user provides a slide UID and enters the following prompt in the chat interface:
+
+\begin{quote}
+\textit{``Find the tumor in this lung thumbnail (UID: 2.25.338247016696998394111485786182386609869). Identify and localize any suspicious regions consistent with tumor presence. Within the detected tumor area, estimate and count the number of cells. Then generate a structured report summarizing the findings, including tumor location, size (if inferable), cell count estimate, and any relevant observations or limitations.''}
+\end{quote}
+
+\subsubsection{Use Case 3 - Autonomous Pathology ROI Monitoring}
 
 \textbf{Clinical context.}
 A pathology instrument or PACS system exports region-of-interest (ROI) images to a local directory as part of its standard output. No human is available to initiate analysis for each arriving file. The goal is for the system to detect each new file, run cell segmentation automatically, and route the result based on a configurable cell count threshold, without any user interaction. Files can also be deposited manually through the Workspaces tab in the frontend, which provides a console showing detection events and agent activity in real time.
@@ -493,13 +505,13 @@ The workflow is illustrated in Figure~\ref{fig:workspace-workflow}. When the pol
 \begin{figure*}[t]
   \centering
   \includegraphics[width=\textwidth]{images/WorkspaceMonitoringWorkflow.png}
-  \caption{Use Case 2 - Autonomous pathology ROI monitoring workflow.}
+  \caption{Use Case 3 - Autonomous pathology ROI monitoring workflow.}
   \label{fig:workspace-workflow}
 \end{figure*}
 
 \subsection{Evaluation Setup}
 
-Evaluation was structured in three phases. Phase 1 evaluates both API-based and locally hosted language models for tool-calling reliability in clinical workflows. Phase 2 evaluates whether the agent can operate autonomously in clinical workflows. It first examines how skills provide the workflow constraints that make autonomous execution reliable, showing that the agent follows the correct tool sequence and guard conditions without human intervention. It then compares assisted and autonomous execution of the same task to assess whether human-in-the-loop confirmation changes the outcome, or whether the agent produces equivalent results in both modes. Phase 3 runs the two use cases end to end, comparing autonomous and manual workflows, evaluated by task completion and qualitative assessment of outputs, specifically whether the radiology report was correctly filled and whether segmentation completed successfully.
+Evaluation was structured in three phases. Phase 1 evaluates both API-based and locally hosted language models for tool-calling reliability in clinical workflows. Phase 2 evaluates whether the agent can operate autonomously in clinical workflows. It first examines how skills provide the workflow constraints that make autonomous execution reliable, showing that the agent follows the correct tool sequence and guard conditions without human intervention. It then compares assisted and autonomous execution of the same task to assess whether human-in-the-loop confirmation changes the outcome, or whether the agent produces equivalent results in both modes. Phase 3 runs all three use cases end to end. Use Cases 1 and 2 are evaluated by task completion and qualitative assessment of outputs (whether the report was correctly filled and whether segmentation completed successfully). Use Case 3 is evaluated by end-to-end autonomous operation of the workspace monitoring pipeline.
 
 Language model experiments were run on a laptop with an AMD Ryzen 5 8645HS CPU, 16~GB DDR5 RAM, and an NVIDIA GeForce RTX 3050 6~GB GPU. MONAI inference benchmarks were run on two configurations: the same local machine using CUDA (GPU), and a shared deployment server using CPU-only inference, using MONAI 1.5.1 and PyTorch 2.6.0. Two categories of language model were tested: large API-based models (Gemini 2.0 Flash, Gemini 2.5 Flash, and Gemini 3.0) and locally hosted open-source models of significantly smaller scale (deepseek-r1:7b and llama3.1:8b via Ollama).
 
@@ -599,32 +611,22 @@ The same DICOM analysis task was executed twice: once in assisted mode, where th
 
 The tool call sequences were identical across both executions. The agent selected the same tools in the same order, passed the same arguments, and reached \texttt{goal\_achieved} in the same number of iterations. No tool call was rejected or modified by the user during the assisted run, and the outputs produced, segmentation results and per-organ volumes in the Results tab, were equivalent.
 
-This result has a direct architectural implication. If assisted mode were a correction mechanism, the two sequences would diverge whenever the user overrode a proposed tool call. The fact that they did not indicates that the agent's autonomous decisions were already correct, and that the confirmation step added visibility without changing the outcome. Assisted mode is therefore best understood as a transparency and audit mechanism for operators who want to inspect each tool call before it executes, rather than a safety net that catches errors the agent would otherwise make. This in turn validates autonomous mode for event-driven workflows such as Use Case 2, where no user is present: the agent produces the same result whether or not a human is watching.
+This result has a direct architectural implication. If assisted mode were a correction mechanism, the two sequences would diverge whenever the user overrode a proposed tool call. The fact that they did not indicates that the agent's autonomous decisions were already correct, and that the confirmation step added visibility without changing the outcome. Assisted mode is therefore best understood as a transparency and audit mechanism for operators who want to inspect each tool call before it executes, rather than a safety net that catches errors the agent would otherwise make. This in turn validates autonomous mode for event-driven workflows such as Use Case 3, where no user is present: the agent produces the same result whether or not a human is watching.
 
 
 
 
 \subsection{Phase 3 - Use Case Comparison}
 
-This phase evaluates the system through two end-to-end clinical workflows covering different imaging modalities and tool combinations. Use Case 1 covers interactive DICOM analysis: a user uploads a CT series, issues a natural language prompt, and the agent autonomously parses the study, selects and runs a segmentation model, and generates a structured radiology report. Use Case 2 covers event-driven pathology analysis: the workspace monitoring system detects incoming whole-slide image ROIs, triggers the agent without user input, runs cell segmentation via Cellpose, and routes the result based on a threshold rule. Each task was executed under two conditions, with and without a skill loaded, to isolate the effect of domain-specific workflow guidance on agent behavior.
+This phase evaluates the system through three end-to-end clinical workflows. Use Case 1 covers interactive DICOM analysis: a user uploads a CT series, issues a natural language prompt, and the agent autonomously parses the study, selects and runs a segmentation model, and generates a structured radiology report. Use Case 2 covers interactive WSI tumor detection: the user provides a slide UID, and the agent retrieves a region of interest from the iPath platform, runs cell segmentation via Cellpose, and generates a structured pathology report. Use Cases 1 and 2 were each executed under two conditions, with and without a skill loaded, to isolate the effect of domain-specific workflow guidance on agent behavior. Use Case 3 covers event-driven pathology analysis: the workspace monitoring system detects incoming ROI images, triggers the agent without user input, runs cell segmentation, and routes the result based on a configurable threshold rule.
 
-\subsubsection{Use Case 1 Results}
-Use Case 1 was initiated with a publicly available DICOM series from the Cancer Imaging Archive and the following prompt:
-
-\begin{quote}
-\textit{``Analyze this DICOM series and run the appropriate segmentation model. Use the spleen model and make a report with the findings.''}
-\end{quote}
-
-Use Case 2 was initiated without a file upload and the following prompt:
-
-\begin{quote}
-\textit{``Find the tumor in this lung thumbnail (UID: 2.25.338247016696998394111485786182386609869). Identify and localize any suspicious regions consistent with tumor presence. Within the detected tumor area, estimate and count the number of cells. Then generate a structured report summarizing the findings, including tumor location, size (if inferable), cell count estimate, and any relevant observations or limitations.''}
-\end{quote}
+\subsubsection{Use Cases 1 and 2 Results}
+Use Case 1 was initiated with a publicly available DICOM series from the Cancer Imaging Archive and Use Case 2 without a file upload using the iPath slide UID, both with the prompts defined in the setup.
 
 Each task was executed under two conditions. In the skilled condition, the agent loads the corresponding skill file and follows its prescribed sequence as a workflow protocol. In the unskilled condition, the agent selects tools based solely on its general reasoning over the available tool descriptions. Results are summarised in Table~\ref{tab:uc1-results}.
 
 \begin{table*}[t]
-  \caption{Use Case 1: Execution Metrics and Outcomes}
+  \caption{Use Cases 1 and 2: Execution Metrics and Outcomes}
   \label{tab:uc1-results}
   \centering
   \small
@@ -653,7 +655,7 @@ Independently, the unskilled condition produced a domain-incorrect report at the
 
 With the \textbf{wsi-tumor-detection} skill active, the agent followed the prescribed workflow sequence without deviation. Cell segmentation yielded 428 cells detected in the 2,700$\times$2,700~px ROI. The final report was generated using the pathology template from the \textbf{clinical-reports} skill, with fields appropriate to a tissue specimen including specimen information, microscopic description, and diagnosis (Figure~\ref{fig:task2-skill-report}). The skilled condition consumed 135,842 total tokens against 95,942 in the unskilled condition, reflecting the additional context from loading two skill files, with wall-clock times of 129.6~s and 117.9~s respectively.
 
-Both use cases completed end-to-end without manual intervention, producing clinically structured outputs from raw imaging inputs. Use Case 1 confirmed that the system correctly orchestrates DICOM parsing, model selection, inference, and report generation autonomously. Use Case 2 confirmed the same for whole-slide image analysis and cell segmentation, with the additional observation that the skill was necessary to produce a domain-correct report at the final step.
+Use Cases 1 and 2 completed end-to-end without manual intervention, producing clinically structured outputs from raw imaging inputs. Use Case 1 confirmed that the system correctly orchestrates DICOM parsing, model selection, inference, and report generation autonomously. Use Case 2 confirmed the same for whole-slide image analysis and cell segmentation, with the additional observation that the skill was necessary to produce a domain-correct report at the final step.
 
 \begin{figure}[h]
   \centering
@@ -669,7 +671,7 @@ Both use cases completed end-to-end without manual intervention, producing clini
   \label{fig:task2-skill-report}
 \end{figure}
 
-\subsubsection{Use Case 2 Results}
+\subsubsection{Use Case 3 Results}
 
 Initial testing of the workspace monitoring system used two workspaces configured to validate both the watcher trigger pipeline and the agent's ability to follow workspace-specific instructions without cross-contamination between workspaces.
 
@@ -731,7 +733,7 @@ A practical advantage of both workflows, independent of accuracy, is the conveni
 
 \subsection{MCP as a Practical Integration Layer}
 
-The Background identifies fragmentation as a structural problem in clinical AI: tools exist, but no standard layer connects them, forcing each institution to build and maintain custom integrations. MCP was evaluated in this work as a candidate solution to that problem. The results support that framing. Six servers covering distinct clinical capabilities were integrated without any agent-side connector code: each server exposes its tools through the MCP protocol, and adding a new server required no changes to the agent or any existing component. More importantly, this composability held under real workflow conditions: both use cases required the agent to sequence operations across multiple servers dynamically, and in both cases it did so correctly without any hardcoded knowledge of how those servers were implemented.
+The Background identifies fragmentation as a structural problem in clinical AI: tools exist, but no standard layer connects them, forcing each institution to build and maintain custom integrations. MCP was evaluated in this work as a candidate solution to that problem. The results support that framing. Six servers covering distinct clinical capabilities were integrated without any agent-side connector code: each server exposes its tools through the MCP protocol, and adding a new server required no changes to the agent or any existing component. More importantly, this composability held under real workflow conditions: all three use cases required the agent to sequence operations across multiple servers dynamically, and in all cases it did so correctly without any hardcoded knowledge of how those servers were implemented.
 
 The broader implication is that MCP could reduce the integration overhead that currently slows AI adoption in clinical settings. Under the conventional approach, connecting a new tool to an existing workflow requires custom development work regardless of how well-designed the tool itself is. Under an MCP-based architecture, the integration contract is defined by the protocol: a conforming server is immediately accessible to any conforming agent. If this holds as more clinical tools adopt MCP, the bottleneck shifts from integration engineering to tool capability itself, which is a more tractable problem. Singh et al. argue this conceptually~\cite{mcp-aditi}; the use cases presented here provide evidence that it holds in practice.
 
@@ -739,13 +741,9 @@ One finding qualifies this picture. MCP decouples the agent from a server's impl
 
 One open question is how this composability scales beyond the six servers evaluated here. The architecture imposes no limit on the number of registered servers, and adding a new one requires no changes to the agent. However, all tool descriptions are loaded into context at startup, and as the catalogue grows the agent's ability to select the correct tool from an increasingly large set is expected to degrade, a direct instance of the failure mode where options buried deeper in a long context are more likely to be overlooked or misapplied~\cite{jaroslawicz2025ifscale}. Skills that function as workflow guides partially mitigate this by prescribing explicit tool sequences, reducing the risk of the agent selecting the wrong tool from an increasingly large catalogue, but they do not reduce the size of the tool list itself. A natural extension would be a multi-agent architecture in which specialist agents each expose only the tools relevant to their domain, keeping individual context windows bounded regardless of how many total servers exist. This design was not evaluated here and remains future work.
 
-\subsection{Verified Autonomous Execution}
-
-The finding that assisted and autonomous mode produced identical tool sequences has a direct implication for how human oversight of agentic clinical AI should be understood. If the confirmation step changed outcomes, assisted mode would be a safety mechanism: the human would be catching and correcting errors the agent would otherwise make. The fact that it did not indicates that the agent's decisions were already correct, and that the confirmation step added visibility without adding control. Assisted mode is therefore best understood as a transparency and audit mechanism for operators who want to inspect each tool call before it executes, rather than a safety net that catches errors the agent would otherwise make. This in turn validates autonomous mode for event-driven workflows such as Use Case 2, where no user is present: the agent produces the same result whether or not a human is watching.
-
 \subsection{Skills as Workflows: When Guidance Changes Behaviour}
 
-The two use cases clarify when a skill operating as a workflow changes the agent's behaviour and when it does not. In Use Case 1, the skill made no difference to the outcome: the DICOM analysis workflow presents no ambiguous decision forks, so the agent reached the correct sequence through general reasoning alone. The skill enforces protocol adherence on top of an already correct execution, which matters for reproducibility but does not change the result. Use Case 2 produced a different outcome, with two clinically incorrect decisions in the unskilled condition (Section~\ref{sec:results}).
+Use Cases 1 and 2 clarify when a skill operating as a workflow changes the agent's behaviour and when it does not. In Use Case 1, the skill made no difference to the outcome: the DICOM analysis workflow presents no ambiguous decision forks, so the agent reached the correct sequence through general reasoning alone. The skill enforces protocol adherence on top of an already correct execution, which matters for reproducibility but does not change the result. Use Case 2 produced a different outcome, with two clinically incorrect decisions in the unskilled condition (Section~\ref{sec:results}).
 
 The two failures illustrate distinct mechanisms by which a workflow skill corrects agent behaviour. The first is a \emph{constraint enforcement failure}: the tool description encoded the correct limit, but the agent did not apply it when its own spatial estimate exceeded it. The skill resolved this by making the constraint an explicit instruction in the workflow rather than a property of the tool schema. The second is a \emph{domain selection failure}: two tools were available that could both produce a structured report, and the agent selected the tool with greater salience in its context window. The skill resolved this by naming the correct tool explicitly and ruling out the incorrect one, a decision the agent could not make reliably from tool names and descriptions alone.
 
@@ -769,7 +767,7 @@ Several paths could close this gap. Fine-tuning a smaller model specifically on 
 
 \section{Conclusions}
 
-This work set out to demonstrate that an agentic AI system using MCP as a standardized interoperability layer can autonomously orchestrate multi-step clinical imaging workflows without custom integration code. The results support that claim. Both use cases completed end-to-end without manual intervention, six MCP servers were integrated without agent-side connector code, and the skill-based governance mechanism demonstrably changed agent behavior in the pathology task, preventing domain-incorrect tool selection that occurred without it. The finding that assisted and autonomous modes produced identical tool sequences confirms that the agent's decisions were correct independently of human oversight, validating unattended operation for event-driven workflows.
+This work set out to demonstrate that an agentic AI system using MCP as a standardized interoperability layer can autonomously orchestrate multi-step clinical imaging workflows without custom integration code. The results support that claim. All three use cases completed end-to-end without manual intervention, six MCP servers were integrated without agent-side connector code, and the skill-based governance mechanism demonstrably changed agent behavior in the pathology task, preventing domain-incorrect tool selection that occurred without it. The finding that assisted and autonomous modes produced identical tool sequences confirms that the agent's decisions were correct independently of human oversight, validating unattended operation for event-driven workflows.
 
 The comparison between API-hosted and locally-hosted models exposed a tension that clinical deployment cannot currently avoid. Reliable multi-step tool-calling requires model scale that exceeds what most institutions can run locally, yet transmitting clinical data to a third-party API raises data protection concerns under GDPR and HIPAA. This is not a limitation unique to this system; it reflects the current state of open-weight model capability relative to the computational resources available in clinical environments~\cite{agiformedicalimaging2025}. A hybrid approach, where a local model handles routine decisions on identified data and an API model is invoked only for complex reasoning on de-identified inputs, represents a concrete direction for resolving this tension.
 

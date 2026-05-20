@@ -581,7 +581,7 @@ function WorkspaceCard({ dir, onToggle, onEdit, onDelete, openConsoleId, setOpen
     >
       <BorderGlow
         borderRadius={14}
-        backgroundColor="#0c0c14"
+        backgroundColor="var(--bg-secondary)"
         colors={dir.watching ? ['#06b6d4', '#6366f1', '#34d399'] : ['#6366f1', '#8b5cf6', '#38bdf8']}
         glowRadius={28}
         glowIntensity={0.8}

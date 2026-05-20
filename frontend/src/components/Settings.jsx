@@ -18,6 +18,13 @@ const NOTIF_COLORS = {
 
 function Settings({ onModeChange, appMode }) {
   const [activeTab, setActiveTab] = useState('settings');
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
+
+  const handleSetTheme = (t) => {
+    setTheme(t);
+    localStorage.setItem('theme', t);
+    document.documentElement.setAttribute('data-theme', t);
+  };
 
   // Diagnostics
   const [diagLoading, setDiagLoading] = useState(false);
@@ -451,6 +458,29 @@ Disk     : ${diagData.system.disk_free_gb} GB free / ${diagData.system.disk_tota
       ) : (
       <>
       {/* Mode toggle */}
+      <div className="settings-mode-section">
+        <div className="settings-mode-header">
+          <div>
+            <h3 className="settings-mode-title">Appearance</h3>
+            <p className="settings-mode-desc">Choose between light and dark mode.</p>
+          </div>
+        </div>
+        <div className="settings-mode-buttons">
+          <button
+            className={`settings-mode-btn${theme === 'light' ? ' active' : ''}`}
+            onClick={() => handleSetTheme('light')}
+          >
+            Light
+          </button>
+          <button
+            className={`settings-mode-btn${theme === 'dark' ? ' active' : ''}`}
+            onClick={() => handleSetTheme('dark')}
+          >
+            Dark
+          </button>
+        </div>
+      </div>
+
       <div className="settings-mode-section">
         <div className="settings-mode-header">
           <div>

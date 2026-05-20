@@ -129,6 +129,8 @@ MedGov-AI addresses the integration and orchestration layer directly: it combine
 % idk why you put this as a placeholder when the image doesn't have this name and is already there??
 % anyways i altered it
 
+% FIXME: how was the image generated? it would be best if it was an SVG or a PDF, otherwise it is pixelized when zoomed in, making smaller text look bad
+% FIXME: the gray font is difficult to read, I think it is best to darken it a little
 \begin{figure*}[t]
   \centering
   \includegraphics[width=\textwidth]{images/AgenticArchitecture.png}
@@ -154,6 +156,7 @@ user interface, communicating with the orchestrator exclusively via a
 REST and SSE API\@. SSE enables real-time streaming of task progress
 and agent responses to the user without polling.
 
+% FIXME: AgenticAgent is an odd, redundant name...
 \subsubsection*{Orchestrator}
 The orchestrator is a FastAPI application and is the system's single
 point of control: it exposes the REST and SSE API consumed by the
@@ -162,12 +165,18 @@ MCP server, and hosts the three internal services that drive the
 system's behaviour: the \texttt{AgenticAgent}, the
 \texttt{task\_runner}, and the \texttt{watcher\_service}.
 
-The \texttt{AgenticAgent} is the sole decision-maker in the system. A
-deliberate choice was made to use a single agent rather than a
+The \texttt{AgenticAgent} is the sole decision-maker in the system.
+% FIXME: weird phrasing, can simplify to "We use a single agent rather than a hierarchy of sub-agents for two reasons". Otherwise it seems there were "two reasons to make a deliberate choise", which makes no sense. Also, although this is more about writing style, but we can be more sterile: "We use a single agent rather than a hierarchy of sub-agents for simplicity and auditability"
+A deliberate choice was made to use a single agent rather than a
 hierarchy of sub-agents, for two reasons: simplicity and auditability.
+% FIXME: For those in the know, it is obvious why single agent is simpler, but we can justify its simplicity compared to multi-agent by approximating the multi-agents problem to a distributed systems problem, and maybe use a reference if possible
+% FIXME: How do you mean that "delegation" is "hidden"? I can easily make it non-hidden by including the delegated agent's trace in my own, should clarify the point
 A single agent is easier to reason about, debug, and extend, and every
 tool call, its inputs, and its result are recorded in a single session
-trace with no hidden delegation. The agent runs an iterative LLM loop
+trace with no hidden delegation.
+% FIXME: what is a "turn"?
+% FIXME: I would call it Google Gemini for specificity
+The agent runs an iterative LLM loop 
 using either the Gemini API or a locally-hosted Ollama model as its
 reasoning backend, and executes multi-turn function calling to invoke
 MCP tools in sequence. It maintains a session context across turns so
@@ -178,9 +187,13 @@ The \texttt{task\_runner} manages long-running operations that cannot
 complete within a synchronous HTTP request. Operations such as MONAI
 inference or Cellpose segmentation are submitted to a background thread
 pool and tracked through a state machine with four states: queued,
-running, completed, and failed. A semaphore limits concurrent GPU
+running, completed, and failed.
+% FIXME: this is a setup-specific detail
+A semaphore limits concurrent GPU
 inference to a single job at a time, preventing out-of-memory crashes
-on constrained hardware. The task runner also captures stderr output
+on constrained hardware.
+% FIXME: I would drop the technical term `stderr' and instead say "captures the standard error streams from inference processes". I got confused with stderr output, as "output" can be associated with "stdout"
+The task runner also captures stderr output
 from inference processes and, on failure, passes the log to the LLM
 for a plain-language error explanation before surfacing it to the user.
 Task state is persisted in SQLite so that progress survives backend
@@ -188,13 +201,16 @@ restarts, and the frontend is notified of state transitions via SSE\@.
 
 The \texttt{watcher\_service} monitors registered filesystem
 directories using periodic polling and triggers the agent automatically
-when a new file is deposited. This enables event-driven clinical
+when a new file is deposited.
+% FIXME: no footnotes inside footnotes! This doesn't even seem to work
+This enables event-driven clinical
 workflows in which files arriving from a PACS\footnote{Picture Archiving and Communication System (PACS): the institutional system used in clinical radiology to store, retrieve, and distribute medical images, typically in DICOM\footnote{Digital Imaging and Communications in Medicine (DICOM): the international standard for the storage and transmission of medical imaging data. A DICOM file bundles the pixel data of a scan with structured metadata tags encoding patient identifiers, modality, acquisition parameters, and study identifiers.} format.} system or a scanner
 initiate the full analysis pipeline without any user action. No changes
 to upstream systems are required; the watcher integrates at the
 filesystem level and streams its activity log to the frontend via a
 dedicated SSE\footnote{Server-Sent Events (SSE): a unidirectional HTTP streaming mechanism through which the server pushes events to connected browser clients in real time, without the client needing to poll.} channel.
 
+% FIXME: "write-ahead logging journaling"? Maybe just write it in full: "write-ahead logging.". It contrasts with the intent in the rest of the paper to explain acronyms
 All persistent state is stored in a single SQLite database with WAL
 journaling. The schema covers users, sessions, conversation history,
 uploaded files, background task status, watched directories, and
@@ -202,18 +218,26 @@ per-user tool settings.
 
 \subsubsection*{LLM Backends}
 The orchestrator supports two LLM backends, selectable at deployment
-time without modifying any agent logic. The Gemini API provides a
+time without modifying any agent logic.
+% FIXME: "API dependency" is an odd cost, isn't that the case for Ollama as well? (and virtually any LLM backend?) Maybe "subscription" was the intended word? Or maybe "external" was meant to be applied to "API dependency" as well? But that applies to Ollama as well... what was the point?
+The Gemini API provides a
 large cloud-hosted model capable of reliable multi-step function
 calling in complex clinical workflows, at the cost of external data
-transmission and API dependency. Ollama provides a local inference
+transmission and API dependency.
+% FIXME: "... for local inference on ordinary computers
+Ollama provides a local inference
 alternative using smaller open-weight models running entirely on the
 deployment host with no external data transmission, which is relevant
 in privacy-sensitive clinical environments, but proved insufficient for
 reliable tool calling at the 7--8B parameter scale currently available
-for local inference. Both backends implement the same internal
+for local inference.
+% FIXME: could cut this
+Both backends implement the same internal
 interface.
 
 \subsubsection*{MCP Server Layer}
+% FIXME: why does this say "six" when the figure has seven? If the fhir server is not to be mentioned, we should remember to remove it from the figure, otherwise it will be confusing
+% FIXME: why does it matter that we say a server runs in an isolated environment? Isn't that implied?
 The tool layer consists of six MCP servers, each running as an
 independent process in its own isolated Python virtual environment.
 Isolation at the process level is a deliberate design choice: it
@@ -221,12 +245,17 @@ prevents dependency conflicts between servers with incompatible
 requirements (most critically between the GPU-enabled PyTorch
 installation required by \texttt{mcp-monai} and the CPU-only
 installation used elsewhere, which cannot coexist in a single
-environment). Tool names are prefixed with the server name
+environment).
+% FIXME: is this true for other custom MCP servers we may add? Are we going to force future MCP servers to adhere to a namespace? Why does this even matter? Aren't these just API calls? We do not need to care about namespacing
+Tool names are prefixed with the server name
 (e.g., \texttt{monai.run\_inference}, \texttt{radlex.generate\_report}),
-providing unambiguous namespacing across servers. All servers
+providing unambiguous namespacing across servers.
+% FIXME: We also support HTTP transport right? We need to make that clear here, otherwise we can give the idea that only stdio is supported
+All servers
 communicate over stdio transport. The available servers and their
 clinical functions are listed in Table~\ref{tab:mcp-servers}.
 
+% FIXME: a column with a single value is not valuable
 \begin{table*}[t]
   \caption{MCP Servers and Clinical Functions}
   \label{tab:mcp-servers}
@@ -245,10 +274,13 @@ clinical functions are listed in Table~\ref{tab:mcp-servers}.
   \end{tabular}
 \end{table*}
 
+% FIXME: do we *need* to write an MCP server? Can't we skip that step and register an existing one in the configuration file? I would say that creating the MCP server is out of the picture, only registering it in the configuration file is necessary. Of course, we should clarify that if not already available, we need to create the MCP server. This also touches on the unmentioned advantage that MCP can promote collaboration and reduce duplicate work
 This architecture means that extending the system with a new clinical
 capability requires only writing a new MCP-compliant server and
 registering it in the configuration file. The agent, the orchestrator,
-and every existing server remain unchanged. This is the property that makes MCP a viable interoperability layer rather than yet another custom integration approach.
+and every existing server remain unchanged.
+% FIXME: switch "yet another custom" with "a bespoke", "yet another" is reductive
+This is the property that makes MCP a viable interoperability layer rather than yet another custom integration approach.
 
 
 % as i said before we dont mention the fhir and i dont know if we should
@@ -278,7 +310,9 @@ segmentation on multi-channel MRI, whole-body CT segmentation across
 architecture.
 
 \textbf{Mcp-radlex} provides structured radiology reporting through
-integration with the RadLex terminology standard. The agent can browse
+integration with the RadLex terminology standard.
+% FIXME: odd sentence, maybe it was meant to be ", and search"?
+The agent can browse
 available radiological subspecialties, search the template catalogue by
 subspecialty or keyword. When populating a report from raw inference
 results, the server uses MCP sampling to delegate the mapping of
@@ -298,12 +332,21 @@ server supports reading, writing, moving, copying, and deleting files,
 listing directory contents, and searching by pattern.
 
 \textbf{Mcp-cellpose} provides cell segmentation for pathology
-workflows using the Cellpose v4 universal model (cpsam). Cellpose v3
+workflows using the Cellpose v4 universal model (cpsam).
+% FIXME: we do not need to know how the API works, we do not need to specify the "model_type argument"
+Cellpose v3
 exposed multiple task-specific models (cyto3, cyto2, nuclei, each
 approximately 80~MB) selected by a \texttt{model\_type} argument.
+% FIXME: "both versions"? Versions of what? Cellpose? But does v3 also have a SAM-based universal model? This is not indicated in text
 Cellpose v4 replaces all of these with a single SAM-based universal
 model (cpsam, approximately 2.5~GB) that was evaluated on both versions
-during development. Testing on the same pathology ROI image showed v3 (cyto3) detecting 1{,}100 cells against v4 (cpsam) detecting 1{,}703 cells, a 55\% increase in detected count on identical input. v4 was selected as the deployment model. However, cpsam cannot distinguish cytoplasm from nuclei on standard RGB images without separate fluorescence channels, and the \texttt{model\_type} argument accepted by the v3 API is silently ignored in v4. The server supports
+during development.
+% FIXME: this does not say much, and implies "more is better" which is not necessarily the case. Also, unless it is sent as an attachment to the paper, we should not mention the ROI I believe, as it does not say much
+Testing on the same pathology ROI image showed v3 (cyto3) detecting 1{,}100 cells against v4 (cpsam) detecting 1{,}703 cells, a 55\% increase in detected count on identical input.
+% FIXME: why?
+v4 was selected as the deployment model.
+% FIXME: the remark on model_type is redundant, we know v4 only has a single model
+However, cpsam cannot distinguish cytoplasm from nuclei on standard RGB images without separate fluorescence channels, and the \texttt{model\_type} argument accepted by the v3 API is silently ignored in v4. The server supports
 both 2D and 3D inputs and composites the predicted cell mask onto the
 original image for visual inspection. GPU availability is detected at
 startup with automatic CPU fallback, though CPU execution is only
@@ -343,7 +386,9 @@ a body of domain knowledge such as regulatory standards, clinical
 report templates, and API usage patterns. What these forms share is
 that the guidance cannot be derived from MCP tool schemas alone and is
 too domain-specific or voluminous to embed permanently in the system
-prompt. Embedding it permanently would increase token consumption on
+prompt.
+% FIXME: if you say it is "well-documented" then there should be one or more references to back that up
+Embedding it permanently would increase token consumption on
 every request, including those that do not require that domain, and
 would increase the risk of the LLM overlooking or misapplying
 instructions buried in a large prompt, a well-documented failure mode
@@ -412,11 +457,19 @@ The agent's operation is governed by an iterative execution loop that drives the
 
 \subsubsection{System Prompt and Session Initialisation}
 
-At the start of each session the agent receives a system prompt that establishes its role, its available tools, and its behavioural rules. The system prompt includes the list of available skills as a plain bulleted list of names and descriptions, injected at startup after dynamic discovery, so the agent knows what clinical domains it can operate in before any user message arrives. It also includes explicit rules for tool usage: when to read a skill file before acting, when to queue a long-running operation to the background task runner rather than calling it inline, how to handle DICOM series directories versus individual files, and how to avoid repeating failed tool calls. Two variants of the system prompt exist: one for autonomous mode, which omits confirmation-related guidance, and one for assisted mode, which includes it.
+At the start of each session the agent receives a system prompt that establishes its role, its available tools, and its behavioural rules. The system prompt includes the list of available skills as a plain bulleted list of names and descriptions, injected at startup after dynamic discovery, so the agent knows what clinical domains it can operate in before any user message arrives.
+% FIXME: call "inline"? As in the line of code responsible for the call? Maybe it would be best to say "synchronously"
+It also includes explicit rules for tool usage: when to read a skill file before acting, when to queue a long-running operation to the background task runner rather than calling it inline, how to handle DICOM series directories versus individual files, and how to avoid repeating failed tool calls.
+% FIXME: what is "confirmation-related guidance"?
+Two variants of the system prompt exist: one for autonomous mode, which omits confirmation-related guidance, and one for assisted mode, which includes it.
 
 \subsubsection{Iterative Reasoning and Tool Dispatch}
 
-Each iteration of the loop follows the same structure. The agent receives a prompt describing the current goal, any available files, and the results of all prior tool calls in the session. On the first iteration the prompt is minimal: goal, data, and file context. On subsequent iterations the prompt also includes the execution history, which the agent evaluates before deciding its next action. The LLM responds with either one or more function calls, or a text response indicating that the goal is complete or that more information is needed. Multiple tool calls can be returned in a single LLM response and are executed sequentially within the same iteration. All results are collected and returned to the LLM in a single message before the next iteration begins. Function calls are parsed and dispatched to the appropriate MCP server via the tool registry, and the result is appended to the execution history.
+Each iteration of the loop follows the same structure. The agent receives a prompt describing the current goal, any available files, and the results of all prior tool calls in the session.
+% FIXME: what is "data" and "file context"?
+On the first iteration the prompt is minimal: goal, data, and file context.
+% FIXME: what is the "execution history"? The tool call execution results? But wasn't that already mentioned in the second sentence? It seems the last sentence clarifies this, but it is late
+On subsequent iterations the prompt also includes the execution history, which the agent evaluates before deciding its next action. The LLM responds with either one or more function calls, or a text response indicating that the goal is complete or that more information is needed. Multiple tool calls can be returned in a single LLM response and are executed sequentially within the same iteration. All results are collected and returned to the LLM in a single message before the next iteration begins. Function calls are parsed and dispatched to the appropriate MCP server via the tool registry, and the result is appended to the execution history.
 
 A repetition guard addresses a failure mode observed during development in which the agent would attempt the same failing tool call repeatedly rather than trying an alternative approach, consuming iterations without making progress. The guard inspects the execution history before each tool call: if the same tool has failed twice in a row, the third attempt is blocked and an error message is injected into the history instructing the agent to try a different tool or approach.
 
@@ -426,7 +479,10 @@ Alongside the MCP tools discovered at startup, the agent has access to a set of 
 
 \subsubsection{Operating Modes}
 
-The system supports two operating modes that can be selected per session. In \textbf{autonomous mode}, the agent executes tool calls without interruption from goal receipt to completion. This is the intended mode for event-driven workflows triggered by the workspace watcher, where no user is present to intervene. In \textbf{assisted mode} (referred to in the codebase as debug mode), the loop pauses before each tool call and returns a \texttt{confirmation\_required} response to the frontend, which presents the proposed tool name and arguments to the user for approval or rejection before execution resumes.
+% FIXME: "can be selected per session"? Isn't that implied?
+The system supports two operating modes that can be selected per session. In \textbf{autonomous mode}, the agent executes tool calls without interruption from goal receipt to completion. This is the intended mode for event-driven workflows triggered by the workspace watcher, where no user is present to intervene.
+% FIXME: I do not think specifying the debug mode is useful
+In \textbf{assisted mode} (referred to in the codebase as debug mode), the loop pauses before each tool call and returns a \texttt{confirmation\_required} response to the frontend, which presents the proposed tool name and arguments to the user for approval or rejection before execution resumes.
 
 
 % ill write this part i just wanna point out that we're still making changes so it might not be worth it finishing this right now
@@ -434,7 +490,9 @@ The system supports two operating modes that can be selected per session. In \te
 
 Inference operations such as MONAI CT segmentation and Cellpose cell counting are long-running by nature, taking anywhere from seconds to several minutes depending on hardware and input size. Blocking the agent or the HTTP request while waiting for these operations to complete would make the system unresponsive to other users and interactions. To avoid this, all inference calls are offloaded to a background thread pool: when the agent calls a tool that queues inference, the tool returns immediately with a task identifier, and the actual computation runs asynchronously.
 
-Each task follows a simple state machine: \texttt{queued} when submitted, \texttt{running} once a thread picks it up, and \texttt{completed} or \texttt{failed} on exit. Task state is persisted in a SQLite database so that results survive server restarts and can be retrieved by any session. A semaphore limits concurrent inference to a single job at a time, preventing simultaneous runs from exhausting GPU memory. When a job finishes, a Server-Sent Events (SSE) notification is pushed to the frontend, which updates the results tab without requiring the user to poll or refresh. This design allows multiple users to submit jobs independently: each submission is queued and processed in order, with results delivered to the corresponding session on completion.
+Each task follows a simple state machine: \texttt{queued} when submitted, \texttt{running} once a thread picks it up, and \texttt{completed} or \texttt{failed} on exit. Task state is persisted in a SQLite database so that results survive server restarts and can be retrieved by any session. A semaphore limits concurrent inference to a single job at a time, preventing simultaneous runs from exhausting GPU memory.
+% FIXME: no need to explain SSE, it is already explained in a footnote
+When a job finishes, a Server-Sent Events (SSE) notification is pushed to the frontend, which updates the results tab without requiring the user to poll or refresh. This design allows multiple users to submit jobs independently: each submission is queued and processed in order, with results delivered to the corresponding session on completion.
 
 
 
@@ -444,13 +502,19 @@ Not all clinical workflows are initiated by a user interacting with a chat inter
 
 \subsubsection{Architecture}
 
-Each workspace is a named, registered directory stored in the SQLite database alongside a configurable prompt that defines what the agent should do when a file arrives. At startup, the orchestrator resumes watching all previously registered workspaces. The \texttt{watcher\_service} uses a polling observer to monitor each registered path recursively, bridging filesystem events into the orchestrator's asyncio event loop via an internal queue.
+Each workspace is a named, registered directory stored in the SQLite database alongside a configurable prompt that defines what the agent should do when a file arrives. At startup, the orchestrator resumes watching all previously registered workspaces. 
+% FIXME: it is odd to mention "asyncio" without ever mentioning that the orchestrator is implemented in Python. I would simply remove that word
+The \texttt{watcher\_service} uses a polling observer to monitor each registered path recursively, bridging filesystem events into the orchestrator's asyncio event loop via an internal queue.
 
 When a new file is detected, the service does not trigger the agent immediately. Instead it starts a three-second debounce window: if additional files arrive within that window, they are batched together. Only after three seconds of inactivity does the service dispatch all accumulated files to the agent in a single invocation. This prevents a burst of files, such as a DICOM series arriving slice by slice, from spawning multiple redundant agent executions.
 
 \subsubsection{Trigger Flow}
 
-When the debounce window closes, the watcher copies the incoming files from the watched directory into the corresponding workspace directory and constructs a goal prompt that includes the workspace name, the list of received files, and the preconfigured prompt for that workspace. It then invokes the agent in autonomous mode, since no user is present to confirm tool calls. The agent proceeds through its standard execution loop: reading the appropriate skill file (if needed), parsing the files, running the required analysis, and producing the configured outputs. The entire activity log, including file detection events, agent actions, and results, is streamed to the frontend via SSE under the workspace's dedicated console channel, giving an operator real-time visibility even when the workflow was triggered without user interaction.
+% FIXME: this is confusing, isn't a "watched directory" a "workspace directory"? I do not think the distinction has been made clear, up until this point it seems both things are the same
+When the debounce window closes, the watcher copies the incoming files from the watched directory into the corresponding workspace directory and constructs a goal prompt that includes the workspace name, the list of received files, and the preconfigured prompt for that workspace. It then invokes the agent in autonomous mode, since no user is present to confirm tool calls.
+% FIXME: Put "skill file(s)" rather than just "skill file" to imply more can be read
+% FIXME: "configured outputs"? "configured" where? Seems unnecessarily verbose
+The agent proceeds through its standard execution loop: reading the appropriate skill file (if needed), parsing the files, running the required analysis, and producing the configured outputs. The entire activity log, including file detection events, agent actions, and results, is streamed to the frontend via SSE under the workspace's dedicated console channel, giving an operator real-time visibility even when the workflow was triggered without user interaction.
 
 
 \subsection{Use Cases}
@@ -463,8 +527,24 @@ A clinician or automated trigger provides a DICOM file or series. The system ide
 
 \subsubsection{Pathology: Whole Slide Image Analysis}
 
-Two pathology workflows are evaluated. In the interactive scenario (Use Case 2), a slide UID is provided and the system retrieves a region of interest from the remote iPath platform, runs cell segmentation, and produces a structured pathology report. In the autonomous scenario (Use Case 3), ROI images arrive in a monitored directory and the system detects each file, runs cell segmentation, and routes the result based on a configurable cell count threshold. Success in both cases is defined as a completed segmentation run with quantitative output returned without manual intervention.
+Two pathology workflows are evaluated. In the interactive scenario (Use Case 2), a slide UID is provided and the system retrieves a region of interest from the remote iPath platform, runs cell segmentation, and produces a structured pathology report. In the autonomous scenario (Use Case 3), ROI images arrive in a monitored directory and the system detects each file, runs cell segmentation, and routes the result based on a configurable cell count threshold.
+% FIXME: isn't success in use case 3 also determined by whether the agent correctly routes the output based on cell count?
+Success in both cases is defined as a completed segmentation run with quantitative output returned without manual intervention.
 
+% FIXME: this is extremely confusing, we cannot have these be sub-sub sections when we already have them previously. I am not sure what is the best way to handle this. I would say we can have an "Evaluation" section instead of a "Use Cases" sub-section, making each Use Case a subsection, and include the parts "Clinical context", "Setup" and "Workflow" as sub-subsections within each use case sub-section, so:
+% Evaluation
+% ├── Radiology: DICOM Analysis and Report Generation
+% │   ├── Clinical context
+% │   ├── Setup
+% │   └── Workflow
+% ├── Pathology: Whole Slide Image Analysis (interactive)
+% │   ├── Clinical context
+% │   ├── Setup
+% │   └── Workflow
+% └── Pathology: Whole Slide Image Analysis (autonomous)
+%     ├── Clinical context
+%     ├── Setup
+%     └── Workflow
 \subsubsection{Use Case 1 - Interactive DICOM Analysis and Segmentation}
 
 \textbf{Clinical context.}

@@ -133,7 +133,7 @@ def scale_roi_to_slide(
 
     Args:
         thumb_x, thumb_y: Top-left of bbox in thumbnail pixels
-        thumb_w, thumb_h: Size of bbox in thumbnail pixels (max 30 each — larger values produce unusable ROIs)
+        thumb_w, thumb_h: Size of bbox in thumbnail pixels. HARD LIMIT: MUST NOT exceed 30 each. If your visual estimate is larger, clamp it to 30. Never pass a value above 30.
         thumb_img_w, thumb_img_h: Thumbnail dimensions (from fetch_thumbnail)
         slide_w, slide_h: Full slide dimensions (from get_slide_dimensions)
     """

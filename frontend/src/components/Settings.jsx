@@ -128,7 +128,11 @@ function Settings({ onModeChange, appMode }) {
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Load current mode and llm mode on mount
+  // Confirmation toggle
+  const [confirmationEnabled, setConfirmationEnabled] = useState(true);
+  const [confirmationLoading, setConfirmationLoading] = useState(false);
+
+  // Load current mode, llm mode, and confirmation on mount
   useEffect(() => {
     apiFetch(`${API_URL}/api/mode`)
       .then(r => r.json())
@@ -137,6 +141,10 @@ function Settings({ onModeChange, appMode }) {
     apiFetch(`${API_URL}/api/llm-mode`)
       .then(r => r.json())
       .then(d => setLlmMode(d.llm_mode))
+      .catch(() => {});
+    apiFetch(`${API_URL}/api/confirmation`)
+      .then(r => r.json())
+      .then(d => setConfirmationEnabled(d.confirmation))
       .catch(() => {});
   }, []);
 
@@ -162,11 +170,25 @@ function Settings({ onModeChange, appMode }) {
         body: JSON.stringify({ mode: newMode }),
       });
       setMode(newMode);
+      // Sync confirmation state with mode default
+      setConfirmationEnabled(newMode === 'debug');
       if (onModeChange) onModeChange(newMode);
-    } catch (e) {
-      // silently fail
-    }
+    } catch (e) {}
     setModeLoading(false);
+  };
+
+  const handleSetConfirmation = async (enabled) => {
+    if (mode === 'debug') return;
+    setConfirmationLoading(true);
+    try {
+      await apiFetch(`${API_URL}/api/confirmation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: enabled }),
+      });
+      setConfirmationEnabled(enabled);
+    } catch (e) {}
+    setConfirmationLoading(false);
   };
 
   // Fetch MCPs and tools
@@ -507,6 +529,19 @@ Disk     : ${diagData.system.disk_free_gb} GB free / ${diagData.system.disk_tota
           >
             Debug
           </button>
+        </div>
+        <div className="settings-confirmation-row">
+          <label className={`settings-confirmation-label${mode === 'debug' ? ' disabled' : ''}`}>
+            <input
+              type="checkbox"
+              checked={mode === 'debug' ? true : confirmationEnabled}
+              disabled={mode === 'debug' || confirmationLoading}
+              onChange={e => handleSetConfirmation(e.target.checked)}
+              className="settings-confirmation-checkbox"
+            />
+            <span>Require tool confirmation before each tool call</span>
+            {mode === 'debug' && <span className="settings-confirmation-hint">(always on in debug mode)</span>}
+          </label>
         </div>
       </div>
 

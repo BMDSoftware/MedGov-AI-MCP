@@ -271,6 +271,44 @@ input[type="checkbox"] {
   cursor: not-allowed;
 }
 
+.settings-confirmation-row {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-confirmation-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-confirmation-label.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-confirmation-checkbox {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.settings-confirmation-label.disabled .settings-confirmation-checkbox {
+  cursor: not-allowed;
+}
+
+.settings-confirmation-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
 .refresh-server-btn {
   margin-left: auto;
   background: transparent;

@@ -441,12 +441,32 @@ async def set_mode(data: dict = Body(...), current_user: dict = Depends(get_curr
     if mode == _app_settings.get("mode"):
         return {"mode": mode}
     _app_settings["mode"] = mode
+    # Reset confirmation to mode default when switching modes
+    if mode == "debug":
+        _app_settings["confirmation"] = True
+    else:
+        _app_settings["confirmation"] = False
     _save_settings(_app_settings)
-    # Update all active agents
     async with _agents_lock:
         for agent in _agents.values():
             agent.set_mode(mode)
     return {"mode": mode}
+
+@app.get("/api/confirmation", tags=["system"], summary="Get whether tool confirmation is required")
+async def get_confirmation(current_user: dict = Depends(get_current_user)):
+    return {"confirmation": _app_settings.get("confirmation", True)}
+
+@app.post("/api/confirmation", tags=["system"], summary="Set tool confirmation (only effective in normal mode)")
+async def set_confirmation(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    if _app_settings.get("mode", "debug") == "debug":
+        return {"confirmation": True}
+    enabled = bool(data.get("confirmation", False))
+    _app_settings["confirmation"] = enabled
+    _save_settings(_app_settings)
+    async with _agents_lock:
+        for agent in _agents.values():
+            agent.require_confirmation = enabled
+    return {"confirmation": enabled}
 
 
 @app.get("/api/llm-mode", tags=["system"], summary="Get current LLM mode (stateful or stateless)")

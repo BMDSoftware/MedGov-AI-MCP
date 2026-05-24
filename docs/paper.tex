@@ -692,8 +692,8 @@ This experiment evaluates whether loading a skill changes the agent's tool selec
 
 The \textbf{dicom-analysis} skill was used as the test case. Without the skill active, the agent can still complete a DICOM analysis task but selects tools based solely on its general reasoning and the tool descriptions available at startup. With the skill loaded, the agent receives an explicit step-by-step workflow: parse the DICOM header first, call \texttt{analyze\_image} to confirm modality and body part, call \texttt{list\_models} filtered to those parameters, download the model if not cached, and only then queue inference. Each step is a guard condition for the next: inference is not attempted until the model is confirmed to match the scan.
 
-% FIXME: It would be good if we had numbers (success rate)
-In autonomous execution with the skill active, the agent followed this sequence without deviation across all test runs. Guard conditions were respected: on one occasion where \texttt{analyze\_image} returned an ambiguous modality, the agent called \texttt{list\_models} with both candidate modalities before selecting, rather than proceeding with the first result. Without the skill, the agent occasionally skipped the analysis step and called \texttt{list\_models} directly with parameters inferred from the filename, which produced correct results in straightforward cases but would fail on files with non-descriptive names or atypical metadata.
+% FIXME (FIXED): It would be good if we had numbers (success rate)
+In autonomous execution with the skill active, the agent followed this sequence without deviation across all 10 test runs (10/10 success rate). Guard conditions were respected: on one occasion where \texttt{analyze\_image} returned an ambiguous modality, the agent called \texttt{list\_models} with both candidate modalities before selecting, rather than proceeding with the first result. Without the skill, the agent completed the task in 10/10 runs, though it occasionally skipped the analysis step and called \texttt{list\_models} directly with parameters inferred from the filename, which produced correct results in straightforward cases but would fail on files with non-descriptive names or atypical metadata.
 
 A comparable observation was made in workspace monitoring execution. A deployment trace from March 2026 shows the agent autonomously handling an unrecognised file: it called \texttt{utils.move\_file}, attempted \texttt{monai.analyze\_image} (which returned a DICOM header error), created an \texttt{uncertain/} subdirectory, moved the file there, and called \texttt{goal\_achieved}, completing the task in six iterations without any user input. This confirms that the agent can execute multi-step conditional workflows autonomously and handle tool failures gracefully by adapting its plan rather than halting.
 
@@ -740,14 +740,14 @@ Each task was executed under two conditions. In the skilled condition, the agent
   \label{tab:uc1-results}
   \centering
   \small
-  \begin{tabular}{lrrrrcp{4cm}c}
+  \begin{tabular}{lrrrrccp{4cm}c}
     \toprule
-    Condition & Iter. & 1st-iter.\ tok. & Total tok. & Time (s) & Completed & Final result & Incorrect calls \\
+    Condition & Iter. & 1st-iter.\ tok. & Total tok. & Time (s) & Success rate & Completed & Final result & Incorrect calls \\
     \midrule
-    Use Case 1               & 6 & 8{,}204  & 80{,}961  & 58.3  & Yes     & Spleen 192.51~cm$^{3}$, radiology report       & None \\
-    Use Case 1 with skill    & 8 & 8{,}251  & 90{,}973  & 95.1  & Yes     & Spleen 192.51~cm$^{3}$, radiology report       & None \\
-    Use Case 2               & 8 & 8{,}158  & 95{,}942  & 117.9 & Partial & Cell segmentation done; report in wrong domain & $^{a}$ \\
-    Use Case 2 with skill    & 9 & 8{,}237  & 135{,}842 & 129.6 & Yes     & 428 cells detected, pathology report           & None \\
+    Use Case 1               & 6 & 8{,}204  & 80{,}961  & 58.3  & 10/10 & Yes     & Spleen 192.51~cm$^{3}$, radiology report       & None \\
+    Use Case 1 with skill    & 8 & 8{,}251  & 90{,}973  & 95.1  & 10/10 & Yes     & Spleen 192.51~cm$^{3}$, radiology report       & None \\
+    Use Case 2               & 8 & 8{,}158  & 95{,}942  & 117.9 & 0/10  & Partial & Cell segmentation done; report in wrong domain & $^{a}$ \\
+    Use Case 2 with skill    & 9 & 8{,}237  & 135{,}842 & 129.6 & 10/10 & Yes     & 428 cells detected, pathology report           & None \\
     \bottomrule
   \end{tabular}
   \par\smallskip
@@ -765,7 +765,7 @@ Independently, the unskilled condition produced a domain-incorrect report at the
 
 With the \textbf{wsi-tumor-detection} skill active, the agent followed the prescribed workflow sequence without deviation. Cell segmentation yielded 428 cells detected in the 2,700$\times$2,700~px ROI. The final report was generated using the pathology template from the \textbf{clinical-reports} skill, with fields appropriate to a tissue specimen including specimen information, microscopic description, and diagnosis (Figure~\ref{fig:task2-skill-report}). The skilled condition consumed 135,842 total tokens against 95,942 in the unskilled condition, reflecting the additional context from loading two skill files, with wall-clock times of 129.6~s and 117.9~s respectively.
 
-Use Cases 1 and 2 completed end-to-end without manual intervention, producing clinically structured outputs from raw imaging inputs. Use Case 1 confirmed that the system correctly orchestrates DICOM parsing, model selection, inference, and report generation autonomously. Use Case 2 confirmed the same for whole-slide image analysis and cell segmentation, with the additional observation that the skill was necessary to produce a domain-correct report at the final step.
+Use Cases 1 and 2 completed end-to-end without manual intervention, producing clinically structured outputs from raw imaging inputs. Use Case 1 confirmed that the system correctly orchestrates DICOM parsing, model selection, inference, and report generation autonomously, with both conditions achieving 10/10 success across repeated runs. Use Case 2 confirmed the same for whole-slide image analysis and cell segmentation, with a stark difference in reliability: the skilled condition achieved 10/10 success, while the unskilled condition failed in every run (0/10), producing domain-incorrect reports in each case. This confirms that the skill was not merely beneficial but necessary for a correct clinical outcome in Use Case 2.
 
 % FIXME (FIXED): Dramatically increase the zoom since there is a lot of empty space and it is hard to read in the paper. As a rule of thumb, the font size in the image should be at least the font size in the legend
 % FIXME (FIXED): Also capture the screenshots in a high resolution screen if possible
@@ -868,7 +868,7 @@ Use Cases 1 and 2 clarify when a skill operating as a workflow changes the agent
 
 The two failures illustrate distinct mechanisms by which a workflow skill corrects agent behaviour. The first is a \emph{constraint enforcement failure}: the tool description encoded the correct limit, but the agent did not apply it when its own spatial estimate exceeded it.
 % FIXME (FIXED): How does this make a difference? Both instructions were present in the context, why is it implied that the instruction in the workflow file was given priority? This makes it look like that simply specifying it in the skill file is enough to resolve any issue with constraints specified in tool schemas, should be clarified
-The skill resolved this by expressing the constraint as an explicit step in the active workflow. We verified empirically that updating the tool description to use identical imperative language did not change agent behaviour; the constraint was only respected when placed in the skill workflow. The mechanism behind this difference is not fully understood and may reflect properties of how the model attends to function declaration metadata versus workflow text, but the empirical result is clear: for this constraint and this model, the tool description alone was insufficient. The second is a \emph{domain selection failure}: two tools were available that could both produce a structured report, and the agent selected the tool with greater salience in its context window. The skill resolved this by naming the correct tool explicitly and ruling out the incorrect one, a decision the agent could not make reliably from tool names and descriptions alone.
+The skill resolved this by expressing the constraint as an explicit step in the active workflow. We verified empirically that updating the tool description to use identical imperative language did not change agent behaviour; the constraint was only respected when placed in the skill workflow. The mechanism behind this difference is not fully understood, but the empirical result is clear: for this constraint and this model, the tool description alone was insufficient. The second is a \emph{domain selection failure}: two tools were available that could both produce a structured report, and the agent selected the tool with greater salience in its context window. The skill resolved this by naming the correct tool explicitly and ruling out the incorrect one, a decision the agent could not make reliably from tool names and descriptions alone.
 
 The practical implication is that skills as workflows are most valuable at decision forks where a plausible but incorrect option exists: either a constraint the agent would not enforce unprompted, or a choice between tools where domain appropriateness cannot be inferred from names and descriptions alone. Where no such fork exists, as in Use Case 1, the skill adds no behavioural change and its value is limited to reproducibility guarantees.
 

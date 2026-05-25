@@ -209,7 +209,7 @@ def save_markdown_report(session_id: Optional[str], tool_name: str, arguments: D
 
 def save_radlex_report(session_id: Optional[str], tool_name: str, result: Any, arguments: Dict) -> None:
     """Persist a radlex report to the DB so it appears in the Report tab."""
-    if not session_id or tool_name != "radlex.generate_report":
+    if not session_id or tool_name != "radlex.generate_radiology_report":
         return
     report_wrap = {
         "patient_context": {},

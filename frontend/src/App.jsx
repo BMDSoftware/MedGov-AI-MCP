@@ -536,7 +536,7 @@ function App() {
               setCurrentSessionId(data.session_id);
               setMessages([{
                 type: 'bot',
-                content: 'New session started. Select a patient or upload a file to begin.',
+                content: 'New session started. Upload a file to begin.',
                 actions: []
               }]);
               setSelectedPatient(null);

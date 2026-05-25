@@ -22,7 +22,7 @@ BUILTIN_TOOLS: Dict[str, Dict] = {
             "properties": {
                 "task_type": {
                     "type": "string",
-                    "description": "Category of the task. Use 'inference' for MONAI model runs, 'cellpose' for Cellpose cell segmentation, 'report' for report generation, or any descriptive string for other tasks.",
+                    "description": "Category of the task. Use 'inference' for MONAI model runs, 'cellpose' for Cellpose cell segmentation, or any descriptive string for other tasks.",
                 },
                 "description": {
                     "type": "string",
@@ -30,7 +30,7 @@ BUILTIN_TOOLS: Dict[str, Dict] = {
                 },
                 "input_data": {
                     "type": "object",
-                    "description": "Task-specific inputs as a JSON object. For 'inference': {image_path, model_name}. For 'cellpose': {image_path} - one file per task, call once per file. For 'report': {task_ids, patient_context}.",
+                    "description": "Task-specific inputs as a JSON object. For 'inference': {image_path, model_name}. For 'cellpose': {image_path} - one file per task, call once per file.",
                 },
             },
             "required": ["task_type", "description", "input_data"],

@@ -4,7 +4,8 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
+from pydantic import Field
 
 import httpx
 from mcp import types as mcp_types
@@ -295,16 +296,10 @@ async def list_subspecialties() -> List[Dict[str, str]]:
 
 @mcp.tool()
 async def find_templates(
-    query: Optional[str] = None,
-    specialty_code: Optional[str] = None,
+    query: Annotated[Optional[str], Field(description="Optional search keyword for template names")] = None,
+    specialty_code: Annotated[Optional[str], Field(description='Subspecialty code string (e.g., "AB", "NR", "CH"). Use list_subspecialties for valid codes.')] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Search for templates. Use specialty_code from list_subspecialties for better accuracy.
-
-    Args:
-        query: Optional search keyword for template names.
-        specialty_code: Subspecialty code string (e.g., "AB", "NR", "CH").
-    """
+    """Search for RadReport templates. Use specialty_code from list_subspecialties for better accuracy."""
     # Handle case where LLM passes {"code": "AB"} instead of "AB"
     if isinstance(specialty_code, dict) and "code" in specialty_code:
         specialty_code = specialty_code["code"]
@@ -315,35 +310,15 @@ async def find_templates(
 
 @mcp.tool()
 async def generate_radiology_report(
-    template_id: str,
-    output_path: str,
+    template_id: Annotated[str, Field(description="RadReport template ID (from find_templates)")],
+    output_path: Annotated[str, Field(description="File path to save the HTML report. The report is not returned inline — it must be saved to disk.")],
     ctx: Context,
-    findings: Optional[Dict[str, Any]] = None,
-    inference_results: Optional[List[Dict]] = None,
-    patient_context: Optional[Dict] = None,
-    specialty: str = "general",
+    findings: Annotated[Optional[Dict[str, Any]], Field(description="Pre-mapped field key/value dict (legacy path). Exact template keys required.")] = None,
+    inference_results: Annotated[Optional[List[Dict]], Field(description="Raw inference results list, each with 'description', 'model', 'structures' keys (structures have 'name', 'volume_cm3', 'voxel_count').")] = None,
+    patient_context: Annotated[Optional[Dict], Field(description="Optional patient demographics / clinical context dict")] = None,
+    specialty: Annotated[str, Field(description="Reporting specialty for the sampling prompt. One of: general, oncology, cardiology, emergency, neuroradiology, musculoskeletal.")] = "general",
 ) -> Dict[str, Any]:
-    """
-    Fill a RadReport template, using MCP sampling to map raw AI inference results to
-    template fields and generate a clinical narrative when inference_results is provided.
-
-    Two modes:
-    - inference_results provided: host LLM maps structures to template fields and writes
-      findings_narrative, impression, recommendations via MCP sampling.
-    - findings dict provided: legacy rigid mapping (exact template keys required, no sampling).
-    At least one of findings or inference_results must be supplied.
-
-    Args:
-        template_id: RadReport template ID (from find_templates).
-        output_path: File path to save the HTML report. Required — the report will not be
-            returned in full in the tool response; it must be saved to disk to be accessible.
-        findings: Pre-mapped field key/value dict (legacy path).
-        inference_results: Raw inference results list, each with 'description', 'model',
-            'structures' keys (structures have 'name', 'volume_cm3', 'voxel_count').
-        patient_context: Optional patient demographics / clinical context dict.
-        specialty: Reporting specialty for the sampling prompt. One of: general, oncology,
-            cardiology, emergency, neuroradiology, musculoskeletal. Default: general.
-    """
+    """Fill a RadReport template using MCP sampling. Provide inference_results for LLM-driven narrative generation, or findings for legacy rigid mapping. At least one must be supplied."""
     template_payload = await fetch_template_html(template_id)
     if "error" in template_payload:
         return template_payload

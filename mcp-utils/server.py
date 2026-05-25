@@ -8,7 +8,8 @@ import json
 import os
 import shutil
 import sys
-from typing import Any, Dict, List
+from typing import Annotated, Any, Dict, List
+from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from dicom_parser import DicomParser
@@ -26,15 +27,10 @@ dicom_parser = DicomParser()
 
 
 @mcp.tool()
-def parse_dicom(file_path: str) -> Dict[str, Any]:
-    """
-    Parse a DICOM file and extract all available metadata.
-
-    Returns modality, body part, patient info, study/series info,
-    image dimensions, and all other tags present in the file.
-
-    :param file_path: Path to the DICOM file
-    """
+def parse_dicom(
+    file_path: Annotated[str, Field(description="Path to the DICOM file")],
+) -> Dict[str, Any]:
+    """Parse a DICOM file and extract all available metadata including modality, body part, patient info, study/series info, and image dimensions."""
     log(f"Parsing DICOM file: {file_path}")
     result = dicom_parser.parse(file_path)
     log(f"Found {result.get('num_tags', 0)} tags")
@@ -42,15 +38,10 @@ def parse_dicom(file_path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def parse_dicom_directory(dir_path: str) -> Dict[str, Any]:
-    """
-    Parse all DICOM files in a directory and organize by series.
-
-    Useful for loading a full CT/MRI scan that consists of multiple slices.
-    Returns series information with modality, body part, and file lists.
-
-    :param dir_path: Path to directory containing DICOM files
-    """
+def parse_dicom_directory(
+    dir_path: Annotated[str, Field(description="Path to directory containing DICOM files")],
+) -> Dict[str, Any]:
+    """Parse all DICOM files in a directory and organize by series. Useful for loading a full CT/MRI scan that consists of multiple slices."""
     log(f"Parsing DICOM directory: {dir_path}")
     result = dicom_parser.parse_directory(dir_path)
     log(f"Found {result.get('total_files', 0)} files in {result.get('num_series', 0)} series")
@@ -58,12 +49,10 @@ def parse_dicom_directory(dir_path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def create_directory(path: str) -> Dict[str, Any]:
-    """
-    Create a directory (and any missing parent directories) at the given path.
-
-    :param path: Absolute path of the directory to create
-    """
+def create_directory(
+    path: Annotated[str, Field(description="Absolute path of the directory to create")],
+) -> Dict[str, Any]:
+    """Create a directory (and any missing parent directories) at the given path."""
     log(f"Creating directory: {path}")
     try:
         os.makedirs(path, exist_ok=True)
@@ -73,16 +62,11 @@ def create_directory(path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def move_file(src: str, dst: str) -> Dict[str, Any]:
-    """
-    Move a file or directory from src to dst.
-
-    If dst is an existing directory, the file is moved inside it.
-    Parent directories of dst are created automatically.
-
-    :param src: Source path (file or directory)
-    :param dst: Destination path
-    """
+def move_file(
+    src: Annotated[str, Field(description="Source path (file or directory)")],
+    dst: Annotated[str, Field(description="Destination path. If dst is an existing directory, the file is moved inside it. Parent directories are created automatically.")],
+) -> Dict[str, Any]:
+    """Move a file or directory from src to dst."""
     log(f"Moving: {src} -> {dst}")
     try:
         os.makedirs(os.path.dirname(dst) if not os.path.isdir(dst) else dst, exist_ok=True)
@@ -93,14 +77,11 @@ def move_file(src: str, dst: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def write_file(path: str, content: str) -> Dict[str, Any]:
-    """
-    Write text content to a file, creating parent directories if needed.
-    Overwrites the file if it already exists.
-
-    :param path: Absolute path of the file to write
-    :param content: Text content to write
-    """
+def write_file(
+    path: Annotated[str, Field(description="Absolute path of the file to write")],
+    content: Annotated[str, Field(description="Text content to write")],
+) -> Dict[str, Any]:
+    """Write text content to a file, creating parent directories if needed. Overwrites the file if it already exists."""
     log(f"Writing file: {path}")
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -112,16 +93,10 @@ def write_file(path: str, content: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def list_directory(path: str) -> Dict[str, Any]:
-    """
-    List files and subdirectories at the given path with basic metadata.
-
-    Returns name, type (file/directory), size in bytes, and last modified
-    time for each entry. Useful for surveying what files are present before
-    deciding which ones to process.
-
-    :param path: Absolute path of the directory to list
-    """
+def list_directory(
+    path: Annotated[str, Field(description="Absolute path of the directory to list")],
+) -> Dict[str, Any]:
+    """List files and subdirectories at the given path with name, type, size in bytes, and last modified time."""
     log(f"Listing directory: {path}")
     try:
         entries: List[Dict[str, Any]] = []
@@ -141,16 +116,10 @@ def list_directory(path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_file_metadata(path: str) -> Dict[str, Any]:
-    """
-    Get metadata for a single file or directory: size, creation time,
-    modification time, and extension.
-
-    Useful for checking whether a file is worth processing (e.g. size
-    sanity check) without reading its contents.
-
-    :param path: Absolute path to the file or directory
-    """
+def get_file_metadata(
+    path: Annotated[str, Field(description="Absolute path to the file or directory")],
+) -> Dict[str, Any]:
+    """Get metadata for a single file or directory: size, creation time, modification time, and extension."""
     log(f"Getting metadata: {path}")
     try:
         stat = os.stat(path)
@@ -172,17 +141,12 @@ def get_file_metadata(path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def find_files(directory: str, pattern: str, recursive: bool = True) -> Dict[str, Any]:
-    """
-    Find files matching a glob pattern within a directory.
-
-    Supports wildcards like *.dcm, *.nii.gz, CT_*.
-    Use recursive=True (default) to search all subdirectories.
-
-    :param directory: Root directory to search in
-    :param pattern: Glob pattern to match filenames against (e.g. *.dcm)
-    :param recursive: Whether to search subdirectories (default True)
-    """
+def find_files(
+    directory: Annotated[str, Field(description="Root directory to search in")],
+    pattern: Annotated[str, Field(description="Glob pattern to match filenames against (e.g. *.dcm, *.nii.gz, CT_*)")],
+    recursive: Annotated[bool, Field(description="Whether to search subdirectories (default True)")] = True,
+) -> Dict[str, Any]:
+    """Find files matching a glob pattern within a directory."""
     log(f"Finding files in {directory} matching '{pattern}' (recursive={recursive})")
     try:
         matches: List[str] = []
@@ -203,15 +167,10 @@ def find_files(directory: str, pattern: str, recursive: bool = True) -> Dict[str
 
 
 @mcp.tool()
-def delete_file(path: str) -> Dict[str, Any]:
-    """
-    Delete a file. Does not delete directories.
-
-    Use with care — intended for cleanup after processing, e.g. removing
-    a temporary file after it has been moved or archived.
-
-    :param path: Absolute path to the file to delete
-    """
+def delete_file(
+    path: Annotated[str, Field(description="Absolute path to the file to delete")],
+) -> Dict[str, Any]:
+    """Delete a file. Does not delete directories. Intended for cleanup after processing."""
     log(f"Deleting file: {path}")
     try:
         if os.path.isdir(path):
@@ -225,16 +184,11 @@ def delete_file(path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def copy_file(src: str, dst: str) -> Dict[str, Any]:
-    """
-    Copy a file from src to dst, creating parent directories if needed.
-
-    Useful for archiving an original file before processing it, or
-    duplicating results to a different output location.
-
-    :param src: Source file path
-    :param dst: Destination file path
-    """
+def copy_file(
+    src: Annotated[str, Field(description="Source file path")],
+    dst: Annotated[str, Field(description="Destination file path. Parent directories are created automatically.")],
+) -> Dict[str, Any]:
+    """Copy a file from src to dst, creating parent directories if needed."""
     log(f"Copying: {src} -> {dst}")
     try:
         os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -245,14 +199,10 @@ def copy_file(src: str, dst: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def read_file(path: str) -> Dict[str, Any]:
-    """
-    Read the text contents of a file (reports, CSVs, JSON, logs, etc.).
-
-    Not intended for binary files like DICOM — use parse_dicom for those.
-
-    :param path: Absolute path to the text file
-    """
+def read_file(
+    path: Annotated[str, Field(description="Absolute path to the text file. Not for binary files like DICOM — use parse_dicom for those.")],
+) -> Dict[str, Any]:
+    """Read the text contents of a file (reports, CSVs, JSON, logs, etc.)."""
     log(f"Reading file: {path}")
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -263,17 +213,11 @@ def read_file(path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def write_json(path: str, data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Write a JSON object to a file, creating parent directories if needed.
-    Overwrites the file if it already exists.
-
-    Intended for persisting structured analysis results to the workspaces
-    output directory so external systems can consume them.
-
-    :param path: Absolute path of the JSON file to write
-    :param data: JSON-serialisable object to write
-    """
+def write_json(
+    path: Annotated[str, Field(description="Absolute path of the JSON file to write")],
+    data: Annotated[Dict[str, Any], Field(description="JSON-serialisable object to write")],
+) -> Dict[str, Any]:
+    """Write a JSON object to a file, creating parent directories if needed. Overwrites the file if it already exists."""
     log(f"Writing JSON: {path}")
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)

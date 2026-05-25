@@ -32,6 +32,8 @@ if not _gpu:
 else:
     os.environ.setdefault("OMP_NUM_THREADS", "1")
 
+from typing import Annotated  # noqa: E402
+from pydantic import Field  # noqa: E402
 from cellpose_mcp.mcp_instance import mcp  # noqa: E402
 from cellpose_mcp import tools as _tools  # noqa: E402, F401 — registers all upstream tools
 
@@ -149,20 +151,12 @@ def cellpose_diagnostics(model_type: str = "cpsam") -> dict:
 
 
 @mcp.tool()
-def save_overlay(image_path: str, mask_path: str, output_path: str | None = None) -> dict:
-    """Draw segmentation outlines on the original image and save as PNG.
-
-    Creates a visualization where cell boundaries are drawn in red on top of the
-    original image. Use this after segment_cells_2d to inspect where cells were detected.
-
-    Args:
-        image_path: Path to the original image
-        mask_path: Path to the mask file produced by segment_cells_2d
-        output_path: Optional path for the overlay PNG (default: mask_path with _overlay.png suffix)
-
-    Returns:
-        Dictionary with overlay_path, or error key on failure
-    """
+def save_overlay(
+    image_path: Annotated[str, Field(description="Path to the original image")],
+    mask_path: Annotated[str, Field(description="Path to the mask file produced by segment_cells_2d")],
+    output_path: Annotated[str | None, Field(description="Optional path for the overlay PNG (default: mask_path with _overlay.png suffix)")] = None,
+) -> dict:
+    """Draw segmentation outlines on the original image and save as PNG. Use this after segment_cells_2d to inspect where cells were detected."""
     import numpy as np
     import imageio.v2 as imageio
     from pathlib import Path

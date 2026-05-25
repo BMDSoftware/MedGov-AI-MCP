@@ -6,7 +6,8 @@ MCP Skills Server - Provides skill management capabilities for the agentic syste
 import sys
 import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Annotated, Dict, Any
+from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 # Add current directory to path to import SkillsManager
@@ -35,15 +36,10 @@ log(f"Discovered {len(skills_manager.skills)} skills")
 
 
 @mcp.tool()
-def read_skill_file(skill_name: str) -> Dict[str, Any]:
-    """
-    Read the SKILL.md file for a specific skill.
-    
-    Returns the main skill instructions (SKILL.md content) and a list of available
-    helper files that can be loaded separately if needed.
-    
-    :param skill_name: Name of the skill to read
-    """
+def read_skill_file(
+    skill_name: Annotated[str, Field(description="Name of the skill to read")],
+) -> Dict[str, Any]:
+    """Read the SKILL.md file for a specific skill. Returns the main skill instructions and a list of available helper files that can be loaded separately."""
     log(f"Reading SKILL.md for: {skill_name}")
     
     result = skills_manager.activate(skill_name)
@@ -59,16 +55,11 @@ def read_skill_file(skill_name: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def read_references(skill_name: str, file_path: str) -> Dict[str, Any]:
-    """
-    Read a specific reference/helper file from a skill directory.
-    
-    Use this to load detailed documentation, schemas, or configuration files
-    that are referenced in SKILL.md.
-    
-    :param skill_name: Name of the skill
-    :param file_path: Relative path to the file within the skill directory (e.g., "references/pipeline.md")
-    """
+def read_references(
+    skill_name: Annotated[str, Field(description="Name of the skill")],
+    file_path: Annotated[str, Field(description='Relative path to the file within the skill directory (e.g., "references/pipeline.md")')],
+) -> Dict[str, Any]:
+    """Read a specific reference/helper file from a skill directory. Use this to load detailed documentation, schemas, or configuration files referenced in SKILL.md."""
     log(f"Reading reference file: {skill_name}/{file_path}")
     
     content = skills_manager.load_skill_file(skill_name, file_path)
@@ -90,20 +81,11 @@ def read_references(skill_name: str, file_path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def execute_script(skill_name: str, command: str) -> Dict[str, Any]:
-    """
-    Execute a command within a skill directory context.
-    
-    The command should be the full path to the script and any arguments.
-    The command will be executed with the skill directory as the working directory.
-    
-    Examples:
-    - "python scripts/extract_metadata.py --file_path /path/to/file.dcm"
-    - "bash scripts/anonymize_dicom.sh input.dcm output.dcm"
-    
-    :param skill_name: Name of the skill (used to determine working directory)
-    :param command: Full command to execute including script path and arguments
-    """
+def execute_script(
+    skill_name: Annotated[str, Field(description="Name of the skill (used to determine working directory)")],
+    command: Annotated[str, Field(description='Full command to execute including script path and arguments (e.g., "python scripts/extract_metadata.py --file_path /path/to/file.dcm")')],
+) -> Dict[str, Any]:
+    """Execute a command within a skill directory context. The command runs with the skill directory as the working directory."""
     log(f"Executing command in {skill_name}: {command}")
     
     import subprocess
@@ -151,17 +133,11 @@ def execute_script(skill_name: str, command: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def read_asset(skill_name: str, asset_path: str) -> Dict[str, Any]:
-    """
-    Read or locate a static asset (template, image, data file) from a skill's assets folder.
-    
-    If the file is text-based (CSV, JSON, HTML), the content is returned.
-    If the file is binary (PNG, DOCX, PDF), metadata and the absolute path are returned
-    so it can be passed to 'execute_script'.
-    
-    :param skill_name: Name of the skill
-    :param asset_path: Path to the asset (e.g., "assets/invoice_template.html")
-    """
+def read_asset(
+    skill_name: Annotated[str, Field(description="Name of the skill")],
+    asset_path: Annotated[str, Field(description='Path to the asset within the skill directory (e.g., "assets/invoice_template.html"). Text files return content; binary files return metadata and absolute path.')],
+) -> Dict[str, Any]:
+    """Read or locate a static asset (template, image, data file) from a skill's assets folder."""
     log(f"Accessing asset: {skill_name}/{asset_path}")
     
     result = skills_manager.read_asset_content(skill_name, asset_path)

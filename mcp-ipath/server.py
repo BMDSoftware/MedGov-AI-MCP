@@ -12,9 +12,10 @@ No vision model is run here. Visual reasoning is done by the LLM agent.
 """
 
 import sys
-from typing import Any, Dict
+from typing import Annotated, Any, Dict
 
 import httpx
+from pydantic import Field
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
@@ -56,21 +57,12 @@ mcp = FastMCP("ipath")
 
 @mcp.tool()
 def fetch_thumbnail(
-    slide_uid: str,
-    output_path: str,
-    width: int = 844,
-    height: int = 588,
+    slide_uid: Annotated[str, Field(description="DICOM UID of the slide (e.g. 2.25.338...)")],
+    output_path: Annotated[str, Field(description="Absolute path where the image will be saved")],
+    width: Annotated[int, Field(description="Thumbnail width in pixels (default 844, max 2700)")] = 844,
+    height: Annotated[int, Field(description="Thumbnail height in pixels (default 588, max 2700)")] = 588,
 ) -> Dict[str, Any]:
-    """
-    Download a scaled overview of a whole-slide iPath image to a local file.
-    Returns width/height to use as thumb_img_w/thumb_img_h in scale_roi_to_slide.
-
-    Args:
-        slide_uid: DICOM UID of the slide (e.g. 2.25.338...)
-        output_path: Absolute path where the image will be saved
-        width: Thumbnail width in pixels (default 844, max 2700)
-        height: Thumbnail height in pixels (default 588, max 2700)
-    """
+    """Download a scaled overview of a whole-slide iPath image to a local file. Returns width/height to use as thumb_img_w/thumb_img_h in scale_roi_to_slide."""
     slide_uid = normalize_uid(slide_uid)
     width = min(width, MAX_ROI_DIM)
     height = min(height, MAX_ROI_DIM)
@@ -88,13 +80,10 @@ def fetch_thumbnail(
 
 
 @mcp.tool()
-def get_slide_dimensions(slide_uid: str) -> Dict[str, Any]:
-    """
-    Get the full pixel dimensions of a whole-slide iPath image.
-
-    Args:
-        slide_uid: DICOM UID of the slide
-    """
+def get_slide_dimensions(
+    slide_uid: Annotated[str, Field(description="DICOM UID of the slide")],
+) -> Dict[str, Any]:
+    """Get the full pixel dimensions of a whole-slide iPath image."""
     slide_uid = slide_uid.strip()
     url = f"{IPATH_BASE}/dump?uid={slide_uid}"
     log(f"get_slide_dimensions: {url}")
@@ -119,24 +108,16 @@ def get_slide_dimensions(slide_uid: str) -> Dict[str, Any]:
 
 @mcp.tool()
 def scale_roi_to_slide(
-    thumb_x: float,
-    thumb_y: float,
-    thumb_w: float,
-    thumb_h: float,
-    thumb_img_w: float,
-    thumb_img_h: float,
-    slide_w: int,
-    slide_h: int,
+    thumb_x: Annotated[float, Field(description="Left edge of the bounding box in thumbnail pixels")],
+    thumb_y: Annotated[float, Field(description="Top edge of the bounding box in thumbnail pixels")],
+    thumb_w: Annotated[float, Field(description="Width of the bounding box in thumbnail pixels. HARD LIMIT: MUST NOT exceed 30. If your visual estimate is larger, clamp it to 30.")],
+    thumb_h: Annotated[float, Field(description="Height of the bounding box in thumbnail pixels. HARD LIMIT: MUST NOT exceed 30. If your visual estimate is larger, clamp it to 30.")],
+    thumb_img_w: Annotated[float, Field(description="Thumbnail image width in pixels (returned by fetch_thumbnail)")],
+    thumb_img_h: Annotated[float, Field(description="Thumbnail image height in pixels (returned by fetch_thumbnail)")],
+    slide_w: Annotated[int, Field(description="Full slide width in pixels (returned by get_slide_dimensions)")],
+    slide_h: Annotated[int, Field(description="Full slide height in pixels (returned by get_slide_dimensions)")],
 ) -> Dict[str, Any]:
-    """
-    Scale a bounding box from thumbnail coordinates to full slide coordinates.
-
-    Args:
-        thumb_x, thumb_y: Top-left of bbox in thumbnail pixels
-        thumb_w, thumb_h: Size of bbox in thumbnail pixels. HARD LIMIT: MUST NOT exceed 30 each. If your visual estimate is larger, clamp it to 30. Never pass a value above 30.
-        thumb_img_w, thumb_img_h: Thumbnail dimensions (from fetch_thumbnail)
-        slide_w, slide_h: Full slide dimensions (from get_slide_dimensions)
-    """
+    """Scale a bounding box from thumbnail coordinates to full slide coordinates."""
     scale_x = slide_w / thumb_img_w
     scale_y = slide_h / thumb_img_h
 
@@ -154,24 +135,14 @@ def scale_roi_to_slide(
 
 @mcp.tool()
 def fetch_roi(
-    slide_uid: str,
-    x: int,
-    y: int,
-    width: int,
-    height: int,
-    output_path: str,
+    slide_uid: Annotated[str, Field(description="DICOM UID of the slide")],
+    x: Annotated[int, Field(description="Left edge of the ROI in full slide pixels")],
+    y: Annotated[int, Field(description="Top edge of the ROI in full slide pixels")],
+    width: Annotated[int, Field(description="Width of the ROI in full slide pixels (max 2700)")],
+    height: Annotated[int, Field(description="Height of the ROI in full slide pixels (max 2700)")],
+    output_path: Annotated[str, Field(description="Absolute path where the image will be saved")],
 ) -> Dict[str, Any]:
-    """
-    Fetch a high-res ROI from a whole-slide iPath image. Width/height clamped to 2700px.
-
-    Workflow: fetch_thumbnail -> identify bbox -> get_slide_dimensions -> scale_roi_to_slide -> fetch_roi
-
-    Args:
-        slide_uid: DICOM UID of the slide
-        x, y: Top-left of ROI in full slide pixels
-        width, height: Size of ROI in full slide pixels (max 2700)
-        output_path: Absolute path where the image will be saved
-    """
+    """Fetch a high-res ROI from a whole-slide iPath image. Width/height clamped to 2700px. Workflow: fetch_thumbnail -> identify bbox -> get_slide_dimensions -> scale_roi_to_slide -> fetch_roi."""
     slide_uid = slide_uid.strip()
     clamped = width > MAX_ROI_DIM or height > MAX_ROI_DIM
     width = min(width, MAX_ROI_DIM)
@@ -199,16 +170,10 @@ def fetch_roi(
 
 
 @mcp.tool()
-def get_series_instances(series_uid: str) -> Dict[str, Any]:
-    """
-    List all pyramid-level instances in a WSI series with their SOP Instance UIDs and pixel dimensions.
-    Use this to identify which instance to use at each resolution level.
-    The response includes a 'smallest' field with the lowest-resolution instance - sufficient to report its UID and dimensions without downloading anything.
-    Only call fetch_dicom_instance if you need the actual file content for further processing.
-
-    Args:
-        series_uid: Series Instance UID to query (digits and dots only)
-    """
+def get_series_instances(
+    series_uid: Annotated[str, Field(description="Series Instance UID to query (digits and dots only)")],
+) -> Dict[str, Any]:
+    """List all pyramid-level instances in a WSI series with their SOP Instance UIDs and pixel dimensions. The response includes a 'smallest' field with the lowest-resolution instance. Only call fetch_dicom_instance if you need the actual file content."""
     series_uid = normalize_uid(series_uid)
     if not _validate_uid(series_uid):
         return {"success": False, "error": "invalid arguments"}
@@ -250,22 +215,12 @@ def get_series_instances(series_uid: str) -> Dict[str, Any]:
 
 @mcp.tool()
 def fetch_dicom_instance(
-    study_uid: str,
-    series_uid: str,
-    instance_uid: str,
-    output_path: str,
+    study_uid: Annotated[str, Field(description="Study Instance UID (digits and dots only)")],
+    series_uid: Annotated[str, Field(description="Series Instance UID (digits and dots only)")],
+    instance_uid: Annotated[str, Field(description="SOP Instance UID (digits and dots only)")],
+    output_path: Annotated[str, Field(description="Absolute path where the .dcm file will be saved")],
 ) -> Dict[str, Any]:
-    """
-    Download a DICOM instance file from the DICOMweb server for further processing (e.g. parsing metadata, running inference).
-    Only call this when you need the actual file content - NOT just to identify an instance or report its dimensions.
-    Use get_series_instances to discover instance UIDs and dimensions without downloading anything.
-
-    Args:
-        study_uid: Study Instance UID (digits and dots only)
-        series_uid: Series Instance UID (digits and dots only)
-        instance_uid: SOP Instance UID (digits and dots only)
-        output_path: Absolute path where the .dcm file will be saved
-    """
+    """Download a DICOM instance file from the DICOMweb server. Only call this when you need the actual file content — use get_series_instances to discover instance UIDs and dimensions without downloading."""
     for name, uid in [("study_uid", study_uid), ("series_uid", series_uid), ("instance_uid", instance_uid)]:
         if not _validate_uid(uid):
             return {"success": False, "error": f"invalid arguments: {name}"}

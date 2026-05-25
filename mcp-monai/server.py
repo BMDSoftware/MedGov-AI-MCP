@@ -9,7 +9,8 @@ import sys
 import torch
 import numpy as np
 import monai
-from typing import Dict, Any, List, Optional
+from typing import Annotated, Dict, Any, List, Optional
+from pydantic import Field
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from monai.transforms import (
@@ -558,15 +559,10 @@ def get_monai_info() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def analyze_image(image_path: str) -> Dict[str, Any]:
-    """
-    Analyze a medical image to detect its type, modality (CT/MRI/X-ray), and characteristics.
-    This should be called FIRST to understand what kind of image you're working with.
-
-    Returns image metadata, detected modality, and recommended models for analysis.
-
-    :param image_path: Path to the medical image file or DICOM series directory
-    """
+def analyze_image(
+    image_path: Annotated[str, Field(description="Path to the medical image file or DICOM series directory")],
+) -> Dict[str, Any]:
+    """Analyze a medical image to detect its type, modality (CT/MRI/X-ray), and characteristics. Call this FIRST to understand what kind of image you're working with."""
     path = image_path
     is_dir = os.path.isdir(path)
     if not os.path.exists(path) and not is_dir:
@@ -650,14 +646,12 @@ def analyze_image(image_path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def list_models(category: Optional[str] = None, modality: Optional[str] = None, body_part: Optional[str] = None) -> Dict[str, Any]:
-    """
-    List available pre-trained models from the MONAI Model Zoo.
-
-    :param category: Filter by category: segmentation, classification, or detection
-    :param modality: Filter by modality: CT, MRI, or X-ray
-    :param body_part: Filter by body part: abdomen, chest, head, pelvis, etc.
-    """
+def list_models(
+    category: Annotated[Optional[str], Field(description="Filter by category: segmentation, classification, or detection")] = None,
+    modality: Annotated[Optional[str], Field(description="Filter by modality: CT, MRI, or X-ray")] = None,
+    body_part: Annotated[Optional[str], Field(description="Filter by body part: abdomen, chest, head, pelvis, etc.")] = None,
+) -> Dict[str, Any]:
+    """List available pre-trained models from the MONAI Model Zoo."""
     models = []
     for name, info in MODEL_REGISTRY.items():
         if category and info["category"].lower() != category.lower():
@@ -690,13 +684,10 @@ def list_models(category: Optional[str] = None, modality: Optional[str] = None, 
 
 
 @mcp.tool()
-def download_model(model_name: str) -> Dict[str, Any]:
-    """
-    Download a pre-trained model bundle from MONAI Model Zoo.
-    Must be called before run_inference if the model hasn't been downloaded yet.
-
-    :param model_name: Name of the model from list_models()
-    """
+def download_model(
+    model_name: Annotated[str, Field(description="Name of the model from list_models()")],
+) -> Dict[str, Any]:
+    """Download a pre-trained model bundle from MONAI Model Zoo. Must be called before run_inference if the model hasn't been downloaded yet."""
     model_name = _resolve_model_name(model_name)
     if model_name not in MODEL_REGISTRY:
         return {
@@ -757,19 +748,11 @@ def download_model(model_name: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def run_inference(image_path: str, model_name: str) -> Dict[str, Any]:
-    """
-    Run REAL inference on a medical image using a MONAI pre-trained model.
-
-    The model must be downloaded first using download_model().
-    Use analyze_image() first to determine which model is appropriate.
-
-    For best results, use 3D medical images (NIfTI, DICOM).
-    2D images (JPEG, PNG) will be converted to pseudo-3D for compatibility.
-
-    :param image_path: Path to the input medical image file or DICOM series directory
-    :param model_name: Name of the model to use (from list_models)
-    """
+def run_inference(
+    image_path: Annotated[str, Field(description="Path to the input medical image file or DICOM series directory")],
+    model_name: Annotated[str, Field(description="Name of the model to use (from list_models). Call download_model() first if not yet downloaded.")],
+) -> Dict[str, Any]:
+    """Run inference on a medical image using a MONAI pre-trained model. Use analyze_image() first to determine the right model. 3D images (NIfTI, DICOM) give best results; 2D images are converted to pseudo-3D."""
     if not os.path.exists(image_path) and not os.path.isdir(image_path):
         return {"error": f"Image not found: {image_path}"}
 
@@ -980,12 +963,10 @@ def _run_inference_inner(image_path: str, model_name: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def list_transforms(category: Optional[str] = None) -> Dict[str, Any]:
-    """
-    List available MONAI transforms for image preprocessing.
-
-    :param category: Filter by: spatial, intensity, crop, or utility
-    """
+def list_transforms(
+    category: Annotated[Optional[str], Field(description="Filter by: spatial, intensity, crop, or utility")] = None,
+) -> Dict[str, Any]:
+    """List available MONAI transforms for image preprocessing."""
     transforms = {
         "spatial": ["Resize", "Rotate", "Flip", "Zoom", "RandAffine", "RandRotate", "Spacing", "Orientation"],
         "intensity": ["ScaleIntensity", "NormalizeIntensity", "ThresholdIntensity", "RandGaussianNoise", "RandAdjustContrast"],

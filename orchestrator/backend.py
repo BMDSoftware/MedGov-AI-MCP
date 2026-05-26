@@ -1101,11 +1101,16 @@ async def add_mcp_server(data: dict = Body(...), current_user: dict = Depends(ge
         return {"error": str(e)}
 
 
+BUNDLED_MCP_SERVERS = {"monai", "utils", "fhir", "skills", "radlex", "ipath", "cellpose"}
+
+
 @app.delete("/api/remove-mcp-server", tags=["agent"], summary="Disconnect and remove an MCP server")
 async def remove_mcp_server(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
     name = data.get("name")
     if not name:
         return {"error": "name is required"}
+    if name in BUNDLED_MCP_SERVERS:
+        return {"error": f"'{name}' is a built-in server and cannot be removed. Disable its tools instead."}
     try:
         agent = await get_or_create_agent(current_user["user_id"])
         removed_tools = [k for k in agent.available_tools if k.startswith(f"{name}.")]

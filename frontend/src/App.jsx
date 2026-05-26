@@ -396,7 +396,7 @@ function App() {
   // --- Render ---
   // ── Unauthenticated views (no hooks after this point) ──────────────────────
   if (!authToken) {
-    if (showLogin) return <Login onLogin={handleLogin} />;
+    if (showLogin) return <Login onLogin={handleLogin} onBack={() => setShowLogin(false)} />;
     if (page === 'about') return <About onNavigate={(p) => { if (p === 'home') setPage('home'); }} />;
     return (
       <HomePage

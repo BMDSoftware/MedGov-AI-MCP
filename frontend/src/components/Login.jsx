@@ -11,7 +11,7 @@ const HIGHLIGHTS = [
   'Per-user sessions and workspace isolation',
 ];
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, onBack }) {
   const [mode, setMode] = useState('login');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -57,7 +57,7 @@ export default function Login({ onLogin }) {
       <div className="sl-left">
         <div className="sl-left-inner">
           <div className="sl-brand">
-            <div className="sl-brand-icon"><MdLocalHospital /></div>
+            <div className="sl-brand-icon" onClick={onBack} style={{ cursor: onBack ? 'pointer' : 'default' }}><MdLocalHospital /></div>
             <span className="sl-brand-name">MedGov-AI</span>
           </div>
 

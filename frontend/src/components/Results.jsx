@@ -92,39 +92,27 @@ function Results({ refreshSignal, currentSessionId }) {
       </div>
 
       <div className="results-filters">
-        <div className="results-filter-group">
-          {[
-            { key: 'all', label: 'All' },
-            { key: 'inference', label: 'Inference' },
-            { key: 'cellpose', label: 'Cellpose' },
-            { key: 'report', label: 'Report' },
-            { key: 'markdown_report', label: 'File Reports' },
-          ].map(({ key, label }) => (
-            <button
-              key={key}
-              className={`filter-btn ${typeFilter === key ? 'active' : ''}`}
-              onClick={() => setTypeFilter(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="results-filter-group">
-          {[
-            { key: 'all', label: 'All statuses' },
-            { key: 'queued', label: 'Queued' },
-            { key: 'done', label: 'Done' },
-            { key: 'failed', label: 'Failed' },
-          ].map(({ key, label }) => (
-            <button
-              key={key}
-              className={`filter-btn ${statusFilter === key ? 'active' : ''}`}
-              onClick={() => setStatusFilter(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <select
+          className="filter-select"
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+        >
+          <option value="all">All types</option>
+          <option value="inference">Inference</option>
+          <option value="cellpose">Cellpose</option>
+          <option value="report">Report</option>
+          <option value="markdown_report">File Reports</option>
+        </select>
+        <select
+          className="filter-select"
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+        >
+          <option value="all">All statuses</option>
+          <option value="queued">Queued</option>
+          <option value="done">Done</option>
+          <option value="failed">Failed</option>
+        </select>
       </div>
 
       {loading && <p className="results-loading">Loading tasks...</p>}

@@ -273,6 +273,19 @@ function App() {
   const handleExamSelect = async (useCase, exam) => {
     setExpandedUseCase(null);
 
+    // Start a fresh session for each use case run so old context never bleeds in
+    try {
+      const res = await apiFetch(getApiUrl('/api/reset-session'), { method: 'POST' });
+      const data = await res.json();
+      setCurrentSessionId(data.session_id);
+      setMessages([WELCOME_MESSAGE]);
+      setUploadedFiles([]);
+      setUploadedDirs([]);
+      setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null, selectedPatient: null, patientContext: null });
+    } catch {
+      // non-fatal — continue with existing session if reset fails
+    }
+
     if (useCase.sampleItems) {
       // UID substitution — no directory to register
       setUserQuery(useCase.firstPrompt.replace('[SLIDE_UID]', exam.dir_path));

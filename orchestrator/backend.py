@@ -729,6 +729,69 @@ async def set_directory(data: dict = Body(...), current_user: dict = Depends(get
     return {"status": "ok", "dirs": state.uploaded_dirs}
 
 
+_APP_ROOT = Path(os.environ.get("APP_ROOT", str(Path(__file__).parent.parent)))
+SAMPLE_DIRS = {
+    "exams": _APP_ROOT / "orchestrator" / "sample_data" / "exams",
+}
+
+@app.get("/api/sample-exams", tags=["files"], summary="List available bundled sample exam directories")
+async def list_sample_exams(dir: str = "exams", current_user: dict = Depends(get_current_user)):
+    base = SAMPLE_DIRS.get(dir)
+    if base is None or not base.is_dir():
+        return {"exams": []}
+    exams = []
+    for exam_dir in sorted(base.iterdir()):
+        if not exam_dir.is_dir():
+            continue
+        file_count = sum(1 for f in exam_dir.iterdir() if f.is_file())
+        exams.append({"name": exam_dir.name, "dir_path": str(exam_dir), "file_count": file_count})
+    return {"exams": exams}
+
+
+@app.post("/api/setup-use-case", tags=["files"], summary="Register bundled sample exam directories for a use case")
+async def setup_use_case(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+    state = _get_user_state(uid)
+    key = data.get("dir")
+    base = SAMPLE_DIRS.get(key)
+    if base is None or not base.is_dir():
+        raise HTTPException(status_code=404, detail=f"Sample directory '{key}' not found")
+
+    if not state.current_session_id:
+        state.current_session_id = db.create_session(user_id=uid)
+
+    # If a specific dir_path is given, register just that one
+    specific = data.get("dir_path")
+    if specific:
+        exam_dir = Path(specific)
+        if not exam_dir.is_dir() or not str(exam_dir).startswith(str(base)):
+            raise HTTPException(status_code=404, detail="Exam directory not found")
+        dir_path_str = str(exam_dir)
+        if dir_path_str not in state.uploaded_dirs:
+            state.uploaded_dirs.append(dir_path_str)
+            total_size = sum(f.stat().st_size for f in exam_dir.iterdir() if f.is_file())
+            db.save_uploaded_file(state.current_session_id, exam_dir.name, dir_path_str, 'dicom_dir', total_size)
+        file_count = sum(1 for f in exam_dir.iterdir() if f.is_file())
+        return {"status": "ok", "exams": [{"dir_path": dir_path_str, "dirname": exam_dir.name, "file_count": file_count}]}
+
+    # Otherwise register all subdirectories
+    registered = []
+    for exam_dir in sorted(base.iterdir()):
+        if not exam_dir.is_dir():
+            continue
+        dir_path_str = str(exam_dir)
+        if dir_path_str not in state.uploaded_dirs:
+            state.uploaded_dirs.append(dir_path_str)
+            total_size = sum(f.stat().st_size for f in exam_dir.iterdir() if f.is_file())
+            db.save_uploaded_file(state.current_session_id, exam_dir.name, dir_path_str, 'dicom_dir', total_size)
+        file_count = sum(1 for f in exam_dir.iterdir() if f.is_file())
+        registered.append({"dir_path": dir_path_str, "dirname": exam_dir.name, "file_count": file_count})
+
+    if not registered:
+        raise HTTPException(status_code=404, detail="No exam subdirectories found")
+    return {"status": "ok", "exams": registered}
+
+
 @app.get("/api/available-models", tags=["agent"], summary="List available Gemini models for the configured API key")
 async def available_models(current_user: dict = Depends(get_current_user)):
     try:

@@ -1,4 +1,5 @@
 {
   "mode": "debug",
-  "llm_mode": "stateful"
+  "llm_mode": "stateful",
+  "confirmation": true
 }

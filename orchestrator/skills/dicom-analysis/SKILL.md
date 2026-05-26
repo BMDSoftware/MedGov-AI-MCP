@@ -31,7 +31,6 @@ description: Read this skill first whenever the user asks to analyze, segment, o
    - `radlex.find_templates(query=..., specialty_code=...)` — find the most relevant template
 
 7. **Generate the report**
-   - `radlex.get_template_schema(template_id)` — inspect valid field keys before filling
    - `radlex.generate_radiology_report(template_id, findings={...}, report_title=...)` — map inference results to template fields
    - Unknown field keys cause hard errors — always check the schema first
 

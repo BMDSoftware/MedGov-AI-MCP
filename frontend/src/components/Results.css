@@ -39,27 +39,25 @@
 
 .results-filters {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   margin-bottom: 20px;
-  flex-wrap: wrap;
 }
 
-.filter-btn {
-  background: transparent;
-  color: var(--text-secondary, #a1a1aa);
-  border: 1px solid var(--border, var(--bg-card));
-  padding: 6px 14px;
-  border-radius: 20px;
-  font-size: 12px;
+.filter-select {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 13px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  outline: none;
+  transition: border-color 0.15s;
 }
 
-.filter-btn:hover,
-.filter-btn.active {
-  background: var(--accent, #6366f1);
+.filter-select:hover,
+.filter-select:focus {
   border-color: var(--accent, #6366f1);
-  color: #fff;
 }
 
 .results-loading,

@@ -538,6 +538,10 @@ body {
   background: var(--bg-primary);
 }
 
+.main.main-fullpage {
+  overflow-y: auto;
+}
+
 .header {
   padding: 28px 40px;
   border-bottom: 1px solid var(--border);
@@ -1078,6 +1082,13 @@ body {
   background: rgba(99, 102, 241, 0.15);
   border-color: rgba(99, 102, 241, 0.35);
   color: #a5b4fc;
+}
+
+.attachment-chip.uploading-chip {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+  opacity: 0.75;
 }
 
 .attachment-chip svg {

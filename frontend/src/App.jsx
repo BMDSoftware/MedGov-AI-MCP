@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { API_CONFIG, getApiUrl } from './config';
 import { isAuthenticated, getToken, getUsername, setAuth, clearAuth } from './auth';
 import { apiFetch, safeJson, authEventSourceUrl } from './apiFetch';
@@ -13,6 +14,7 @@ import Toast from './components/Toast';
 import HomePage from './components/HomePage';
 import AutonomousAgent from './components/AutonomousAgent';
 import Workspaces from './components/Workspaces';
+import About from './components/About';
 import NavDock from './components/NavDock';
 import AgentLog from './components/AgentLog';
 import { MdHome, MdSmartToy, MdBiotech, MdBarChart, MdDescription, MdFolder, MdSettings, MdHistory, MdScience } from 'react-icons/md';
@@ -90,6 +92,7 @@ function App() {
   const [loadingExams, setLoadingExams] = useState(false);
   const pageRef = useRef(page);
   const [uploadingDir, setUploadingDir] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState([]); // [{name, fileType}] uploading in progress
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -105,6 +108,7 @@ function App() {
     setCurrentSessionId(null);
     setUploadedFiles([]);
     setUploadedDirs([]);
+    setUploadingFiles([]);
     setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null, selectedPatient: null, patientContext: null });
     setSelectedPatient(null);
     setPendingTool(null);
@@ -359,6 +363,8 @@ function App() {
   };
 
   const handleFileUpload = async (file) => {
+    const pending = { name: file.name, fileType: file.type };
+    setUploadingFiles(prev => [...prev, pending]);
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -371,6 +377,8 @@ function App() {
       setSessionContext(prev => ({ ...prev, fileUploaded: true }));
     } catch (error) {
       addMessage({ type: 'bot', content: `Upload error: ${error.message}` });
+    } finally {
+      setUploadingFiles(prev => prev.filter(p => p.name !== file.name));
     }
   };
 
@@ -552,10 +560,12 @@ function App() {
   // --- Render ---
   // ── Unauthenticated views (no hooks after this point) ──────────────────────
   if (!authToken) {
-    if (showLogin) return <Login onLogin={handleLogin} />;
+    if (showLogin) return <Login onLogin={handleLogin} onBack={() => setShowLogin(false)} />;
+    if (page === 'about') return <About onNavigate={(p) => { if (p === 'home') setPage('home'); }} />;
     return (
       <HomePage
         onNavigate={(p) => {
+          if (p === 'about') { setPage('about'); return; }
           if (p === 'analysis' || p === 'autonomous' || p === 'results') {
             setShowLogin(true);
           }
@@ -582,10 +592,10 @@ function App() {
 
       {appMode === 'debug' && <AgentLog sessionId={currentSessionId} />}
 
-      {page !== 'home' && <aside className="sidebar">
+      {page !== 'home' && page !== 'about' && <aside className="sidebar">
         <div className="logo" style={{ cursor: 'pointer' }} onClick={() => setPage('home')}>
-          <span className="logo-icon">H</span>
-          <span className="logo-text">HealthMCP</span>
+          <span className="logo-icon">M</span>
+          <span className="logo-text">MedGov-AI</span>
         </div>
         <nav className="nav">
           <NavDock
@@ -619,7 +629,7 @@ function App() {
         </div>
       </aside>}
 
-      <main className="main">
+      <main className={`main${page === 'about' ? ' main-fullpage' : ''}`}>
         {/* Running Tool Indicator */}
         {runningTool && (
           <div style={{
@@ -649,7 +659,7 @@ function App() {
           </div>
         )}
 
-        {page !== 'home' && (
+        {page !== 'home' && page !== 'about' && (
         <header className="header">
           <h1>MedGov-AI</h1>
           {selectedPatient ? (
@@ -672,6 +682,7 @@ function App() {
             onNavigate={setPage}
             currentSessionId={currentSessionId}
             runningTaskCount={runningTaskCount}
+            onSignOut={handleLogout}
           />
         ) : page === 'autonomous' ? (
           <AutonomousAgent currentSessionId={currentSessionId} />
@@ -685,6 +696,8 @@ function App() {
           <Report refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />
         ) : page === 'workspaces' ? (
           <Workspaces appMode={appMode} />
+        ) : page === 'about' ? (
+          <About onNavigate={setPage} />
         ) : page === 'history' ? (
           <Sessions onLoadSession={(data) => {
             if (!data) return;
@@ -743,7 +756,10 @@ function App() {
                       </div>
                     ) : (
                       <>
-                        <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                        {msg.isConfirmation
+                          ? <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          : <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                        }
                         {msg.isConfirmation && pendingTool && i === messages.length - 1 && (
                           <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
                             <button
@@ -909,9 +925,18 @@ function App() {
                   setIsProcessing(false);
                 }
               }}>
-                {/* Attachment strip — only shown when something is attached */}
-                {(uploadedFiles.length > 0 || uploadedDirs.length > 0) && (
+                {/* Attachment strip — only shown when something is attached or uploading */}
+                {(uploadedFiles.length > 0 || uploadedDirs.length > 0 || uploadingFiles.length > 0) && (
                   <div className="attachment-strip">
+                    {uploadingFiles.map(f => (
+                      <div key={`uploading-${f.name}`} className="attachment-chip file-chip uploading-chip" title={f.name}>
+                        <svg width="13" height="13" viewBox="0 0 22 22" style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}>
+                          <circle cx="11" cy="11" r="9" fill="none" stroke="currentColor" strokeWidth="2" strokeOpacity="0.25" />
+                          <path d="M11 2a9 9 0 0 1 9 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        </svg>
+                        <span className="attachment-chip-name">{f.name}</span>
+                      </div>
+                    ))}
                     {uploadedDirs.map(d => (
                       <div key={d.path} className="attachment-chip dir-chip" title={d.name}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

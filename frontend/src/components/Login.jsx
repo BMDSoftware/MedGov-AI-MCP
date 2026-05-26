@@ -5,13 +5,13 @@ import { setAuth } from '../auth';
 import './Login.css';
 
 const HIGHLIGHTS = [
-  'MONAI segmentation on DICOM series',
-  'Structured radiology report generation',
-  'Autonomous multi-file inference pipelines',
+  'Autonomous clinical imaging analysis',
+  'Structured radiology and pathology reports',
+  'Workspace monitoring with event-driven pipelines',
   'Per-user sessions and workspace isolation',
 ];
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, onBack }) {
   const [mode, setMode] = useState('login');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -56,19 +56,18 @@ export default function Login({ onLogin }) {
       {/* ── Left panel ── */}
       <div className="sl-left">
         <div className="sl-left-inner">
-          <div className="sl-brand">
+          <div className="sl-brand" onClick={onBack} style={{ cursor: onBack ? 'pointer' : 'default' }}>
             <div className="sl-brand-icon"><MdLocalHospital /></div>
-            <span className="sl-brand-name">AgenticHealth</span>
+            <span className="sl-brand-name">MedGov-AI</span>
           </div>
 
           <div className="sl-left-body">
             <h1 className="sl-left-title">
-              Medical imaging,<br />
-              <span className="sl-left-accent">reimagined.</span>
+              Clinical workflows,<br />
+              <span className="sl-left-accent">automated.</span>
             </h1>
             <p className="sl-left-sub">
-              An AI-orchestrated platform for DICOM analysis,
-              MONAI inference, and automated radiology workflows.
+              An AI-powered application for autonomous workflows and task resolution, with integrated medical tools for imaging, reporting, and general clinical support.
             </p>
 
             <ul className="sl-features">
@@ -81,7 +80,7 @@ export default function Login({ onLogin }) {
             </ul>
           </div>
 
-          <p className="sl-left-footer">MONAI · RadLex · FHIR · MCP</p>
+          <p className="sl-left-footer">Supported by Health from Portugal · PRR</p>
         </div>
       </div>
 

@@ -70,7 +70,7 @@ function formatDate(iso) {
   return `${diffDays}d ago`;
 }
 
-function HomePage({ onNavigate, onSignIn, currentSessionId, runningTaskCount, isPublic }) {
+function HomePage({ onNavigate, onSignIn, onSignOut, currentSessionId, runningTaskCount, isPublic }) {
   const [sessions, setSessions] = useState([]);
   const [taskStats, setTaskStats] = useState({ done: 0, failed: 0, running: 0 });
   const [loading, setLoading] = useState(!isPublic);
@@ -105,8 +105,8 @@ function HomePage({ onNavigate, onSignIn, currentSessionId, runningTaskCount, is
       {/* Top navigation */}
       <nav className="home-topnav">
         <div className="home-topnav-brand">
-          <div className="home-topnav-icon">H</div>
-          <span className="home-topnav-name">HealthMCP</span>
+          <div className="home-topnav-icon">M</div>
+          <span className="home-topnav-name">MedGov-AI</span>
         </div>
         <div className="home-topnav-links">
           <button onClick={() => onNavigate('autonomous')}>Autonomous</button>
@@ -118,13 +118,19 @@ function HomePage({ onNavigate, onSignIn, currentSessionId, runningTaskCount, is
             )}
           </button>
           <button onClick={() => onNavigate('workspaces')}>Workspaces</button>
+          <button onClick={() => onNavigate('about')}>About</button>
         </div>
-        <button className="home-topnav-cta" onClick={() => isPublic ? onSignIn?.() : onNavigate('analysis')}>
-          {isPublic ? 'Sign in' : 'Open App'}
-          <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-            <path d="M5 12h14M12 5l7 7-7 7"/>
-          </svg>
-        </button>
+        <div className="home-topnav-actions">
+          <button className="home-topnav-cta" onClick={() => isPublic ? onSignIn?.() : onNavigate('analysis')}>
+            {isPublic ? 'Sign in' : 'Open App'}
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+          </button>
+          {!isPublic && (
+            <button className="home-topnav-signout" onClick={onSignOut}>Sign out</button>
+          )}
+        </div>
       </nav>
 
       {/* Hero section */}
@@ -143,7 +149,7 @@ function HomePage({ onNavigate, onSignIn, currentSessionId, runningTaskCount, is
           </h1>
 
           <p className="home-hero-subtitle">
-            Upload DICOM scans, run MONAI segmentation models, and generate structured radiology reports — all through a conversational AI agent.
+            Upload DICOM scans, run MONAI segmentation and Cellpose cell detection models, and generate structured clinical reports — all through a conversational AI agent.
           </p>
 
           <div className="home-hero-actions">
@@ -193,8 +199,17 @@ function HomePage({ onNavigate, onSignIn, currentSessionId, runningTaskCount, is
 
       {/* Footer */}
       <footer className="home-footer">
-        <span>HealthMCP v1.0</span>
-        <span className="home-footer-stack">MONAI · RadLex · FHIR</span>
+        <span>MedGov-AI v1.0</span>
+        <div className="home-footer-ack">
+          <img
+            src="https://www.healthfromportugal.pt/static/site/images/sponsors/footer-hfp.svg"
+            alt="Health from Portugal"
+            className="home-footer-ack-logo"
+          />
+          <span className="home-footer-ack-text">
+            Supported by Health from Portugal - PRR grant No C644937233-00000047
+          </span>
+        </div>
         <button className="home-footer-settings" onClick={() => onNavigate('settings')}>
           Settings
         </button>

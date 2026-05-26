@@ -857,6 +857,7 @@ function App() {
                                   {typeof exam.file_count === 'number' && (
                                     <span className="exam-picker-count">{exam.file_count} files</span>
                                   )}
+                                </button>
                               ))
                             )}
                           </div>

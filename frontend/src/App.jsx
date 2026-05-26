@@ -81,6 +81,8 @@ function App() {
   const [pendingReportPrompt, setPendingReportPrompt] = useState(null);
   const pendingReportRef = useRef(null);
   const selectedUseCaseRef = useRef(null);
+  const reportPromptSentRef = useRef(false);
+  const [showUseCaseSuggestions, setShowUseCaseSuggestions] = useState(false);
   const textareaRef = useRef(null);
   const [expandedUseCase, setExpandedUseCase] = useState(null);
   const [activeUseCase, setActiveUseCase] = useState(null);
@@ -302,15 +304,22 @@ function App() {
 
   useEffect(() => {
     if (!taskRefreshSignal) return;
-    if (taskRefreshSignal.type === 'task_done' && pendingReportRef.current) {
-      const prompt = pendingReportRef.current;
-      pendingReportRef.current = null;
-      setPendingReportPrompt(null);
-      addMessage({
-        type: 'bot',
-        content: 'Background task completed. Ready to generate the report.',
-        actions: [{ id: 'send_report', label: 'Generate Report', query: prompt }]
-      });
+    if (taskRefreshSignal.type === 'task_done') {
+      if (pendingReportRef.current) {
+        const prompt = pendingReportRef.current;
+        pendingReportRef.current = null;
+        setPendingReportPrompt(null);
+        addMessage({
+          type: 'bot',
+          content: 'Background task completed. Ready to generate the report.',
+          actions: [{ id: 'send_report', label: 'Generate Report', query: prompt }]
+        });
+      } else if (reportPromptSentRef.current) {
+        reportPromptSentRef.current = false;
+        setActiveUseCase(null);
+        setExpandedUseCase(null);
+        setShowUseCaseSuggestions(true);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskRefreshSignal]);
@@ -402,6 +411,7 @@ function App() {
 
   const handleAction = async (actionId, extra = {}) => {
     if (actionId === 'send_report') {
+      reportPromptSentRef.current = true;
       setUserQuery(extra.query);
       setTimeout(() => textareaRef.current?.form?.requestSubmit(), 0);
       return;
@@ -516,6 +526,7 @@ function App() {
     if (!pendingTool) return;
     addMessage({ type: 'user', content: `Denied: ${pendingTool.tool_name}` });
     setPendingTool(null);
+    reportPromptSentRef.current = false;
     try {
       const response = await apiFetch(getApiUrl('/api/deny-tool'), { method: 'POST' });
       const data = await safeJson(response);
@@ -709,63 +720,6 @@ function App() {
         ) : (
           <div className="chat">
             <div className="messages">
-              {messages.length === 1 && (
-                <div className="use-case-suggestions">
-                  <span className="use-case-suggestions-label">Try a use case</span>
-                  <div className="use-case-cards">
-                    {USE_CASES.map(uc => (
-                      <div key={uc.id} className="use-case-card-wrapper">
-                        <button
-                          className={`use-case-card${expandedUseCase === uc.id ? ' expanded' : ''}${activeUseCase === uc.id && expandedUseCase !== uc.id ? ' active' : ''}`}
-                          onClick={() => handleUseCaseClick(uc)}
-                          disabled={isProcessing}
-                        >
-                          <div className="use-case-card-top">
-                            <strong>{uc.title}</strong>
-                            {activeUseCase === uc.id && expandedUseCase !== uc.id && (
-                              <span className="use-case-card-active-badge">Selected</span>
-                            )}
-                            <svg
-                              className="use-case-card-arrow"
-                              width="14" height="14" viewBox="0 0 24 24" fill="none"
-                              stroke="currentColor" strokeWidth="2.5"
-                              strokeLinecap="round" strokeLinejoin="round"
-                              style={{ transform: expandedUseCase === uc.id ? 'rotate(90deg)' : undefined }}
-                            >
-                              <path d="M5 12h14M12 5l7 7-7 7"/>
-                            </svg>
-                          </div>
-                          <span className="use-case-card-prompt">{uc.firstPrompt}</span>
-                        </button>
-
-                        {expandedUseCase === uc.id && (
-                          <div className="use-case-exam-picker">
-                            {loadingExams ? (
-                              <span className="exam-picker-empty">Loading...</span>
-                            ) : availableExams.length === 0 ? (
-                              <span className="exam-picker-empty">No exams found in sample_data/exams/</span>
-                            ) : (
-                              availableExams.map(exam => (
-                                <button
-                                  key={exam.dir_path}
-                                  className="exam-picker-item"
-                                  onClick={() => handleExamSelect(uc, exam)}
-                                >
-                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                                  </svg>
-                                  <span className="exam-picker-name" title={exam.name}>{exam.name}</span>
-                                  <span className="exam-picker-count">{exam.file_count} files</span>
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
               {messages.map((msg, i) => (
                 <div key={i} className={`message ${msg.type}`}>
                   <div className="message-avatar">{msg.type === 'bot' ? 'AI' : 'U'}</div>
@@ -825,6 +779,63 @@ function App() {
                   </div>
                 </div>
               ))}
+              {(messages.length === 1 || showUseCaseSuggestions) && (
+                <div className="use-case-suggestions">
+                  <span className="use-case-suggestions-label">Try a use case</span>
+                  <div className="use-case-cards">
+                    {USE_CASES.map(uc => (
+                      <div key={uc.id} className="use-case-card-wrapper">
+                        <button
+                          className={`use-case-card${expandedUseCase === uc.id ? ' expanded' : ''}${activeUseCase === uc.id && expandedUseCase !== uc.id ? ' active' : ''}`}
+                          onClick={() => handleUseCaseClick(uc)}
+                          disabled={isProcessing}
+                        >
+                          <div className="use-case-card-top">
+                            <strong>{uc.title}</strong>
+                            {activeUseCase === uc.id && expandedUseCase !== uc.id && (
+                              <span className="use-case-card-active-badge">Selected</span>
+                            )}
+                            <svg
+                              className="use-case-card-arrow"
+                              width="14" height="14" viewBox="0 0 24 24" fill="none"
+                              stroke="currentColor" strokeWidth="2.5"
+                              strokeLinecap="round" strokeLinejoin="round"
+                              style={{ transform: expandedUseCase === uc.id ? 'rotate(90deg)' : undefined }}
+                            >
+                              <path d="M5 12h14M12 5l7 7-7 7"/>
+                            </svg>
+                          </div>
+                          <span className="use-case-card-prompt">{uc.firstPrompt}</span>
+                        </button>
+
+                        {expandedUseCase === uc.id && (
+                          <div className="use-case-exam-picker">
+                            {loadingExams ? (
+                              <span className="exam-picker-empty">Loading...</span>
+                            ) : availableExams.length === 0 ? (
+                              <span className="exam-picker-empty">No exams found in sample_data/exams/</span>
+                            ) : (
+                              availableExams.map(exam => (
+                                <button
+                                  key={exam.dir_path}
+                                  className="exam-picker-item"
+                                  onClick={() => handleExamSelect(uc, exam)}
+                                >
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                  </svg>
+                                  <span className="exam-picker-name" title={exam.name}>{exam.name}</span>
+                                  <span className="exam-picker-count">{exam.file_count} files</span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
 
@@ -834,6 +845,7 @@ function App() {
                 if (!userQuery.trim()) return;
                 const currentQuery = userQuery;
                 setUserQuery("");
+                setShowUseCaseSuggestions(false);
                 if (selectedUseCaseRef.current) {
                   pendingReportRef.current = selectedUseCaseRef.current.reportPrompt;
                   setPendingReportPrompt(selectedUseCaseRef.current.reportPrompt);

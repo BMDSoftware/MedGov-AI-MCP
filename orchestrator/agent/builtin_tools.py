@@ -97,7 +97,7 @@ BUILTIN_TOOLS: Dict[str, Dict] = {
 
 def handle_list_tasks(session_id: Optional[str], user_id: Optional[str] = None) -> Tuple[Dict, str]:
     """Execute the list_tasks built-in and return (result, summary)."""
-    tasks = db.list_tasks(user_id=user_id) if user_id else db.list_tasks(session_id=session_id)
+    tasks = db.list_tasks(session_id=session_id, user_id=user_id)
     summary_list = []
     for t in tasks:
         entry = {

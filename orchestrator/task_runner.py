@@ -612,20 +612,6 @@ async def _async_run_cellpose(image_path: str, model_type: str, input_data: Dict
             if key in input_data:
                 arguments[key] = input_data[key]
 
-        # Run step-by-step diagnostics first so we know exactly which stage
-        # fails if the process dies silently (model load, torch, inference pass).
-        try:
-            diag_result = await asyncio.wait_for(
-                session.call_tool("cellpose_diagnostics", arguments={}),
-                timeout=120.0,
-            )
-            diag_text = "".join(b.text for b in diag_result.content if hasattr(b, "text"))
-            print(f"[task_runner] Cellpose diagnostics: {diag_text}", flush=True)
-            with open(stderr_log, "a") as _f:
-                _f.write(f"[diagnostics] {diag_text}\n")
-        except Exception as diag_err:
-            with open(stderr_log, "a") as _f:
-                _f.write(f"[diagnostics failed] {diag_err}\n")
 
         mcp_result = await session.call_tool("segment_cells_2d", arguments=arguments)
 

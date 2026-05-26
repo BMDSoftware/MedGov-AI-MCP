@@ -148,7 +148,9 @@ async def search_templates(
                 return [{"error": f"No templates found for query={query}, specialty={specialty}"}]
 
             approved = [t for t in templates if t.get("TLAP_Approved") == "1"]
-            return approved if approved else [{"error": f"No TLAP-approved templates found for query={query}, specialty={specialty}"}]
+            english = [t for t in approved if (t.get("lang") or "English").lower() == "english"]
+            filtered = english if english else approved
+            return filtered if filtered else [{"error": f"No TLAP-approved templates found for query={query}, specialty={specialty}"}]
         except Exception as exc:
             return [{"error": f"Search failed: {exc}"}]
 

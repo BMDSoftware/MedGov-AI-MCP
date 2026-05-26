@@ -915,6 +915,13 @@ body {
   color: #a5b4fc;
 }
 
+.attachment-chip.uploading-chip {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+  opacity: 0.75;
+}
+
 .attachment-chip svg {
   flex-shrink: 0;
   opacity: 0.8;

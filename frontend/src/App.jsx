@@ -61,6 +61,7 @@ function App() {
   const [appMode, setAppMode] = useState('debug'); // 'normal' | 'debug'
   const pageRef = useRef(page);
   const [uploadingDir, setUploadingDir] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState([]); // [{name, fileType}] uploading in progress
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -76,6 +77,7 @@ function App() {
     setCurrentSessionId(null);
     setUploadedFiles([]);
     setUploadedDirs([]);
+    setUploadingFiles([]);
     setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null, selectedPatient: null, patientContext: null });
     setSelectedPatient(null);
     setPendingTool(null);
@@ -212,6 +214,8 @@ function App() {
   };
 
   const handleFileUpload = async (file) => {
+    const pending = { name: file.name, fileType: file.type };
+    setUploadingFiles(prev => [...prev, pending]);
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -224,6 +228,8 @@ function App() {
       setSessionContext(prev => ({ ...prev, fileUploaded: true }));
     } catch (error) {
       addMessage({ type: 'bot', content: `Upload error: ${error.message}` });
+    } finally {
+      setUploadingFiles(prev => prev.filter(p => p.name !== file.name));
     }
   };
 
@@ -699,9 +705,18 @@ function App() {
                   setIsProcessing(false);
                 }
               }}>
-                {/* Attachment strip — only shown when something is attached */}
-                {(uploadedFiles.length > 0 || uploadedDirs.length > 0) && (
+                {/* Attachment strip — only shown when something is attached or uploading */}
+                {(uploadedFiles.length > 0 || uploadedDirs.length > 0 || uploadingFiles.length > 0) && (
                   <div className="attachment-strip">
+                    {uploadingFiles.map(f => (
+                      <div key={`uploading-${f.name}`} className="attachment-chip file-chip uploading-chip" title={f.name}>
+                        <svg width="13" height="13" viewBox="0 0 22 22" style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}>
+                          <circle cx="11" cy="11" r="9" fill="none" stroke="currentColor" strokeWidth="2" strokeOpacity="0.25" />
+                          <path d="M11 2a9 9 0 0 1 9 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        </svg>
+                        <span className="attachment-chip-name">{f.name}</span>
+                      </div>
+                    ))}
                     {uploadedDirs.map(d => (
                       <div key={d.path} className="attachment-chip dir-chip" title={d.name}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

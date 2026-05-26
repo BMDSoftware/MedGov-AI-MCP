@@ -63,11 +63,11 @@ export default function Login({ onLogin }) {
 
           <div className="sl-left-body">
             <h1 className="sl-left-title">
-              Medical imaging,<br />
-              <span className="sl-left-accent">reimagined.</span>
+              Clinical workflows,<br />
+              <span className="sl-left-accent">automated.</span>
             </h1>
             <p className="sl-left-sub">
-              An agentic AI platform for clinical imaging orchestration via the Model Context Protocol.
+              An AI-powered application for autonomous workflows and task resolution, with integrated medical tools for imaging, reporting, and general clinical support.
             </p>
 
             <ul className="sl-features">

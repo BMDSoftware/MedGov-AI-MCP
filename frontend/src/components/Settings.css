@@ -190,7 +190,27 @@
   color: var(--text-muted, #a1a1aa);
   margin-left: 10px;
 }
-.settings-loading, .settings-error {
+.settings-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 40px 0;
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 14px;
+}
+
+.settings-loading-spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--border, #3f3f46);
+  border-top-color: var(--accent, #6366f1);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+.settings-error {
   text-align: center;
   margin: 40px 0;
   color: var(--error, #ef4444);

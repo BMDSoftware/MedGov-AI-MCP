@@ -349,7 +349,7 @@ function Settings({ onModeChange, appMode }) {
     }
   };
 
-  if (loading) return <div className="settings-loading">Loading...</div>;
+  if (loading) return <div className="settings-loading"><div className="settings-loading-spinner" />Loading settings...</div>;
   if (error) return <div className="settings-error">{error}</div>;
 
   return (

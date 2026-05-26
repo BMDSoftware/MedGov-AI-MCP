@@ -24,10 +24,7 @@ function Results({ refreshSignal, currentSessionId }) {
 
   const fetchTasks = async () => {
     try {
-      const url = currentSessionId
-        ? `${API_URL}/api/tasks?session_id=${currentSessionId}`
-        : `${API_URL}/api/tasks`;
-      const res = await apiFetch(url);
+      const res = await apiFetch(`${API_URL}/api/tasks`);
       const data = await res.json();
       setTasks(data.tasks || []);
     } catch {
@@ -71,6 +68,13 @@ function Results({ refreshSignal, currentSessionId }) {
       || (statusFilter === 'failed' && t.status === 'failed');
     return typeMatch && statusMatch;
   });
+
+  const currentTasks = currentSessionId
+    ? filteredTasks.filter(t => t.session_id === currentSessionId)
+    : filteredTasks;
+  const otherTasks = currentSessionId
+    ? filteredTasks.filter(t => t.session_id !== currentSessionId)
+    : [];
 
   const formatTime = (iso) => {
     if (!iso) return '—';
@@ -123,8 +127,8 @@ function Results({ refreshSignal, currentSessionId }) {
         </div>
       )}
 
-      <div className="task-list">
-        {filteredTasks.map(task => (
+      {!loading && filteredTasks.length > 0 && (() => {
+        const renderCard = (task) => (
           <div key={task.id} className={`task-card task-${task.status}`}>
             <div className="task-card-header" onClick={() => toggle(task.id)}>
               <div className="task-card-left">
@@ -164,7 +168,6 @@ function Results({ refreshSignal, currentSessionId }) {
 
             {expanded.has(task.id) && (
               <div className="task-card-body">
-                {/* Inference summary */}
                 {task.task_type === 'inference' && (
                   <div className="task-inference-summary">
                     <div className="task-inference-summary-row">
@@ -194,7 +197,6 @@ function Results({ refreshSignal, currentSessionId }) {
                   </div>
                 )}
 
-                {/* Cellpose summary */}
                 {task.task_type === 'cellpose' && (
                   <div className="task-inference-summary">
                     <div className="task-inference-summary-row">
@@ -235,8 +237,29 @@ function Results({ refreshSignal, currentSessionId }) {
               </div>
             )}
           </div>
-        ))}
-      </div>
+        );
+
+        if (!currentSessionId) {
+          return <div className="task-list">{filteredTasks.map(renderCard)}</div>;
+        }
+
+        return (
+          <>
+            <div className="task-section">
+              <div className="task-section-header">Current Session</div>
+              {currentTasks.length === 0
+                ? <p className="results-empty-section">No tasks in the current session.</p>
+                : <div className="task-list">{currentTasks.map(renderCard)}</div>}
+            </div>
+            {otherTasks.length > 0 && (
+              <div className="task-section">
+                <div className="task-section-header">Previous Sessions</div>
+                <div className="task-list">{otherTasks.map(renderCard)}</div>
+              </div>
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }

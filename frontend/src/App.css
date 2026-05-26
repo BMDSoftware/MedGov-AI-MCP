@@ -651,6 +651,18 @@ body {
   color: var(--text-bright);
 }
 
+.message-body pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-width: 100%;
+}
+
+.message-body pre code {
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
 /* Actions */
 .actions {
   display: flex;

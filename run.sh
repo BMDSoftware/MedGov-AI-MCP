@@ -68,8 +68,8 @@ else
 fi
 
 # ── Sample data ───────────────────────────────────────────────────────────────
-SAMPLE_CT="$REPO_ROOT/orchestrator/sample_data/ct-exam"
-if [ ! -d "$SAMPLE_CT" ] || [ -z "$(ls -A "$SAMPLE_CT"/*.dcm 2>/dev/null)" ]; then
+SAMPLE_EXAMS="$REPO_ROOT/orchestrator/sample_data/exams"
+if [ ! -d "$SAMPLE_EXAMS" ] || [ -z "$(find "$SAMPLE_EXAMS" -type f -name '*.dcm' -print -quit 2>/dev/null || true)" ]; then
     info "Downloading sample CT data from TCIA..."
     "$REPO_ROOT/orchestrator/venv/bin/python" "$REPO_ROOT/orchestrator/sample_data/download_sample_data.py"
 else

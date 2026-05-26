@@ -58,16 +58,12 @@ Two questions frame the motivation for this work:
 \textbf{What AI tools are deployed in clinical settings and what do they do?}
 Several AI tools are currently used across clinical disciplines, with the notable characteristic that they typically operate in isolation from one another, with no unified integration layer. In radiology, AI assists with worklist prioritization and critical finding alerts, where the system detects life-threatening conditions such as stroke, pulmonary embolism, or intracranial hemorrhage and immediately notifies the clinical team. In screening programs, AI acts as a first filter, flagging high-risk cases for specialist review and allowing programs to scale without proportionally increasing the number of specialists required. Google Health conducted a published clinical trial of an AI system for diabetic retinopathy screening in Thailand, demonstrating that AI-assisted grading matched or exceeded specialist performance in a real clinical setting~\cite{ruamviboonsuk2022retinopathy, wolf2024access}. Mayo Clinic (United States) has integrated AI into ECG interpretation and cardiac imaging workflows as a decision support layer for cardiologists~\cite{mayoclinic-ai-cardiology}. In pathology, whole slide image analysis is used for tumour grading and cell counting, and AI-generated preliminary reports from imaging findings are now in active clinical use. For segmentation and detection specifically, FDA-cleared tools such as Viz.ai~\cite{vizai} and Aidoc~\cite{aidoc} are deployed for CT-based triage; Transpara~\cite{transpara} for mammography screening; and IDx-DR~\cite{idxdr} for diabetic retinopathy grading from fundus images.
 
-% FIXME (FIXED): We could use a reference for training bias or lack of generalization
-% FIXME (FIXED): That 80% figure is deceptive, it is about Australia and New Zealand
 \textbf{What are the benefits and what are the risks?}
 The benefits of AI in clinical workflows are directly tied to the limitations of the current manual process. Faster analysis is the most immediate gain: AI systems can process and flag findings in seconds, reducing the time between acquisition and clinical decision. Consistency is a second key advantage, as AI models apply the same criteria uniformly across every case, unlike human specialists who are subject to fatigue, experience, and workload. Reducing routine reads and preliminary reporting also frees specialists for cases that genuinely require expert judgement. Taken together, these properties position AI not as a replacement for clinicians but as a force multiplier. The risks are equally significant. Bias is a primary concern: models trained on data from specific demographics may underperform when applied to different patient populations or institutions, since differences in demographics and treatment practices affect how well a model generalises~\cite{mittermaier2023bias}. In medical imaging specifically, bias can be introduced at any stage of the AI pipeline - from dataset composition to model training and deployment - leading to systematic errors that negatively affect generalisation and can compromise patient outcomes~\cite{kocak2025bias}. Hallucination is critical in language models used for report generation, where confident but clinically incorrect statements carry direct patient risk~\cite{griot2025metacognition}. The black-box nature of deep learning raises accountability concerns, as clinicians and regulators often cannot explain why a model reached a particular conclusion~\cite{kondylakis2026futureai}. From a regulatory standpoint, no unified framework governs how AI tools in healthcare should be validated, updated, or audited in production; Jia et al.~\cite{jia2025deployment} further showed that regulatory approval at development time does not cover new hazards that emerge only after deployment. Finally, and most relevant to this work, no established standards govern how agentic AI systems should operate in clinical environments, including how they communicate with existing tools, when they escalate to a human, and how their decisions are logged for audit~\cite{trustworthyai2025}. The gap between technical capability and clinical deployment is substantial: Cozzolino et al.~\cite{cozzolino2025surveillance} found that fewer than 4\% of AI studies had been evaluated in real clinical settings, and In Australia and New Zealand, over 80\% of radiologists had not integrated AI into their daily practice~\cite{kondylakis2026futureai}; a survey of radiologists in Lombardy, Italy found that fewer than 40\% reported daily AI use~\cite{ce2024perceptions}.
 
 
 Despite the progress of individual AI tools, no standard integration layer exists to orchestrate them together within a clinical workflow. Each institution must develop its own connectors and its own standards, which leads to fragmentation, lack of interoperability, slow adoption, and deployments that are expensive and difficult to maintain. The Model Context Protocol (MCP)\footnote{MCP is an open protocol that defines a standardized client-server interface through which an AI agent discovers and invokes external tools. Each MCP server declares its available tools at startup with names, input schemas, and natural language descriptions; the agent selects and calls them by name at runtime without any prior knowledge of the server's implementation.} is a promising solution to this problem, providing a standardized way for agents to discover and call tools without custom integration. MCP has begun attracting application in clinical AI contexts~\cite{transformingclinical2026, kalathas2026mcp, ehtesham2025mcpfhir}. This work extends that direction to multi-tool clinical imaging orchestration.
 
-% FIXME (FIXED): Are there other works like this that we can reference?
-% FIXME (FIXED): The tool call approval behind a "debug" mode does not sound right, it should be a normal user-facing setting, ideally attached to each tool call, with sensible defaults. Since this requires development, we can leave it as is, but I wanted to mention this
 % FIX: Added a "Require tool confirmation" toggle in Settings. In debug mode it is greyed out and always on. In normal mode it is freely toggleable, backed by a new /api/confirmation endpoint that sets agent.require_confirmation independently of the mode.
 \subsection{Agentic AI in Healthcare}
 
@@ -81,22 +77,18 @@ Agentic AI\footnote{An agentic AI system is one that pursues a goal through iter
 Three core properties characterize agentic systems: goal persistence (the system does not stop until the required deliverables are met), tool use (it can act on external systems, not just generate text), and iterative reasoning (each result informs the next decision). We evaluated several existing agentic frameworks, including LangChain~\cite{langchain}, CrewAI~\cite{crewai}, and AutoGen~\cite{autogen}, but opted to build a custom agentic system. The primary reason was the need for tight integration with MCP: existing frameworks do not natively support MCP as a tool protocol, which would have required additional adapter layers and reintroduced the fragmentation problem we were trying to solve. Building a custom loop also allowed us to enforce specific behaviors required in a clinical context, such as a completion contract under which the agent cannot declare success while required deliverables remain unmet, and a debug mode in which the user must approve each tool call before execution. The system uses a single-agent architecture; Collaco et al. note that single-agent designs offer greater simplicity, more predictable behavior, and clearer accountability for decisions compared to multi-agent systems~\cite{collaco2026scoping}, properties that are particularly important in a clinical context where every tool call must be traceable.
 
 Contrasting with simpler alternatives clarifies why this design was necessary.
-% FIXME (FIXED): Isn't the conversation up until now the state?
 A plain chatbot produces one response per prompt and cannot call tools or take actions in the world. A hardcoded pipeline can call tools but relies on the developer to anticipate every possible execution path, making it brittle in the face of real-world variability. A standalone ML model provides predictions but has no language interface and cannot adapt its behavior based on context. We found that only a true agentic system could handle the complexity and variability of real clinical workflows, which often require conditional logic, error handling, and dynamic tool selection.
 
 % FIXME (SKIP): If the paper is too long I think we can cut this
 Our own system began as precisely this kind of hardcoded pipeline: in the initial version, the LLM was never consulted, and all sequencing decisions were made by explicit conditional logic in the orchestrator code. This approach proved limiting, as it could not adapt to new information without significant reprogramming, which motivated the transition to a fully agentic design.
 
 This transition is not without its challenges. Reliable agentic behavior requires careful prompt engineering: the agent must be guided to select tools in the correct order, avoid premature declarations of success, and handle ambiguous or incomplete results gracefully. These challenges are discussed in detail in later sections.
-% FIXME (FIXED): There *are* code changes (additions), in implementing an MCP server. It is just that they can be easily shared with the community, so the coding effort is minimized greatly, but not nullified. This seems to be dismissing the possibility that an MCP server for a particular domain does not yet exist
 However, the fundamental advantage over any hardcoded alternative is scalability: supporting a new clinical domain requires only an MCP server exposing the relevant tools - community-contributed servers already exist for established standards such as FHIR~\cite{ehtesham2025mcpfhir}, and where none exists, writing one is a self-contained effort isolated to that domain. We wrote our own servers to retain control over tool descriptions and add domain-specific operations not covered by existing implementations. The agent discovers and incorporates new servers at runtime without changes to the orchestration layer. This also opens a much wider architectural design space. Rather than a single fixed agent, one could configure specialist agents for distinct clinical tasks, use prompt-based behavioral switches to change the agent's operating mode, or compose multiple MCP servers covering entirely different domains.
-% FIXME (FIXED): Remove "simply", as it is superfluous and does not change the meaning of the sentence
 None of these extensions require touching the orchestration code, which is not true of any hardcoded pipeline.
 
 % Note: LLM backbone comparison placed here; consider moving to Methods or Results if the teacher prefers
 
 % is it worth mentioning the hardware it was tested on? and enumerating all the models for example?
-% FIXME (FIXED): We could add references to the models here
 When testing the system we explored two LLM backend approaches: a locally-hosted model and a cloud API. The local model was Ollama's deepseek-r1:7b~\cite{deepseekr1} (4.7~GB), with llama3.1:8b~\cite{llama31} (4.9~GB) also evaluated, both small enough to run on consumer hardware and allowing for complete data privacy since all processing happens locally. The API-based models tested were Gemini 2.0 Flash, Gemini 2.5 Flash, and Gemini 3.0~\cite{gemini2025}, all significantly larger and more capable models hosted in the cloud. The local approach offers greater control and privacy, though privacy considerations were not the primary focus of this work and are left for future investigation.
 %% TODO: We could add references on privacy risks of cloud-based clinical AI here
 The local approach proved to struggle with the demands of multi-step clinical workflows. We observed consistent failures in tool calling: the model frequently failed to select the correct tool for the given context and could not reliably chain multiple calls to reach a goal. Addressing this consumed considerable development time across prompt engineering, workflow simplification, logging, and targeted adjustments. None of these fully resolved the problem, as the root cause was model scale rather than configuration: smaller models have fewer parameters and correspondingly less capacity for the multi-step contextual reasoning required to chain tool calls reliably across a clinical workflow. Beyond raw capability, API-hosted models also represent a more accessible deployment path for clinical institutions. Acquiring and maintaining the GPU infrastructure required to run large local models is a significant investment that many healthcare organizations cannot justify, whereas access to a capable cloud model requires only an API subscription, a constraint independently confirmed across the field~\cite{agiformedicalimaging2025}. Switching to the API-hosted model resolved all of these issues immediately. The API approach introduces trade-offs of its own: latency, potential data security concerns in privacy-sensitive deployments, and a dependency on third-party service availability that is outside the institution's control. If the API experiences downtime or degraded performance, the entire orchestration layer is affected, which is a meaningful reliability concern in clinical settings. Despite these limitations, for the complex reasoning required by clinical imaging workflows it proved to be the only reliably viable option at the model sizes currently available for local inference. The system architecture supports both backends, allowing deployment to be tailored to the constraints of a given clinical environment. A recurring requirement across the agentic AI literature is seamless, secure interoperability with existing clinical platforms — Dietrich et al. identify this as a prerequisite for agentic AI to function without disrupting care delivery~\cite{dietrich2025agentic} — a problem that MCP directly addresses, as described in the following section.
@@ -129,10 +121,6 @@ MedGov-AI addresses the integration and orchestration layer directly: it combine
 % idk why you put this as a placeholder when the image doesn't have this name and is already there??
 % anyways i altered it
 
-% FIXME (FIXED): Is it possible to export diagrams to SVG or PDF? (i.e. vector rather than raster export), otherwise it is pixelized when zoomed in, making smaller text look bad
-% FIX: All diagrams (AgenticArchitecture, AnalysisWorkflow, WorkspaceMonitoringWorkflow, Database_schema) exported as PDF via Chrome print, cropped with pdfcrop, and referenced as .pdf in includegraphics.
-% FIXME (FIXED): The gray font in subtext is difficult to read, I think it is best to darken it a little
-% FIX: Darkened .sub opacity from 0.65 to 0.85 and .note color from #94a3b8 to #475569 in both workflow HTML files.
 \begin{figure*}[t]
   \centering
   \includegraphics[width=\textwidth]{images/AgenticArchitecture.pdf}
@@ -158,7 +146,6 @@ user interface, communicating with the orchestrator exclusively via a
 REST and SSE API\@. SSE enables real-time streaming of task progress
 and agent responses to the user without polling.
 
-% FIXME (FIXED): AgenticAgent is an odd redundant name... we could simply call it Agent
 \subsubsection*{Orchestrator}
 The orchestrator is a FastAPI application and is the system's single
 point of control: it exposes the REST and SSE API consumed by the
@@ -168,12 +155,8 @@ system's behaviour: the \texttt{Agent}, the
 \texttt{task\_runner}, and the \texttt{watcher\_service}.
 
 The \texttt{Agent} is the sole decision-maker in the system.
-% FIXME (FIXED): Weird phrasing, can simplify to "We use a single agent rather than a hierarchy of sub-agents for two reasons". Otherwise it seems there were "two reasons to make a deliberate choise", which makes no sense. Also, although this is more about writing style, we could be more sterile: "We use a single agent rather than a hierarchy of sub-agents for simplicity and auditability", but I leave this last one up to you
 We use a single agent rather than a hierarchy of sub-agents for two reasons: simplicity and auditability.
-% FIXME (FIXED): For those in the know, it is obvious why single agent is simpler, but we can justify its simplicity compared to multi-agent by approximating the multi-agents problem to a distributed systems problem, and maybe use a reference if possible
-% FIXME (FIXED): How do you mean that "delegation" is "hidden"? I can easily make it non-hidden by including the delegated agent's trace in the main one's trace, the point should be clarified
 Multi-agent coordination introduces inter-agent communication, shared state synchronisation, and context propagation across independently reasoning models - challenges that arise even in physical multi-agent systems~\cite{abro2024uav}. In clinical LLM settings, Klang et al.~\cite{klang2026orchestrated} show that orchestrated multi-agent pipelines sustain accuracy better than a single agent under concurrent batch workloads, at the cost of additional orchestration overhead. Our system targets a different regime: a single clinician submitting one request at a time, where task partitioning offers no benefit. A single agent suffices and already achieves model specialisation through MCP: inference tools delegate to MONAI and Cellpose, and the skills mechanism allows the agent to invoke additional task-specific models as needed - without the overhead of coordinating independent reasoning agents. Every tool call, its inputs, and its result are recorded in a single session trace, keeping the system straightforward to audit~\cite{collaco2026scoping}.
-% FIXME (FIXED): What is a "turn"? This could be clarified
 The agent runs an iterative LLM loop
 using either the Gemini API or a locally-hosted Ollama model as its
 reasoning backend, and executes function calling across multiple turns, each turn being one prompt-and-response cycle with the model, to invoke
@@ -189,7 +172,6 @@ running, completed, and failed.
 A semaphore limits concurrent GPU
 inference to a single job at a time, preventing out-of-memory crashes
 on constrained hardware.
-% FIXME (FIXED): I would drop the technical term `stderr' and instead say "captures the standard error streams from inference processes". I got confused with "stderr output", as "output" can be associated with "stdout". Alternatively, if you want to keep "stderr" since you use that word later as well, we can simply drop the "output" word
 The task runner also captures the standard error streams
 from inference processes and, on failure, passes the log to the LLM
 for a plain-language error explanation before surfacing it to the user.
@@ -199,7 +181,6 @@ restarts, and the frontend is notified of state transitions via SSE\@.
 The \texttt{watcher\_service} monitors registered filesystem
 directories using periodic polling and triggers the agent automatically
 when a new file is deposited.
-% FIXME (FIXED): No footnotes inside footnotes! This doesn't even seem to work. For acronyms, I believe it is enough to simply write them in full the first time we mention them, rather than explain them in full in footnotes. We can leave the reader to independently find more information knowing the full name of the thing we are talking about, and avoid making the paper too long
 This enables event-driven clinical
 workflows in which files arriving from a Picture Archiving and Communication System (PACS) or a scanner
 initiate the full analysis pipeline without any user action. No changes
@@ -207,7 +188,6 @@ to upstream systems are required; the watcher integrates at the
 filesystem level and streams its activity log to the frontend via a
 dedicated SSE channel.
 
-% FIXME (FIXED): Maybe just write it in full "write-ahead logging." instead of "WAL journaling", which expands to "write-ahead logging journaling". This also contrasts with the intent in the rest of the paper to detail acronyms
 All persistent state is stored in a single SQLite database with write-ahead logging. The schema covers users, sessions, conversation history,
 uploaded files, background task status, watched directories, and
 per-user tool settings.
@@ -215,23 +195,18 @@ per-user tool settings.
 \subsubsection*{LLM Backends}
 The orchestrator supports two LLM backends, selectable at deployment
 time without modifying any agent logic.
-% FIXME (FIXED): "API dependency" is an odd cost, isn't that the case for Ollama as well, and virtually any LLM backend? Maybe "subscription" was the intended word?
 The Gemini API provides a
 large cloud-hosted model capable of reliable multi-step function
 calling in complex clinical workflows, at the cost of external data
 transmission and dependence on third-party service availability.
-% FIXME (FIXED): I believe we should mention that this is a problem for ordinary hardware: "... for local inference on ordinary hardware"
 Ollama provides a local inference
 alternative using smaller open-weight models running entirely on the
 deployment host with no external data transmission, which is relevant
 in privacy-sensitive clinical environments, but proved insufficient for
 reliable tool calling at the 7--8B parameter scale currently available
 for local inference on ordinary hardware.
-% FIXME (FIXED): We could cut this, as we do not develop this point anywhere else as far as I remember
 
 \subsubsection*{MCP Server Layer}
-% FIXME (FIXED): If the fhir server is not to be mentioned, we should remember to remove it from the figure, otherwise it will be confusing
-% FIXME (FIXED): Why does it matter that we say a server runs in an isolated environment? Isn't that implied? I believe we can cut that
 The tool layer consists of six MCP servers, each running as an
 independent process in its own Python virtual environment.
 Isolation at the process level is a deliberate design choice: it
@@ -240,15 +215,12 @@ requirements (most critically between the GPU-enabled PyTorch
 installation required by \texttt{mcp-monai} and the CPU-only
 installation used elsewhere, which cannot coexist in a single
 environment).
-% FIXME (FIXED): Is this true for other custom MCP servers we may add? Are we going to force future MCP servers to adhere to a namespace? Does this matter? -- the registry enforces this automatically for every server
 Tool names are automatically prefixed with the server name by the tool registry
 (e.g., \texttt{monai.run\_inference}, \texttt{radlex.generate\_report}),
 providing unambiguous namespacing across servers regardless of what any individual server declares.
-% FIXME (FIXED): We also support HTTP transport right? We need to make that clear here, otherwise we can give the idea that only stdio is supported
 Servers communicate over stdio or HTTP transport, configured per server; all six servers in the current deployment use stdio. The available servers and their
 clinical functions are listed in Table~\ref{tab:mcp-servers}.
 
-% FIXME (FIXED): A column with a single value is not very valuable -- added FHIR row with HTTP transport to show the column has meaning
 \begin{table*}[t]
   \caption{MCP Servers and Clinical Functions. The six core servers are used in the evaluated workflows; the FHIR server is an optional integration demonstrating interoperability with community servers via HTTP.}
   \label{tab:mcp-servers}
@@ -269,11 +241,9 @@ clinical functions are listed in Table~\ref{tab:mcp-servers}.
 \end{table*}
 FHIR-based patient record integration was explored by connecting an existing community FHIR MCP server rather than building a custom one~\cite{ehtesham2025mcpfhir}, demonstrating that third-party servers can be plugged into the architecture without any changes to the orchestration layer.
 
-% FIXME (FIXED): Do we *need* to write an MCP server? Can't we skip that step and register an existing one in the configuration file?
 This architecture means that extending the system with a new clinical
 capability requires registering a compatible MCP server in the configuration file - reusing an existing community server where one is available, or writing a new one where it is not. The agent, the orchestrator,
 and every existing server remain unchanged.
-% FIXME (FIXED): Switch "yet another custom" with "a bespoke", "yet another" is a bit reductive
 This is the property that makes MCP a viable interoperability layer rather than a bespoke integration approach.
 
 
@@ -305,7 +275,6 @@ architecture.
 
 \textbf{Mcp-radlex} provides structured radiology reporting through
 integration with the RadLex terminology standard.
-% FIXME (FIXED): Odd sentence, maybe it was meant to be ", and search"?
 The agent can browse
 available radiological subspecialties, and search the template catalogue by
 subspecialty or keyword. When populating a report from raw inference
@@ -327,13 +296,9 @@ listing directory contents, and searching by pattern.
 
 \textbf{Mcp-cellpose} provides cell segmentation for pathology
 workflows using the Cellpose v4 universal model (cpsam).
-% FIXME (FIXED): We do not need to know how the API works, we do not need to specify the "model_type argument"
 Cellpose v3
 exposed multiple task-specific models (cyto3, cyto2, nuclei, each
 approximately 80~MB).
-% FIXME (FIXED): "both versions"? Versions of what? Cellpose? But does v3 also have a SAM-based universal model? This is not indicated in text
-% FIXME (FIXED): This does not say much, and implies "more is better" which is not necessarily the case.
-% FIXME (FIXED): Why?
 Cellpose v4 replaces all of these with a single SAM-based universal model (cpsam, approximately 2.5~GB), simplifying model selection at the cost of a larger download. Both Cellpose versions were evaluated on the same pathology ROI image; v3 (cyto) detected 1{,}123 cells while v4 (cpsam) detected 1{,}706. A higher count is not inherently better, but visual inspection of the segmentation masks confirmed that v4 produced more complete cell boundaries with fewer missed detections in densely packed regions, as shown in Figure~\ref{fig:cellpose-comparison}. v4 was therefore selected as the deployment model.
 
 \begin{figure*}[t]
@@ -346,10 +311,9 @@ Cellpose v4 replaces all of these with a single SAM-based universal model (cpsam
     \small v4 cpsam (1{,}706 cells) &
     \small v4 cpsam overlay on H\&E \\
   \end{tabular}
-  \caption{Cellpose version comparison on the same pathology ROI. Binary segmentation masks from v3 (cyto) and v4 (cpsam) are shown alongside the v4 mask overlaid on the original H\&E\footnote{Hematoxylin and Eosin staining, the standard technique for visualising tissue structure in histopathology.} image. v4 produces denser and more complete cell detection in packed regions.}
+  \caption{Cellpose version comparison on the same pathology ROI. Binary segmentation masks from v3 (cyto) and v4 (cpsam) are shown alongside the v4 mask overlaid on the original H\&E (Hematoxylin and Eosin) image. v4 produces denser and more complete cell detection in packed regions.}
   \label{fig:cellpose-comparison}
 \end{figure*}
-% FIXME (FIXED): The remark on model_type is redundant, we know v4 only has a single model
 However, the current server implementation uses grayscale mode and does not expose the channel configuration required to distinguish cytoplasm from nuclei; fluorescence-based segmentation is a planned extension. The server supports
 both 2D and 3D inputs and composites the predicted cell mask onto the
 original image for visual inspection. GPU availability is detected at
@@ -391,7 +355,6 @@ report templates, and API usage patterns. What these forms share is
 that the guidance cannot be derived from MCP tool schemas alone and is
 too domain-specific or voluminous to embed permanently in the system
 prompt.
-% FIXME (FIXED): If you say it is "well-documented" then there should be one or more references to back that up
 Embedding it permanently would increase token consumption on
 every request, including those that do not require that domain, and
 would increase the risk of the LLM overlooking or misapplying
@@ -461,17 +424,13 @@ The agent's operation is governed by an iterative execution loop that drives the
 \subsubsection{System Prompt and Session Initialisation}
 
 At the start of each session the agent receives a system prompt that establishes its role, its available tools, and its behavioural rules. The system prompt includes the list of available skills as a plain bulleted list of names and descriptions, injected at startup after dynamic discovery, so the agent knows what clinical domains it can operate in before any user message arrives.
-% FIXME (FIXED): Call "inline"? As in the line of code responsible for the call? Maybe it would be best to say "synchronously"
 It also includes explicit rules for tool usage: when to read a skill file before acting, when to queue a long-running operation to the background task runner rather than calling it synchronously, how to handle DICOM series directories versus individual files, and how to avoid repeating failed tool calls.
-% FIXME (FIXED): What is "confirmation-related guidance"? This could be clarified
 Two variants of the system prompt exist: one for autonomous mode, which omits tool call confirmation instructions, and one for assisted mode, which includes them.
 
 \subsubsection{Iterative Reasoning and Tool Dispatch}
 
 Each iteration of the loop follows the same structure. The agent receives a prompt describing the current goal, any available files, and the results of all prior tool calls in the session.
-% FIXME (FIXED): What is "data" and "file context"? It seems ambiguous and confusing
 On the first iteration the prompt is minimal: the goal (system prompt) and any uploaded files.
-% FIXME (FIXED): What is the "execution history"? The tool call execution results? But wasn't that already mentioned in the second sentence? It seems the last sentence clarifies this, but it is late
 On subsequent iterations the prompt also includes the results of all prior tool calls, which the agent evaluates before deciding its next action. The LLM responds with either one or more function calls, or a text response indicating that the goal is complete or that more information is needed. Multiple tool calls can be returned in a single LLM response and are executed sequentially within the same iteration. All results are collected and returned to the LLM in a single message before the next iteration begins. Function calls are parsed and dispatched to the appropriate MCP server via the tool registry, and the result is appended to the execution history.
 
 A repetition guard addresses a failure mode observed during development in which the agent would attempt the same failing tool call repeatedly rather than trying an alternative approach, consuming iterations without making progress. The guard inspects the execution history before each tool call: if the same tool has failed twice in a row, the third attempt is blocked and an error message is injected into the history instructing the agent to try a different tool or approach.
@@ -482,9 +441,7 @@ Alongside the MCP tools discovered at startup, the agent has access to a set of 
 
 \subsubsection{Operating Modes}
 
-% FIXME (FIXED): "can be selected per session"? Isn't the fact that we can use these modes once logged in implied? I believe we can cut "that can be selected per session", unless I am misunderstanding it
 The system supports two operating modes. In \textbf{autonomous mode}, the agent executes tool calls without interruption from goal receipt to completion. This is the intended mode for event-driven workflows triggered by the workspace watcher, where no user is present to intervene.
-% FIXME (FIXED): I do not think specifying the debug mode is very useful, we could cut "referred to in the codebase as debug mode"
 In \textbf{assisted mode}, the loop pauses before each tool call and returns a \texttt{confirmation\_required} response to the frontend, which presents the proposed tool name and arguments to the user for approval or rejection before execution resumes.
 
 
@@ -494,7 +451,6 @@ In \textbf{assisted mode}, the loop pauses before each tool call and returns a \
 Inference operations such as MONAI CT segmentation and Cellpose cell counting are long-running by nature, taking anywhere from seconds to several minutes depending on hardware and input size. Blocking the agent or the HTTP request while waiting for these operations to complete would make the system unresponsive to other users and interactions. To avoid this, all inference calls are offloaded to a background thread pool: when the agent calls a tool that queues inference, the tool returns immediately with a task identifier, and the actual computation runs asynchronously.
 
 Each task follows a simple state machine: \texttt{queued} when submitted, \texttt{running} once a thread picks it up, and \texttt{completed} or \texttt{failed} on exit. Task state is persisted in a SQLite database so that results survive server restarts and can be retrieved by any session. A semaphore limits concurrent inference to a single job at a time, preventing simultaneous runs from exhausting GPU memory.
-% FIXME (FIXED): No need to write SSE in full, it was already written in full previously
 When a job finishes, an SSE notification is pushed to the frontend, which updates the results tab without requiring the user to poll or refresh. This design allows multiple users to submit jobs independently: each submission is queued and processed in order, with results delivered to the corresponding session on completion.
 
 
@@ -506,21 +462,16 @@ Not all clinical workflows are initiated by a user interacting with a chat inter
 \subsubsection{Architecture}
 
 The system refers to each monitored directory as a \textit{workspace}. Each workspace is a named, registered directory stored in the SQLite database alongside a configurable prompt that defines what the agent should do when a file arrives. At startup, the orchestrator resumes watching all previously registered workspaces.
-% FIXME (FIXED): It is odd to mention "asyncio" without ever mentioning that the orchestrator is implemented in Python. I would simply remove that word
 The \texttt{watcher\_service} uses a polling observer to monitor each registered path recursively, bridging filesystem events into the orchestrator's event loop via an internal queue.
 
 When a new file is detected, the service does not trigger the agent immediately. Instead it starts a three-second debounce window: if additional files arrive within that window, they are batched together. Only after three seconds of inactivity does the service dispatch all accumulated files to the agent in a single invocation. This prevents a burst of files, such as a DICOM series arriving slice by slice, from spawning multiple redundant agent executions.
 
 \subsubsection{Trigger Flow}
 
-% FIXME (FIXED): This is confusing, isn't a "watched directory" a "workspace directory"? I do not think the distinction has been made clear, up until this point it seems both things are the same
 When the debounce window closes, the watcher stages the detected files in the workspace's \texttt{incoming/} subfolder and constructs a goal prompt that includes the workspace name, the list of received files, and the preconfigured prompt for that workspace. It then invokes the agent in autonomous mode, since no user is present to confirm tool calls.
-% FIXME (FIXED): Put "skill file(s)" rather than just "skill file" to imply more can be read
-% FIXME (FIXED): "configured outputs"? "configured" where? Seems unnecessarily verbose
 The agent proceeds through its standard execution loop: reading the appropriate skill file(s) (if needed), parsing the files, running the required analysis, and producing the required outputs. The entire activity log, including file detection events, agent actions, and results, is streamed to the frontend via SSE under the workspace's dedicated console channel, giving an operator real-time visibility even when the workflow was triggered without user interaction.
 
 
-% FIXME (FIXED): Restructured as top-level Evaluation section per reviewer suggestion
 \section{Evaluation}
 \label{sec:evaluation}
 
@@ -531,7 +482,6 @@ Three clinical workflows were selected to evaluate the system. Together they cov
 Evaluation was structured in three phases. Phase 1 evaluates both API-based and locally hosted language models for tool-calling reliability in clinical workflows. Phase 2 evaluates whether the agent can operate autonomously in clinical workflows. It first examines how skills provide the workflow constraints that make autonomous execution reliable, showing that the agent follows the correct tool sequence and guard conditions without human intervention. It then compares assisted and autonomous execution of the same task to assess whether human-in-the-loop confirmation changes the outcome, or whether the agent produces equivalent results in both modes. Phase 3 runs all three use cases end to end. Use Cases 1 and 2 are evaluated by task completion and qualitative assessment of outputs (whether the report was correctly filled and whether segmentation completed successfully). Use Case 3 is evaluated by end-to-end autonomous operation of the workspace monitoring pipeline.
 
 Language model experiments were run on a laptop with an AMD Ryzen 5 8645HS CPU, 16~GB DDR5 RAM, and an NVIDIA GeForce RTX 3050 6~GB GPU. MONAI inference benchmarks were run on two configurations: the same local machine using CUDA (GPU), and a shared deployment server using CPU-only inference, using MONAI 1.5.1 and PyTorch 2.6.0.
-% FIXME (FIXED): We should include the scale of the API-based models for comparison
 Two categories of language model were tested: large API-based proprietary models (Gemini 2.0 Flash, Gemini 2.5 Flash, and Gemini 3.0, with parameter counts undisclosed by Google) and locally hosted open-source models of significantly smaller scale (deepseek-r1:7b and llama3.1:8b, both at approximately 7--8 billion parameters, run via Ollama).
 
 \subsection{Use Case 1 - Interactive DICOM Analysis and Segmentation}
@@ -566,13 +516,11 @@ A pathologist or researcher has access to a whole-slide image hosted on the iPat
 \subsubsection{Setup}
 The user provides a slide UID and enters the following prompt in the chat interface:
 
-% FIXME (FIXED): "estimate and count" is redundant, only include "estimate"
 \begin{quote}
 \textit{``Find the tumor in this lung thumbnail (UID: 2.25.338247016696998394111485786182386609869). Identify and localize any suspicious regions consistent with tumor presence. Within the detected tumor area, estimate the number of cells. Then generate a structured report summarizing the findings, including tumor location, size (if inferable), cell count estimate, and any relevant observations or limitations.''}
 \end{quote}
 
 \subsubsection{Workflow}
-% FIXME (FIXED): Add workflow description for Use Case 2 - iPath tool call sequence (thumbnail retrieval, slide dimension acquisition, ROI coordinate scaling, region extraction, Cellpose inference, report generation)
 The agent begins by calling \texttt{ipath.fetch\_thumbnail} with the slide UID to retrieve a scaled thumbnail of the whole-slide image, which is returned as an image the agent can inspect directly. The agent then visually examines the thumbnail and identifies the most suspicious region, committing to a single bounding box in thumbnail pixel coordinates. It then calls \texttt{ipath.get\_slide\_dimensions} to retrieve the full slide dimensions, and \texttt{ipath.scale\_roi\_to\_slide} to map the thumbnail bounding box to the corresponding coordinates on the full-resolution slide. The high-resolution region of interest is extracted with \texttt{ipath.fetch\_roi}, which enforces a 2700~px maximum per side. Cell segmentation is run on the extracted region via \texttt{cellpose.segment\_cells\_2d}, which returns a cell count and a binary segmentation mask. Finally, the agent loads the pathology report template from the \textbf{clinical-reports} skill and writes the structured report using \texttt{utils.write\_file}, using fields appropriate to a tissue specimen.
 
 \subsection{Use Case 3 - Autonomous Pathology ROI Monitoring}
@@ -589,9 +537,9 @@ A workspace is registered pointing to the monitored directory. The following pro
 
 \subsubsection{Workflow}
 The workflow is illustrated in Figure~\ref{fig:workspace-workflow}.
-% FIXME (FIXED): Isn't the file in the workspace already? / "double the computation cost"? clarified below
 When the polling observer detects a new file, the watcher stages it in the workspace's \texttt{incoming/} subfolder and triggers the agent after a three-second debounce window. The agent calls \texttt{get\_file\_metadata} to determine file type, extension, and dimensions, and attempts to classify whether the file is a pathology ROI image.
-This classification step is an inherent limitation of the current design: reliably determining whether an arbitrary image is a valid ROI would require running a dedicated detection model, adding an extra round of tool calls before any analysis begins. To avoid this overhead, the workspace prompt instructs the agent to make a best-effort classification from file metadata and dimensions alone, and to route uncertain cases to a dedicated folder for manual review rather than proceeding with segmentation. This trades false-negative robustness for efficiency, and is an acknowledged design constraint rather than a failure of the workflow. If the file is classified as a valid ROI image, \texttt{segment\_cells\_2d} is submitted to the background task queue using the Cellpose v4 universal model (cpsam). When the task completes, the result is pushed to the frontend via SSE and displayed in the Workspaces console. If the cell count exceeds 2000, the segmentation mask is copied to the output folder; otherwise only a JSON log entry is written. Final results, including cell count, mask path, and timestamp, are persisted and accessible in the Results tab.
+% FIXME: Wouldn't that extra round of tool calls simply be to call the detection model? This seems to be a difference between calling for file metadata or calling for a detection model, therefore there are no differences in the number of tool calls made
+This classification step is an inherent limitation of the current design: reliably determining whether an arbitrary image is a valid ROI would require running a dedicated detection model, adding an inference step before any analysis begins. To avoid this overhead, the workspace prompt instructs the agent to make a best-effort classification from file metadata and dimensions alone, and to route uncertain cases to a dedicated folder for manual review rather than proceeding with segmentation. This trades false-negative robustness for efficiency, and is an acknowledged design constraint rather than a failure of the workflow. If the file is classified as a valid ROI image, \texttt{segment\_cells\_2d} is submitted to the background task queue using the Cellpose v4 universal model (cpsam). When the task completes, the result is pushed to the frontend via SSE and displayed in the Workspaces console. If the cell count exceeds 2000, the segmentation mask is copied to the output folder; otherwise only a JSON log entry is written. Final results, including cell count, mask path, and timestamp, are persisted and accessible in the Results tab.
 
 \begin{figure*}[t]
   \centering
@@ -600,10 +548,8 @@ This classification step is an inherent limitation of the current design: reliab
   \label{fig:workspace-workflow}
 \end{figure*}
 
-% FIXME (FIXED): Capitalize "the" in "the Cancer Imaging Archive" for consistency with acronym
 The primary imaging dataset used for Use Case 1 evaluation is the \textbf{Pancreas-CT} collection from The Cancer Imaging Archive (TCIA)~\cite{tcia}, specifically subject \texttt{PANCREAS\_0001}. The series consists of \textbf{240 DICOM files} totalling \textbf{121~MB}, acquired as an abdominal CT volume. All files follow the DICOM standard and were used without modification. Three MONAI segmentation models were evaluated against this series on both hardware configurations, with results summarised in Table~\ref{tab:inference-results}.
 
-% FIXME (FIXED): Table legend is very large and repeats what was already said in the text, I think it can be summarized
 \begin{table*}[t]
   \caption{MONAI segmentation inference times across hardware configurations for PANCREAS\_0001.}
   \label{tab:inference-results}
@@ -632,12 +578,10 @@ The primary imaging dataset used for Use Case 1 evaluation is the \textbf{Pancre
 % Gemini vs Ollama for tool calling in clinical workflows
 % local versus API, limitations, pros and cons
 
-% FIXME (FIXED): Repetition of what was already mentioned two paragraphs prior. Removed the Evaluation Setup mention and kept this one (which has citations).
 Five language models were evaluated: three large API-based models (Gemini 2.0 Flash, Gemini 2.5 Flash, and Gemini 3.0)~\cite{gemini2025} and two locally-hosted open-source models (deepseek-r1:7b~\cite{deepseekr1} and llama3.1:8b~\cite{llama31}) run via Ollama. The agent loop was capped at 10 iterations per task, meaning a model that cannot reach \texttt{goal\_achieved} within 10 tool calls fails the task regardless of how many individual tool selections were correct.
 
 \subsubsection{Local Models}
 
-% FIXME (FIXED): Inconsistency resolved - using RTX 3050 6~GB consistently throughout. Power profile explanation kept observational rather than mechanistic.
 Both Ollama models were tested on a laptop with an RTX 3050 6~GB GPU at two power profiles: 30W and 60W. At 30W, tool selection was generally correct on the first attempt, and in the majority of cases the first tool called was the appropriate one for the context. However, neither model reliably reached \texttt{goal\_achieved} within the 10-iteration limit: the models would select correct individual tools but fail to chain them into a complete workflow, running out of iterations before producing a final result. At 60W, outcomes were mixed: some tasks completed successfully within the iteration budget, others did not. The observed difference between power profiles is consistent with reduced inference throughput at lower wattage, though a systematic characterization of this effect is outside the scope of this work. A consistent observation across both power profiles was that when a tool call failed, the local models rarely recovered by trying an alternative approach, confirming the need for the repetition guard described in Section~\ref{sec:skills}.
 
 Each tool call with a locally-hosted model took approximately 20 seconds of inference time, making a 10-iteration task take up to three minutes of model time alone, before accounting for actual tool execution. This is a fundamental constraint of the model scale rather than a configuration issue.
@@ -647,20 +591,16 @@ A key finding from this phase is that two implementation choices significantly i
 \subsubsection{API-Based Models}
 
 Gemini 2.0 Flash and Gemini 2.5 Flash resolved all of the reliability issues observed with local models. Both models completed multi-step clinical workflows within the iteration budget, correctly sequenced tool calls, and recovered from tool failures by selecting alternatives.
-% FIXME (FIXED): Clarified - the comparison is LLM inference time per iteration, not MCP tool execution time (which is identical regardless of backend). With local models, each iteration waits ~20s for the LLM to generate a response; with API models this is near-instant.
 LLM inference per iteration was near-instant with API-based models, compared to the approximately 20~seconds required per iteration with local models, reducing full task completion time by an order of magnitude. MCP tool execution time is identical regardless of which LLM backend is used, since tools run locally in all configurations. The primary limitations of the API approach are external: API availability is outside the system's control, and all data submitted to the agent is transmitted to a third-party service, which is a concern in privacy-sensitive clinical environments. A further practical consideration is token consumption. Because the agent passes its full execution history back to the LLM at each iteration, token usage grows with every tool call in the loop. Two concrete examples from development illustrate the scale of this problem. In an early version, image bytes were passed directly to the LLM instead of a file path, resulting in a single analysis call consuming approximately 60,000 tokens for a 57~MB scan. Separately, the \texttt{utils.parse\_dicom\_directory} tool was including all file paths in its response, adding approximately 27,000 tokens per call for large directories. After fixing both issues, a representative multi-file task begins at roughly 1,720 prompt tokens on the first iteration and grows to approximately 2,352 by the second, reflecting the expected accumulation rate from execution history.
 
 Several measures were introduced to manage this growth. The agent uses Gemini's native stateful session mode, meaning only the latest tool result is transmitted per turn rather than rebuilding the full history in each prompt. Report generation uses MCP sampling, a lateral LLM call that produces the report narrative without adding to the agent's context window.
-% FIXME (FIXED): radlex -> RadLex for consistency
 The \texttt{get\_template\_schema} tool was removed in a subsequent refactor of the RadLex server, eliminating a manual template inspection step that consumed tokens on every report workflow.
-% FIXME (FIXED): progressive-disclosure -> progressive disclosure for consistency
 The skills progressive disclosure mechanism avoids embedding domain knowledge permanently in the system prompt by loading it only when the agent determines it is needed for the current task. These values and the measures taken represent the state of the system at time of writing; further optimizations remain possible.
 
 \subsubsection{Summary}
 
 The results confirm that the system architecture is backend-agnostic and functions with both local and API-hosted models; the gap lies in task completion reliability at current local model scales. Local models at 7--8B parameters can select appropriate tools but cannot reliably complete multi-step workflows within a bounded iteration budget. API-hosted models at significantly larger scale resolve this reliably. The architecture supports both backends without modification, allowing deployment to be matched to the constraints of a given environment: a privacy-critical deployment can use a local model with the understanding that task complexity must be managed, while a deployment where API access is available benefits from reliable autonomous operation. Table~\ref{tab:model-comparison} summarises the observed differences.
 
-% FIXME (FIXED): Added footnote explaining single row for 60W - both models showed equivalent mixed results at 60W so they are combined.
 \begin{table*}[t]
   \caption{Language Model Comparison for Agentic Tool-Calling}
   \label{tab:model-comparison}
@@ -692,7 +632,6 @@ This experiment evaluates whether loading a skill changes the agent's tool selec
 
 The \textbf{dicom-analysis} skill was used as the test case. Without the skill active, the agent can still complete a DICOM analysis task but selects tools based solely on its general reasoning and the tool descriptions available at startup. With the skill loaded, the agent receives an explicit step-by-step workflow: parse the DICOM header first, call \texttt{analyze\_image} to confirm modality and body part, call \texttt{list\_models} filtered to those parameters, download the model if not cached, and only then queue inference. Each step is a guard condition for the next: inference is not attempted until the model is confirmed to match the scan.
 
-% FIXME (FIXED): It would be good if we had numbers (success rate)
 In autonomous execution with the skill active, the agent followed this sequence without deviation across all 10 test runs (10/10 success rate). Guard conditions were respected: on one occasion where \texttt{analyze\_image} returned an ambiguous modality, the agent called \texttt{list\_models} with both candidate modalities before selecting, rather than proceeding with the first result. Without the skill, the agent completed the task in 10/10 runs, though it occasionally skipped the analysis step and called \texttt{list\_models} directly with parameters inferred from the filename, which produced correct results in straightforward cases but would fail on files with non-descriptive names or atypical metadata.
 
 A comparable observation was made in workspace monitoring execution. A deployment trace from March 2026 shows the agent autonomously handling an unrecognised file: it called \texttt{utils.move\_file}, attempted \texttt{monai.analyze\_image} (which returned a DICOM header error), created an \texttt{uncertain/} subdirectory, moved the file there, and called \texttt{goal\_achieved}, completing the task in six iterations without any user input. This confirms that the agent can execute multi-step conditional workflows autonomously and handle tool failures gracefully by adapting its plan rather than halting.
@@ -700,12 +639,9 @@ A comparable observation was made in workspace monitoring execution. A deploymen
 The conclusion from this phase is that skills are not required for the agent to complete tasks, but they are what makes autonomous execution \emph{reliable}: they constrain the agent to the correct domain-specific sequence and prevent it from taking plausible but clinically incorrect shortcuts.
 
 A complementary observation concerns the relative efficiency of MCP tools versus skills for the same task. When a direct MCP tool exists for an operation, the agent consistently prefers it over the equivalent skill-based approach. This is expected: the agent reasons over tool descriptions at each iteration and a single tool call is always cheaper than the three-to-four calls required to load a skill (read entry point, optionally read references, execute).
-% FIXME (FIXED): I would simplify "A concrete example from development: " to "For example, "
-% FIXME (SKIP): The dash "-" should be an em dash "---"
-% FIXME (FIXED): These skill names are very lengthy, causing large white space in the text (since text in \texttt cannot be split), is it possible to reword the text to minimize white space?
 For example, extracting DICOM metadata via the \texttt{utils.parse\_dicom} MCP tool requires one call, whereas the \texttt{pydicom} skill achieves the same result in three calls --- reading the skill entry point, loading references, and executing the script --- with additional context window usage. Skills are therefore most valuable where no direct MCP tool exists, where workflow sequencing across multiple tools must be constrained, or where the domain knowledge to be loaded is too large or too domain-specific to embed permanently in the system prompt.
 
-% FIXME: If the paper is too long, I believe this section can be removed, I am not sure it brings as much value as the others
+% FIXME (SKIP): If the paper is too long, I believe this section can be removed, I am not sure it brings as much value as the others
 \subsubsection{Assisted vs Autonomous Mode}
 % run the same task in both modes
 % show the tool call sequence was identical in both
@@ -717,9 +653,7 @@ The same DICOM analysis task was executed twice: once in assisted mode, where th
 The tool call sequences were identical across both executions. The agent selected the same tools in the same order, passed the same arguments, and reached \texttt{goal\_achieved} in the same number of iterations. No tool call was rejected or modified by the user during the assisted run, and the outputs produced, segmentation results and per-organ volumes in the Results tab, were equivalent.
 
 This result has a direct architectural implication. If assisted mode were a correction mechanism, the two sequences would diverge whenever the user overrode a proposed tool call. The fact that they did not indicates that the agent's autonomous decisions were already correct, and that the confirmation step added visibility without changing the outcome.
-% FIXME (FIXED): I would not say assisted mode is auditing, auditing as far as I understood implies analysis of records of events that already happened, not confirmation to events that are yet to happen
 Assisted mode is therefore best understood as a transparency mechanism for operators who want to inspect each tool call before it executes, rather than a safety net that catches errors the agent would otherwise make.
-% FIXME (FIXED): We cannot prove this always holds true, we can only say it has worked in this case: "the agent produced the same result whether or not a human was watching"
 This in turn supports autonomous mode for event-driven workflows such as Use Case 3, where no user is present: the agent's decisions were correct independently of human oversight.
 
 
@@ -730,11 +664,11 @@ This in turn supports autonomous mode for event-driven workflows such as Use Cas
 This phase evaluates the system through three end-to-end clinical workflows. Use Case 1 covers interactive DICOM analysis: a user uploads a CT series, issues a natural language prompt, and the agent autonomously parses the study, selects and runs a segmentation model, and generates a structured radiology report. Use Case 2 covers interactive WSI tumor detection: the user provides a slide UID, and the agent retrieves a region of interest from the iPath platform, runs cell segmentation via Cellpose, and generates a structured pathology report. Use Cases 1 and 2 were each executed under two conditions, with and without a skill loaded, to isolate the effect of domain-specific workflow guidance on agent behavior. Use Case 3 covers event-driven pathology analysis: the workspace monitoring system detects incoming ROI images, triggers the agent without user input, runs cell segmentation, and routes the result based on a configurable threshold rule.
 
 \subsubsection{Use Cases 1 and 2 Results}
-% FIXME (FIXED): It would be better if instead of saying "setup" we explicitly referred to the section that detailed the setup (e.g. the "Use Cases" section)
 Use Case 1 was initiated with a publicly available DICOM series from the Cancer Imaging Archive and Use Case 2 without a file upload using the iPath slide UID, both with the prompts defined in Section~\ref{sec:evaluation}.
 
 Each task was executed under two conditions. In the skilled condition, the agent loads the corresponding skill file and follows its prescribed sequence as a workflow protocol. In the unskilled condition, the agent selects tools based solely on its general reasoning over the available tool descriptions. Results are summarised in Table~\ref{tab:uc1-results}.
 
+% FIXME: this table is too long horizontally, goes out of bounds. I recommend shortening it, e.g. change the first column name to "Use Case" and remove the "Use Case" prefix from the rows (e.g. "1 w/ skill")
 \begin{table*}[t]
   \caption{Use Cases 1 and 2: Execution Metrics and Outcomes}
   \label{tab:uc1-results}
@@ -742,12 +676,12 @@ Each task was executed under two conditions. In the skilled condition, the agent
   \small
   \begin{tabular}{lrrrrccp{4cm}c}
     \toprule
-    Condition & Iter. & 1st-iter.\ tok. & Total tok. & Time (s) & Success rate & Completed & Final result & Incorrect calls \\
+    Use Case & Iter. & 1st-iter.\ tok. & Total tok. & Time (s) & Success rate & Completed & Final result & Incorrect calls \\
     \midrule
-    Use Case 1               & 6 & 8{,}204  & 80{,}961  & 58.3  & 10/10 & Yes     & Spleen 192.51~cm$^{3}$, radiology report       & None \\
-    Use Case 1 with skill    & 8 & 8{,}251  & 90{,}973  & 95.1  & 10/10 & Yes     & Spleen 192.51~cm$^{3}$, radiology report       & None \\
-    Use Case 2               & 8 & 8{,}158  & 95{,}942  & 117.9 & 0/10  & Partial & Cell segmentation done; report in wrong domain & $^{a}$ \\
-    Use Case 2 with skill    & 9 & 8{,}237  & 135{,}842 & 129.6 & 10/10 & Yes     & 428 cells detected, pathology report           & None \\
+    1               & 6 & 8{,}204  & 80{,}961  & 58.3  & 10/10 & Yes     & Spleen 192.51~cm$^{3}$, radiology report       & None \\
+    1 w/ skill      & 8 & 8{,}251  & 90{,}973  & 95.1  & 10/10 & Yes     & Spleen 192.51~cm$^{3}$, radiology report       & None \\
+    2               & 8 & 8{,}158  & 95{,}942  & 117.9 & 0/10  & Partial & Cell segmentation done; report in wrong domain & $^{a}$ \\
+    2 w/ skill      & 9 & 8{,}237  & 135{,}842 & 129.6 & 10/10 & Yes     & 428 cells detected, pathology report           & None \\
     \bottomrule
   \end{tabular}
   \par\smallskip
@@ -767,9 +701,6 @@ With the \textbf{wsi-tumor-detection} skill active, the agent followed the presc
 
 Use Cases 1 and 2 completed end-to-end without manual intervention, producing clinically structured outputs from raw imaging inputs. Use Case 1 confirmed that the system correctly orchestrates DICOM parsing, model selection, inference, and report generation autonomously, with both conditions achieving 10/10 success across repeated runs. Use Case 2 confirmed the same for whole-slide image analysis and cell segmentation, with a stark difference in reliability: the skilled condition achieved 10/10 success, while the unskilled condition failed in every run (0/10), producing domain-incorrect reports in each case. This confirms that the skill was not merely beneficial but necessary for a correct clinical outcome in Use Case 2.
 
-% FIXME (FIXED): Dramatically increase the zoom since there is a lot of empty space and it is hard to read in the paper. As a rule of thumb, the font size in the image should be at least the font size in the legend
-% FIXME (FIXED): Also capture the screenshots in a high resolution screen if possible
-% FIXME (FIXED): Maybe remove the mention of "radlex.generate_radiology_report" since it makes the words in the first sentence too spaced apart in the final document
 \begin{figure}[h]
   \centering
   \includegraphics[width=\linewidth]{images/uc2-noskill-report.png}
@@ -786,7 +717,6 @@ Use Cases 1 and 2 completed end-to-end without manual intervention, producing cl
 
 \subsubsection{Use Case 3 Results}
 
-% FIXME (FIXED): Clarified cross-contamination - it refers to the agent unintentionally routing files into other workspaces
 Initial testing of the workspace monitoring system used two workspaces configured to validate both the watcher trigger pipeline and the agent's ability to follow workspace-specific instructions without routing files into other workspaces unintentionally.
 
 The first workspace, \textbf{CELLPOSE}, was configured with the prompt:
@@ -805,6 +735,7 @@ The second workspace, \textbf{ROI}, was configured with the following prompt, pr
 
 When \texttt{ROI\_TEST\_IMAGE.jpeg} (2{,}352$\times$2{,}673~px, H\&E-stained pathology ROI) was deposited into the ROI workspace, the following sequence was observed and is visible in the workspace console (Figure~\ref{fig:workspace-use-case}): the watcher detected the file within seconds, triggered the agent after the three-second debounce window, and the agent autonomously called \texttt{cellpose.segment\_cells\_2d} without any user interaction. The model reported 1{,}706 detected cells and, since this exceeded the threshold of 100, moved the image to \texttt{/app/workspaces/CELLPOSE} as instructed. The full sequence from file drop to analysis completion took approximately 30 seconds on a local GPU (RTX 3050).
 
+% FIXME: light mode
 \begin{figure}[h]
   \centering
   \includegraphics[width=\linewidth]{images/workspace_use_case.png}
@@ -840,24 +771,20 @@ Inference performance is tightly coupled to available hardware, and the gap betw
 % \end{table*}
 
 The Cellpose v4 model (cpsam) is a SAM-based architecture designed for GPU execution. On CPU, inference took 95 seconds on a 64$\times$64 pixel test image. A real pathology ROI image at typical resolution (2{,}352$\times$2{,}673~px) completed in \textbf{12 minutes 37 seconds} on a local Ryzen 5 8645HS CPU, and ran for approximately three hours on the deployment server before hanging. The contrast with the MONAI inference times in Table~\ref{tab:inference-results} is notable: MONAI times are nearly identical across both machines because the server is configured with \texttt{OMP\_NUM\_THREADS=1} and \texttt{MKL\_NUM\_THREADS=1}, pinning it to a single thread where per-core speed is comparable. Cellpose on CPU is unrestricted and scales with available cores; the deployment server runs as a virtual machine with only 4 cores allocated from a Ryzen 9 5950X host, introducing both core-count and VM overhead constraints that explain the order-of-magnitude difference relative to the local machine. On the local machine with an RTX 3050 GPU (CUDA 13.0), the same image completed in \textbf{30 seconds}.
-% FIXME (FIXED): The version of CUDA is not specified for the RTX 3050 GPU, either specify the version for both or for none
 On the deployment server with an RTX 3060 GPU (CUDA 12.1), the same image completed in \textbf{28 seconds}, confirming that GPU execution eliminates the VM CPU bottleneck entirely and yields equivalent performance across both hardware configurations. GPU execution is therefore not an optional accelerator but a practical prerequisite for the pathology use case~\cite{cellpose}. The MONAI inference pipeline is similarly GPU-dependent: on the test machine (RTX 3050 6~GB), certain models exceeded available VRAM and caused the subprocess to terminate without producing any output or error message. This failure mode was only diagnosed after adding stderr capture to the task runner, which then surfaced the underlying PyTorch out-of-memory exception. These findings shaped deployment requirements: the system is shipped with a GPU-enabled Docker configuration as the recommended deployment target, with CPU fallback available for development and testing only.
 
 A practical advantage of both workflows, independent of accuracy, is the convenience the system provides. Processing speed depends on available hardware, cached models, and firmware, and is therefore highly deployment-specific. What the architecture guarantees regardless of hardware is that long-running operations are queued automatically, results are persisted, and the clinician can return to completed outputs without having been present during execution. In the workspace monitoring scenario this translates directly to overnight or unattended processing: files deposited at the end of a working day are analyzed and results are available the next morning.
-% FIXME (FIXED): I would say the *primary* direction for further experimental work is to test it with users, I would be careful with that word
 Meaningful evaluation of this property at scale, however, requires a broader set of test datasets and input types covering diverse modalities, resolutions, and acquisition protocols, which represents one important direction for further experimental work.
 
 \section{Discussion}
 
 \subsection{MCP as a Practical Integration Layer}
 
-% FIXME (FIXED): It is probably best to refer to the background section via a section reference
 Section~\ref{sec:background} identifies fragmentation as a structural problem in clinical AI: tools exist, but no standard layer connects them, forcing each institution to build and maintain custom integrations. MCP was evaluated in this work as a candidate solution to that problem. The results support that framing. Six servers covering distinct clinical capabilities were integrated without any agent-side connector code: each server exposes its tools through the MCP protocol, and adding a new server required no changes to the agent or any existing component. More importantly, this composability held under real workflow conditions: all three use cases required the agent to sequence operations across multiple servers dynamically, and in all cases it did so correctly without any hardcoded knowledge of how those servers were implemented.
 
 The broader implication is that MCP could reduce the integration overhead that currently slows AI adoption in clinical settings. Under the conventional approach, connecting a new tool to an existing workflow requires custom development work regardless of how well-designed the tool itself is. Under an MCP-based architecture, the integration contract is defined by the protocol: a conforming server is immediately accessible to any conforming agent. If this holds as more clinical tools adopt MCP, the bottleneck shifts from integration engineering to tool capability itself, which is a more tractable problem. Singh et al. argue this conceptually~\cite{mcp-aditi}; the use cases presented here provide evidence that it holds in practice.
 
 One finding qualifies this picture. MCP decouples the agent from a server's implementation, but it does not decouple the agent's decision-making from the quality of each tool's natural language description. Vague or ambiguous descriptions caused incorrect tool selections even when the correct tool was available, an effect observed consistently with local models and to a lesser degree with API-based models. This means the integration problem is not fully solved by adopting MCP: it is partially displaced from adapter code to description authorship.
-% FIXME (FIXED): "zero" is an odd word to include here since it is a number ("zero what?"), maybe use "insignificant" or a word like it
 That is a smaller and more localised problem, but it is not insignificant. A further mitigation observed in this system is that skills partially compensate for this: when a skill is active, the agent follows an explicit protocol that names specific tools, reducing its dependence on description quality for sequencing decisions~\cite{agentskillslargelanguage}. MCP and skills are therefore complementary: MCP provides the integration layer, skills provide the domain knowledge that makes reliable use of that layer possible. Neither alone is sufficient for complex clinical workflows.
 
 One open question is how this composability scales beyond the six servers evaluated here. The architecture imposes no limit on the number of registered servers, and adding a new one requires no changes to the agent. However, all tool descriptions are loaded into context at startup, and as the catalogue grows the agent's ability to select the correct tool from an increasingly large set is expected to degrade, a direct instance of the failure mode where options buried deeper in a long context are more likely to be overlooked or misapplied. Skills that function as workflow guides partially mitigate this by prescribing explicit tool sequences, reducing the risk of the agent selecting the wrong tool from an increasingly large catalogue, but they do not reduce the size of the tool list itself. A natural extension would be a multi-agent architecture in which specialist agents each expose only the tools relevant to their domain, keeping individual context windows bounded regardless of how many total servers exist. This design was not evaluated here and remains future work.
@@ -878,7 +805,6 @@ The evaluation in this work measures task completion: whether the agent correctl
 
 Segmentation accuracy for the models used (spleen, pancreas, and whole-body CT segmentation via MONAI) has been established in their respective publications and benchmarks. What has not been evaluated here is whether the agent's orchestration introduces errors that would not arise in a direct model invocation: whether the correct model is consistently selected for a given scan, whether the inference parameters passed by the agent are appropriate, and whether the structured report correctly maps segmentation findings to the right template fields. These are failure modes specific to the agentic layer, not the underlying models, and they require dedicated clinical validation to assess.
 
-% FIXME (FIXED): What does "prospective" add here? I would remove it
 A rigorous evaluation would require comparison of agent-produced outputs against ground-truth annotations by trained radiologists, Dice similarity scores across a representative dataset of scan types and qualities, and testing across institutions with different equipment and acquisition protocols. Until that validation is done, the system should be understood as a workflow automation tool that reduces the manual effort of orchestrating clinical imaging pipelines, not as a clinically validated decision support system. That distinction is not a limitation unique to this work, as it applies to any system that introduces an agentic orchestration layer over existing models, but it needs to be stated explicitly.
 
 \subsection{Privacy vs Reliability in Clinical Deployment}

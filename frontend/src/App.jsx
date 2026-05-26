@@ -58,7 +58,7 @@ function App() {
   const [taskRefreshSignal, setTaskRefreshSignal] = useState(null);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
   const [unreadTaskCount, setUnreadTaskCount] = useState(0);
-  const [appMode, setAppMode] = useState('debug'); // 'normal' | 'debug'
+  const [appMode, setAppMode] = useState('normal'); // 'normal' | 'debug'
   const pageRef = useRef(page);
   const [uploadingDir, setUploadingDir] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState([]); // [{name, fileType}] uploading in progress

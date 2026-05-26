@@ -434,12 +434,15 @@ async def generate_radiology_report(
     if output_path:
         try:
             import os as _os
+            from datetime import datetime as _dt
             resolved = Path(output_path)
             # In local dev APP_ROOT differs from the Docker /app mount; remap if needed.
             app_root = _os.getenv("APP_ROOT", "")
             if app_root and str(resolved).startswith("/app/"):
                 resolved = Path(app_root) / str(resolved)[len("/app/"):]
-            dest = resolved.with_suffix(".html")
+            base = resolved.with_suffix("")
+            ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+            dest = Path(f"{base}_{ts}.html")
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(fill_result["html_report"], encoding="utf-8")
             result["saved_to"] = str(dest.resolve())

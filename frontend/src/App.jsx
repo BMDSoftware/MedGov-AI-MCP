@@ -19,6 +19,27 @@ import NavDock from './components/NavDock';
 import AgentLog from './components/AgentLog';
 import { MdHome, MdSmartToy, MdBiotech, MdBarChart, MdDescription, MdFolder, MdSettings, MdHistory, MdScience } from 'react-icons/md';
 
+const USE_CASES = [
+  {
+    id: 'dicom',
+    title: 'DICOM Analysis',
+    description: 'Parse and run inference on a CT/MRI scan',
+    firstPrompt: 'Analyze this DICOM series and run the appropriate segmentation model.',
+    reportPrompt: 'Make a report with the findings.',
+    sampleDir: 'exams'
+  },
+  {
+    id: 'wsi',
+    title: 'WSI Tumor Detection',
+    description: 'Detect tumors in a whole-slide pathology image',
+    firstPrompt: 'Find the tumor in slide [SLIDE_UID], localize any suspicious regions, and estimate the cell count.',
+    reportPrompt: 'Make a report with the findings.',
+    sampleItems: [
+      { id: '2.25.338247016696998394111485786182386609869', label: '2.25.338247016696998394111485786182386609869' }
+    ]
+  }
+];
+
 function App() {
   // ── Auth state ──────────────────────────────────────────────────────────────
   // ALL hooks must be declared here, before any conditional return.
@@ -58,7 +79,17 @@ function App() {
   const [taskRefreshSignal, setTaskRefreshSignal] = useState(null);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
   const [unreadTaskCount, setUnreadTaskCount] = useState(0);
-  const [appMode, setAppMode] = useState('normal'); // 'normal' | 'debug'
+  const [appMode, setAppMode] = useState('debug'); // 'normal' | 'debug'
+  const [pendingReportPrompt, setPendingReportPrompt] = useState(null);
+  const pendingReportRef = useRef(null);
+  const selectedUseCaseRef = useRef(null);
+  const reportPromptSentRef = useRef(false);
+  const [showUseCaseSuggestions, setShowUseCaseSuggestions] = useState(false);
+  const textareaRef = useRef(null);
+  const [expandedUseCase, setExpandedUseCase] = useState(null);
+  const [activeUseCase, setActiveUseCase] = useState(null);
+  const [availableExams, setAvailableExams] = useState([]);
+  const [loadingExams, setLoadingExams] = useState(false);
   const pageRef = useRef(page);
   const [uploadingDir, setUploadingDir] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState([]); // [{name, fileType}] uploading in progress
@@ -129,6 +160,12 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (page === 'analysis') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+  }, [page]);
+
   // Fetch initial session ID on mount (auth required)
   useEffect(() => {
     if (!authToken) return;
@@ -191,6 +228,118 @@ function App() {
 
   // --- Logic functions ---
   const addMessage = (message) => setMessages(prev => [...prev, message]);
+
+  const handleUseCaseClick = async (useCase) => {
+    if (expandedUseCase === useCase.id) {
+      setExpandedUseCase(null);
+      return;
+    }
+
+    // Remove any dirs registered by a previous use case selection
+    if (uploadedDirs.length > 0) {
+      const dirsToRemove = [...uploadedDirs];
+      setUploadedDirs([]);
+      for (const dir of dirsToRemove) {
+        apiFetch(getApiUrl('/api/set-directory'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dir_path: dir.path, remove: true })
+        }).catch(() => {});
+      }
+    }
+
+    if (useCase.sampleItems) {
+      setExpandedUseCase(useCase.id);
+      setAvailableExams(useCase.sampleItems.map(item => ({
+        dir_path: item.id,
+        name: item.label,
+        file_count: null
+      })));
+    } else if (useCase.sampleDir) {
+      setExpandedUseCase(useCase.id);
+      setLoadingExams(true);
+      try {
+        const res = await apiFetch(getApiUrl(`/api/sample-exams?dir=${useCase.sampleDir}`));
+        const data = await res.json();
+        setAvailableExams(data.exams || []);
+      } catch {
+        setAvailableExams([]);
+      } finally {
+        setLoadingExams(false);
+      }
+    } else {
+      setUserQuery(useCase.firstPrompt);
+      selectedUseCaseRef.current = useCase;
+      textareaRef.current?.focus();
+    }
+  };
+
+  const handleExamSelect = async (useCase, exam) => {
+    setExpandedUseCase(null);
+
+    // Start a fresh session for each use case run so old context never bleeds in
+    try {
+      const res = await apiFetch(getApiUrl('/api/reset-session'), { method: 'POST' });
+      const data = await res.json();
+      setCurrentSessionId(data.session_id);
+      setMessages([WELCOME_MESSAGE]);
+      setUploadedFiles([]);
+      setUploadedDirs([]);
+      setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null, selectedPatient: null, patientContext: null });
+    } catch {
+      // non-fatal — continue with existing session if reset fails
+    }
+
+    if (useCase.sampleItems) {
+      // UID substitution — no directory to register
+      setUserQuery(useCase.firstPrompt.replace('[SLIDE_UID]', exam.dir_path));
+    } else {
+      try {
+        const res = await apiFetch(getApiUrl('/api/setup-use-case'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dir: useCase.sampleDir, dir_path: exam.dir_path })
+        });
+        const data = await res.json();
+        if (data.exams) {
+          setUploadedDirs(data.exams.map(e => {
+            const n = e.dirname;
+            const shortName = n.length > 24 ? `${n.slice(0, 12)}…${n.slice(-8)}` : n;
+            return { name: `${shortName} (${e.file_count})`, path: e.dir_path };
+          }));
+        }
+      } catch {
+        // non-fatal
+      }
+      setUserQuery(useCase.firstPrompt);
+    }
+
+    setActiveUseCase(useCase.id);
+    selectedUseCaseRef.current = useCase;
+    textareaRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!taskRefreshSignal) return;
+    if (taskRefreshSignal.type === 'task_done') {
+      if (pendingReportRef.current) {
+        const prompt = pendingReportRef.current;
+        pendingReportRef.current = null;
+        setPendingReportPrompt(null);
+        addMessage({
+          type: 'bot',
+          content: 'Background task completed. Ready to generate the report.',
+          actions: [{ id: 'send_report', label: 'Generate Report', query: prompt }]
+        });
+      } else if (reportPromptSentRef.current) {
+        reportPromptSentRef.current = false;
+        setActiveUseCase(null);
+        setExpandedUseCase(null);
+        setShowUseCaseSuggestions(true);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskRefreshSignal]);
 
 
   const handleDrag = (e) => {
@@ -281,7 +430,14 @@ function App() {
     setUploadedFiles(prev => prev.filter(f => f.name !== fileName));
   };
 
-  const handleAction = async (actionId) => {
+  const handleAction = async (actionId, extra = {}) => {
+    if (actionId === 'send_report') {
+      reportPromptSentRef.current = true;
+      setUserQuery(extra.query);
+      setTimeout(() => textareaRef.current?.form?.requestSubmit(), 0);
+      return;
+    }
+
     const labels = { 'analyze': 'Analyze Image', 'info': 'System Info', 'report': 'Generate Report', 'new': 'New Analysis', 'export': 'Export' };
     addMessage({ type: 'user', content: labels[actionId] || actionId });
     setIsProcessing(true);
@@ -391,6 +547,7 @@ function App() {
     if (!pendingTool) return;
     addMessage({ type: 'user', content: `Denied: ${pendingTool.tool_name}` });
     setPendingTool(null);
+    reportPromptSentRef.current = false;
     try {
       const response = await apiFetch(getApiUrl('/api/deny-tool'), { method: 'POST' });
       const data = await safeJson(response);
@@ -504,11 +661,11 @@ function App() {
 
         {page !== 'home' && page !== 'about' && (
         <header className="header">
-          <h1>Medical Image Analysis</h1>
+          <h1>MedGov-AI</h1>
           {selectedPatient ? (
             <p>Healthcare Agent for <strong>{selectedPatient.name}</strong> ({selectedPatient.gender}, Born: {selectedPatient.birthDate})</p>
           ) : (
-            <p>Multi-Agent Orchestrator for Healthcare</p>
+            <p>AI Orchestrator for Healthcare</p>
           )}
 
           {runningTaskCount > 0 && (
@@ -640,7 +797,7 @@ function App() {
                         {msg.actions?.length > 0 && (
                           <div className="actions">
                             {msg.actions.map(a => (
-                              <button key={a.id} onClick={() => handleAction(a.id)} disabled={isProcessing}>
+                              <button key={a.id} onClick={() => handleAction(a.id, a)} disabled={isProcessing}>
                                 {a.label}
                               </button>
                             ))}
@@ -651,6 +808,65 @@ function App() {
                   </div>
                 </div>
               ))}
+              {(messages.length === 1 || showUseCaseSuggestions) && (
+                <div className="use-case-suggestions">
+                  <span className="use-case-suggestions-label">Try a use case</span>
+                  <div className="use-case-cards">
+                    {USE_CASES.map(uc => (
+                      <div key={uc.id} className="use-case-card-wrapper">
+                        <button
+                          className={`use-case-card${expandedUseCase === uc.id ? ' expanded' : ''}${activeUseCase === uc.id && expandedUseCase !== uc.id ? ' active' : ''}`}
+                          onClick={() => handleUseCaseClick(uc)}
+                          disabled={isProcessing}
+                        >
+                          <div className="use-case-card-top">
+                            <strong>{uc.title}</strong>
+                            {activeUseCase === uc.id && expandedUseCase !== uc.id && (
+                              <span className="use-case-card-active-badge">Selected</span>
+                            )}
+                            <svg
+                              className="use-case-card-arrow"
+                              width="14" height="14" viewBox="0 0 24 24" fill="none"
+                              stroke="currentColor" strokeWidth="2.5"
+                              strokeLinecap="round" strokeLinejoin="round"
+                              style={{ transform: expandedUseCase === uc.id ? 'rotate(90deg)' : undefined }}
+                            >
+                              <path d="M5 12h14M12 5l7 7-7 7"/>
+                            </svg>
+                          </div>
+                          <span className="use-case-card-prompt">{uc.firstPrompt}</span>
+                        </button>
+
+                        {expandedUseCase === uc.id && (
+                          <div className="use-case-exam-picker">
+                            {loadingExams ? (
+                              <span className="exam-picker-empty">Loading...</span>
+                            ) : availableExams.length === 0 ? (
+                              <span className="exam-picker-empty">No exams found in sample_data/exams/</span>
+                            ) : (
+                              availableExams.map(exam => (
+                                <button
+                                  key={exam.dir_path}
+                                  className="exam-picker-item"
+                                  onClick={() => handleExamSelect(uc, exam)}
+                                >
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                  </svg>
+                                  <span className="exam-picker-name" title={exam.name}>{exam.name}</span>
+                                  {typeof exam.file_count === 'number' && (
+                                    <span className="exam-picker-count">{exam.file_count} files</span>
+                                  )}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
 
@@ -660,6 +876,12 @@ function App() {
                 if (!userQuery.trim()) return;
                 const currentQuery = userQuery;
                 setUserQuery("");
+                setShowUseCaseSuggestions(false);
+                if (selectedUseCaseRef.current) {
+                  pendingReportRef.current = selectedUseCaseRef.current.reportPrompt;
+                  setPendingReportPrompt(selectedUseCaseRef.current.reportPrompt);
+                  selectedUseCaseRef.current = null;
+                }
                 addMessage({ type: 'user', content: currentQuery });
                 addMessage({ type: 'bot', content: '', isLoading: true });
                 setIsProcessing(true);
@@ -745,6 +967,7 @@ function App() {
 
                 <div className="chatbot-input-controls">
                   <textarea
+                    ref={textareaRef}
                     placeholder="Type your query..."
                     rows={3}
                     className="chatbot-textarea"

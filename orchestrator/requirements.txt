@@ -29,3 +29,5 @@ python-jose[cryptography]>=3.3.0
 bcrypt>=4.0.0
 # Process monitoring (hang detection watchdog)
 psutil>=5.9.0
+# TCIA sample data download
+tcia_utils>=2.6

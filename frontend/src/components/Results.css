@@ -448,3 +448,22 @@
 .markdown-report-body ul, .markdown-report-body ol { padding-left: 1.4rem; margin: 0.4rem 0; }
 .markdown-report-body hr { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 0.75rem 0; }
 .markdown-report-body strong { font-weight: 600; }
+
+.task-section { margin-bottom: 2rem; }
+
+.task-section-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted, rgba(255,255,255,0.45));
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.1));
+  margin-bottom: 0.75rem;
+}
+
+.results-empty-section {
+  font-size: 0.85rem;
+  color: var(--text-muted, rgba(255,255,255,0.45));
+  padding: 0.5rem 0;
+}

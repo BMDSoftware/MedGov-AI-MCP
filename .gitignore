@@ -80,6 +80,8 @@ test_data/CALGB50303/
 *.nii
 *.nii.gz
 mcp-monai/sample_data/
+orchestrator/sample_data/ct-exam/
+orchestrator/sample_data/exams/
 
 # Test directory
 tests/

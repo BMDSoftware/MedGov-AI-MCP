@@ -67,6 +67,15 @@ else
     info "Frontend node_modules already exists, skipping."
 fi
 
+# ── Sample data ───────────────────────────────────────────────────────────────
+SAMPLE_EXAMS="$REPO_ROOT/orchestrator/sample_data/exams"
+if [ ! -d "$SAMPLE_EXAMS" ] || [ -z "$(find "$SAMPLE_EXAMS" -type f -name '*.dcm' -print -quit 2>/dev/null || true)" ]; then
+    info "Downloading sample CT data from TCIA..."
+    "$REPO_ROOT/orchestrator/venv/bin/python" "$REPO_ROOT/orchestrator/sample_data/download_sample_data.py"
+else
+    info "Sample CT data already present, skipping download."
+fi
+
 # ── Launch ────────────────────────────────────────────────────────────────────
 cleanup() {
     echo ""

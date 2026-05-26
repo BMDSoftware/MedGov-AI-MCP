@@ -538,7 +538,6 @@ A workspace is registered pointing to the monitored directory. The following pro
 \subsubsection{Workflow}
 The workflow is illustrated in Figure~\ref{fig:workspace-workflow}.
 When the polling observer detects a new file, the watcher stages it in the workspace's \texttt{incoming/} subfolder and triggers the agent after a three-second debounce window. The agent calls \texttt{get\_file\_metadata} to determine file type, extension, and dimensions, and attempts to classify whether the file is a pathology ROI image.
-% FIXME: Wouldn't that extra round of tool calls simply be to call the detection model? This seems to be a difference between calling for file metadata or calling for a detection model, therefore there are no differences in the number of tool calls made
 This classification step is an inherent limitation of the current design: reliably determining whether an arbitrary image is a valid ROI would require running a dedicated detection model, adding an inference step before any analysis begins. To avoid this overhead, the workspace prompt instructs the agent to make a best-effort classification from file metadata and dimensions alone, and to route uncertain cases to a dedicated folder for manual review rather than proceeding with segmentation. This trades false-negative robustness for efficiency, and is an acknowledged design constraint rather than a failure of the workflow. If the file is classified as a valid ROI image, \texttt{segment\_cells\_2d} is submitted to the background task queue using the Cellpose v4 universal model (cpsam). When the task completes, the result is pushed to the frontend via SSE and displayed in the Workspaces console. If the cell count exceeds 2000, the segmentation mask is copied to the output folder; otherwise only a JSON log entry is written. Final results, including cell count, mask path, and timestamp, are persisted and accessible in the Results tab.
 
 \begin{figure*}[t]
@@ -668,7 +667,6 @@ Use Case 1 was initiated with a publicly available DICOM series from the Cancer 
 
 Each task was executed under two conditions. In the skilled condition, the agent loads the corresponding skill file and follows its prescribed sequence as a workflow protocol. In the unskilled condition, the agent selects tools based solely on its general reasoning over the available tool descriptions. Results are summarised in Table~\ref{tab:uc1-results}.
 
-% FIXME: this table is too long horizontally, goes out of bounds. I recommend shortening it, e.g. change the first column name to "Use Case" and remove the "Use Case" prefix from the rows (e.g. "1 w/ skill")
 \begin{table*}[t]
   \caption{Use Cases 1 and 2: Execution Metrics and Outcomes}
   \label{tab:uc1-results}
@@ -735,7 +733,6 @@ The second workspace, \textbf{ROI}, was configured with the following prompt, pr
 
 When \texttt{ROI\_TEST\_IMAGE.jpeg} (2{,}352$\times$2{,}673~px, H\&E-stained pathology ROI) was deposited into the ROI workspace, the following sequence was observed and is visible in the workspace console (Figure~\ref{fig:workspace-use-case}): the watcher detected the file within seconds, triggered the agent after the three-second debounce window, and the agent autonomously called \texttt{cellpose.segment\_cells\_2d} without any user interaction. The model reported 1{,}706 detected cells and, since this exceeded the threshold of 100, moved the image to \texttt{/app/workspaces/CELLPOSE} as instructed. The full sequence from file drop to analysis completion took approximately 30 seconds on a local GPU (RTX 3050).
 
-% FIXME: light mode
 \begin{figure}[h]
   \centering
   \includegraphics[width=\linewidth]{images/workspace_use_case.png}

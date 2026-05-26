@@ -766,8 +766,13 @@ async def setup_use_case(data: dict = Body(...), current_user: dict = Depends(ge
     # If a specific dir_path is given, register just that one
     specific = data.get("dir_path")
     if specific:
-        exam_dir = Path(specific)
-        if not exam_dir.is_dir() or not str(exam_dir).startswith(str(base)):
+        exam_dir = Path(specific).resolve()
+        base_resolved = base.resolve()
+        if not exam_dir.is_dir():
+            raise HTTPException(status_code=404, detail="Exam directory not found")
+        try:
+            exam_dir.relative_to(base_resolved)
+        except ValueError:
             raise HTTPException(status_code=404, detail="Exam directory not found")
         dir_path_str = str(exam_dir)
         if dir_path_str not in state.uploaded_dirs:

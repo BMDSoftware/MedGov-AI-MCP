@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { API_CONFIG, getApiUrl } from './config';
 import { isAuthenticated, getToken, getUsername, setAuth, clearAuth } from './auth';
 import { apiFetch, safeJson, authEventSourceUrl } from './apiFetch';
@@ -592,7 +593,10 @@ function App() {
                       </div>
                     ) : (
                       <>
-                        <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                        {msg.isConfirmation
+                          ? <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          : <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                        }
                         {msg.isConfirmation && pendingTool && i === messages.length - 1 && (
                           <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
                             <button

@@ -114,6 +114,9 @@ async def get_or_create_agent(user_id: str) -> AgenticAgent:
                 agent.agent_tools.discard(t)
             agent._refresh_agent_components()
             agent.set_mode(_app_settings.get("mode", "normal"))
+            # Re-apply saved confirmation override (set_mode resets it to mode default)
+            if "confirmation" in _app_settings:
+                agent.require_confirmation = _app_settings["confirmation"]
             _agents[user_id] = agent
         return _agents[user_id]
 

@@ -57,10 +57,11 @@
 
 /* brand row */
 .sl-brand {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 10px;
   margin-bottom: auto;
+  align-self: flex-start;
 }
 .sl-brand-icon {
   width: 34px;

@@ -56,8 +56,8 @@ export default function Login({ onLogin, onBack }) {
       {/* ── Left panel ── */}
       <div className="sl-left">
         <div className="sl-left-inner">
-          <div className="sl-brand">
-            <div className="sl-brand-icon" onClick={onBack} style={{ cursor: onBack ? 'pointer' : 'default' }}><MdLocalHospital /></div>
+          <div className="sl-brand" onClick={onBack} style={{ cursor: onBack ? 'pointer' : 'default' }}>
+            <div className="sl-brand-icon"><MdLocalHospital /></div>
             <span className="sl-brand-name">MedGov-AI</span>
           </div>
 

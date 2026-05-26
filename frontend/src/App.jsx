@@ -13,6 +13,7 @@ import Toast from './components/Toast';
 import HomePage from './components/HomePage';
 import AutonomousAgent from './components/AutonomousAgent';
 import Workspaces from './components/Workspaces';
+import About from './components/About';
 import NavDock from './components/NavDock';
 import AgentLog from './components/AgentLog';
 import { MdHome, MdSmartToy, MdBiotech, MdBarChart, MdDescription, MdFolder, MdSettings, MdHistory, MdScience } from 'react-icons/md';
@@ -396,9 +397,11 @@ function App() {
   // ── Unauthenticated views (no hooks after this point) ──────────────────────
   if (!authToken) {
     if (showLogin) return <Login onLogin={handleLogin} />;
+    if (page === 'about') return <About onNavigate={(p) => { if (p === 'home') setPage('home'); }} />;
     return (
       <HomePage
         onNavigate={(p) => {
+          if (p === 'about') { setPage('about'); return; }
           if (p === 'analysis' || p === 'autonomous' || p === 'results') {
             setShowLogin(true);
           }
@@ -425,10 +428,10 @@ function App() {
 
       {appMode === 'debug' && <AgentLog sessionId={currentSessionId} />}
 
-      {page !== 'home' && <aside className="sidebar">
+      {page !== 'home' && page !== 'about' && <aside className="sidebar">
         <div className="logo" style={{ cursor: 'pointer' }} onClick={() => setPage('home')}>
-          <span className="logo-icon">H</span>
-          <span className="logo-text">HealthMCP</span>
+          <span className="logo-icon">M</span>
+          <span className="logo-text">MedGov-AI</span>
         </div>
         <nav className="nav">
           <NavDock
@@ -462,7 +465,7 @@ function App() {
         </div>
       </aside>}
 
-      <main className="main">
+      <main className={`main${page === 'about' ? ' main-fullpage' : ''}`}>
         {/* Running Tool Indicator */}
         {runningTool && (
           <div style={{
@@ -492,7 +495,7 @@ function App() {
           </div>
         )}
 
-        {page !== 'home' && (
+        {page !== 'home' && page !== 'about' && (
         <header className="header">
           <h1>Medical Image Analysis</h1>
           {selectedPatient ? (
@@ -515,6 +518,7 @@ function App() {
             onNavigate={setPage}
             currentSessionId={currentSessionId}
             runningTaskCount={runningTaskCount}
+            onSignOut={handleLogout}
           />
         ) : page === 'autonomous' ? (
           <AutonomousAgent currentSessionId={currentSessionId} />
@@ -528,6 +532,8 @@ function App() {
           <Report refreshSignal={taskRefreshSignal} currentSessionId={currentSessionId} />
         ) : page === 'workspaces' ? (
           <Workspaces appMode={appMode} />
+        ) : page === 'about' ? (
+          <About onNavigate={setPage} />
         ) : page === 'history' ? (
           <Sessions onLoadSession={(data) => {
             if (!data) return;

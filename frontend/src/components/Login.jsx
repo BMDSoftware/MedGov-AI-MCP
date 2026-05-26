@@ -5,9 +5,9 @@ import { setAuth } from '../auth';
 import './Login.css';
 
 const HIGHLIGHTS = [
-  'MONAI segmentation on DICOM series',
-  'Structured radiology report generation',
-  'Autonomous multi-file inference pipelines',
+  'Autonomous clinical imaging analysis',
+  'Structured radiology and pathology reports',
+  'Workspace monitoring with event-driven pipelines',
   'Per-user sessions and workspace isolation',
 ];
 
@@ -58,7 +58,7 @@ export default function Login({ onLogin }) {
         <div className="sl-left-inner">
           <div className="sl-brand">
             <div className="sl-brand-icon"><MdLocalHospital /></div>
-            <span className="sl-brand-name">AgenticHealth</span>
+            <span className="sl-brand-name">MedGov-AI</span>
           </div>
 
           <div className="sl-left-body">
@@ -67,8 +67,7 @@ export default function Login({ onLogin }) {
               <span className="sl-left-accent">reimagined.</span>
             </h1>
             <p className="sl-left-sub">
-              An AI-orchestrated platform for DICOM analysis,
-              MONAI inference, and automated radiology workflows.
+              An agentic AI platform for clinical imaging orchestration via the Model Context Protocol.
             </p>
 
             <ul className="sl-features">
@@ -81,7 +80,7 @@ export default function Login({ onLogin }) {
             </ul>
           </div>
 
-          <p className="sl-left-footer">MONAI · RadLex · FHIR · MCP</p>
+          <p className="sl-left-footer">Supported by Health from Portugal · PRR</p>
         </div>
       </div>
 

@@ -113,7 +113,7 @@ async def get_or_create_agent(user_id: str) -> AgenticAgent:
             for t in _DEFAULT_DISABLED_TOOLS:
                 agent.agent_tools.discard(t)
             agent._refresh_agent_components()
-            agent.set_mode(_app_settings.get("mode", "debug"))
+            agent.set_mode(_app_settings.get("mode", "normal"))
             _agents[user_id] = agent
         return _agents[user_id]
 
@@ -431,7 +431,7 @@ async def set_metadata(data: dict = Body(...), current_user: dict = Depends(get_
 
 @app.get("/api/mode", tags=["system"], summary="Get current UI mode (debug or normal)")
 async def get_mode(current_user: dict = Depends(get_current_user)):
-    return {"mode": _app_settings.get("mode", "debug")}
+    return {"mode": _app_settings.get("mode", "normal")}
 
 @app.post("/api/mode", tags=["system"], summary="Set UI mode — 'debug' shows tool calls, 'normal' uses clinical language")
 async def set_mode(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
@@ -458,7 +458,7 @@ async def get_confirmation(current_user: dict = Depends(get_current_user)):
 
 @app.post("/api/confirmation", tags=["system"], summary="Set tool confirmation (only effective in normal mode)")
 async def set_confirmation(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    if _app_settings.get("mode", "debug") == "debug":
+    if _app_settings.get("mode", "normal") == "debug":
         return {"confirmation": True}
     enabled = bool(data.get("confirmation", False))
     _app_settings["confirmation"] = enabled

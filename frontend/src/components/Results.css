@@ -39,8 +39,14 @@
 
 .results-filters {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   margin-bottom: 20px;
+}
+
+.results-filter-group {
+  display: flex;
+  gap: 8px;
   flex-wrap: wrap;
 }
 

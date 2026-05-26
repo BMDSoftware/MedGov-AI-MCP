@@ -369,6 +369,10 @@ body {
   background: var(--bg-primary);
 }
 
+.main.main-fullpage {
+  overflow-y: auto;
+}
+
 .header {
   padding: 28px 40px;
   border-bottom: 1px solid var(--border);

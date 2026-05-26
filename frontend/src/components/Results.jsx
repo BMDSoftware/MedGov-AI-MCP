@@ -18,7 +18,8 @@ function Results({ refreshSignal, currentSessionId }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(new Set()); // set of expanded task ids
-  const [filter, setFilter] = useState('all'); // all | inference | report | done | failed
+  const [typeFilter, setTypeFilter] = useState('all'); // all | inference | cellpose | report | markdown_report
+  const [statusFilter, setStatusFilter] = useState('all'); // all | queued | done | failed
   const [cancelling, setCancelling] = useState({}); // task id -> true while cancel request in flight
 
   const fetchTasks = async () => {
@@ -63,11 +64,12 @@ function Results({ refreshSignal, currentSessionId }) {
   };
 
   const filteredTasks = tasks.filter(t => {
-    if (filter === 'all') return true;
-    if (filter === 'queued') return t.status === 'queued' || t.status === 'running';
-    if (filter === 'done') return t.status === 'done';
-    if (filter === 'failed') return t.status === 'failed';
-    return t.task_type === filter;
+    const typeMatch = typeFilter === 'all' || t.task_type === typeFilter;
+    const statusMatch = statusFilter === 'all'
+      || (statusFilter === 'queued' && (t.status === 'queued' || t.status === 'running'))
+      || (statusFilter === 'done' && t.status === 'done')
+      || (statusFilter === 'failed' && t.status === 'failed');
+    return typeMatch && statusMatch;
   });
 
   const formatTime = (iso) => {
@@ -90,24 +92,39 @@ function Results({ refreshSignal, currentSessionId }) {
       </div>
 
       <div className="results-filters">
-        {[
-          { key: 'all', label: 'All' },
-          { key: 'inference', label: 'Inference' },
-          { key: 'cellpose', label: 'Cellpose' },
-          { key: 'report', label: 'Report' },
-          { key: 'markdown_report', label: 'File Reports' },
-          { key: 'queued', label: 'Queued' },
-          { key: 'done', label: 'Done' },
-          { key: 'failed', label: 'Failed' },
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            className={`filter-btn ${filter === key ? 'active' : ''}`}
-            onClick={() => setFilter(key)}
-          >
-            {label}
-          </button>
-        ))}
+        <div className="results-filter-group">
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'inference', label: 'Inference' },
+            { key: 'cellpose', label: 'Cellpose' },
+            { key: 'report', label: 'Report' },
+            { key: 'markdown_report', label: 'File Reports' },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              className={`filter-btn ${typeFilter === key ? 'active' : ''}`}
+              onClick={() => setTypeFilter(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="results-filter-group">
+          {[
+            { key: 'all', label: 'All statuses' },
+            { key: 'queued', label: 'Queued' },
+            { key: 'done', label: 'Done' },
+            { key: 'failed', label: 'Failed' },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              className={`filter-btn ${statusFilter === key ? 'active' : ''}`}
+              onClick={() => setStatusFilter(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading && <p className="results-loading">Loading tasks...</p>}

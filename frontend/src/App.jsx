@@ -162,7 +162,7 @@ function App() {
 
   useEffect(() => {
     if (page === 'analysis') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
     }
   }, [page]);
 

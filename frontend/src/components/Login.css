@@ -170,6 +170,17 @@
   color: var(--text-secondary);
   line-height: 1.5;
 }
+.sl-demo-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  color: #38bdf8;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.sl-demo-link:hover { color: #7dd3fc; }
 
 /* form */
 .sl-form {

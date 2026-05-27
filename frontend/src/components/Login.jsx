@@ -91,9 +91,18 @@ export default function Login({ onLogin, onBack }) {
           <div className="sl-form-header">
             <h2>{mode === 'login' ? 'Sign in' : 'Create account'}</h2>
             <p>
-              {mode === 'login'
-                ? 'Enter your credentials to access your workspace.'
-                : 'Set up your account to get started.'}
+              {mode === 'login' ? (
+                <>
+                  Enter your credentials to access your workspace. Just exploring?{' '}
+                  <button
+                    type="button"
+                    className="sl-demo-link"
+                    onClick={() => { setUsername('demo'); setPassword('demo1234'); setError(''); }}
+                  >
+                    Use demo credentials
+                  </button>
+                </>
+              ) : 'Set up your account to get started.'}
             </p>
           </div>
 

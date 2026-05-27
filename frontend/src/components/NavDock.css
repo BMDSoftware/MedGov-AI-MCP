@@ -81,3 +81,9 @@
 .nav-dock-badge.unread {
   background: #f59e0b;
 }
+
+.nav-dock-divider {
+  height: 1px;
+  background: var(--border, rgba(255,255,255,0.08));
+  margin: 4px 4px;
+}

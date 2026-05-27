@@ -61,18 +61,22 @@ export default function NavDock({
           mouseY.set(Infinity);
         }}
       >
-        {items.map((item, index) => (
-          <NavDockItem
-            key={index}
-            item={item}
-            isActive={activePage === item.page}
-            mouseY={mouseY}
-            spring={spring}
-            distance={distance}
-            magnification={magnification}
-            baseItemSize={baseItemSize}
-          />
-        ))}
+        {items.map((item, index) =>
+          item.divider ? (
+            <div key={index} className="nav-dock-divider" />
+          ) : (
+            <NavDockItem
+              key={index}
+              item={item}
+              isActive={activePage === item.page}
+              mouseY={mouseY}
+              spring={spring}
+              distance={distance}
+              magnification={magnification}
+              baseItemSize={baseItemSize}
+            />
+          )
+        )}
       </motion.div>
     </motion.div>
   );

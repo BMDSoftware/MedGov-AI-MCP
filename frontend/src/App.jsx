@@ -693,12 +693,14 @@ function App() {
             activePage={page}
             items={[
               { page: 'home',       label: 'Home',       icon: <MdHome />,      onClick: () => setPage('home') },
-              { page: 'autonomous', label: 'Autonomous', icon: <MdSmartToy />,  onClick: () => setPage('autonomous') },
               { page: 'analysis',   label: 'Analysis',   icon: <MdBiotech />,   onClick: () => setPage('analysis') },
-              { page: 'results',    label: 'Results',    icon: <MdBarChart />,  onClick: () => setPage('results'), badge: runningTaskCount, unread: unreadTaskCount > 0 },
               { page: 'workspaces', label: 'Workspaces', icon: <MdFolder />,    onClick: () => setPage('workspaces') },
+              { page: 'results',    label: 'Results',    icon: <MdBarChart />,  onClick: () => setPage('results'), badge: runningTaskCount, unread: unreadTaskCount > 0 },
+              { divider: true },
               { page: 'settings',   label: 'Settings',   icon: <MdSettings />,  onClick: () => setPage('settings') },
               ...(appMode === 'debug' ? [
+                { divider: true },
+                { page: 'autonomous', label: 'Autonomous', icon: <MdSmartToy />,  onClick: () => setPage('autonomous') },
                 { page: 'history', label: 'Sessions', icon: <MdHistory />,     onClick: () => setPage('history') },
                 { page: 'test',    label: 'Test',     icon: <MdScience />,     onClick: () => setPage('test') },
                 { page: 'report',  label: 'Report',   icon: <MdDescription />, onClick: () => setPage('report') },

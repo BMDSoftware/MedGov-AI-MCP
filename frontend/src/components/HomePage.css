@@ -87,6 +87,14 @@
   gap: 2px;
 }
 
+.home-topnav-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border, rgba(255,255,255,0.1));
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
 .home-topnav-links button {
   background: transparent;
   border: none;
@@ -174,7 +182,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 80px 48px 100px;
+  padding: 80px 48px 40px;
   text-align: center;
 }
 
@@ -365,27 +373,34 @@
   letter-spacing: 2px;
   color: var(--text-muted, #63637a);
   margin-bottom: 16px;
+  text-align: center;
 }
 
 .home-features-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  display: flex;
+  justify-content: center;
   gap: 14px;
+  flex-wrap: wrap;
+}
+
+.home-features-grid .home-feature-card {
+  flex: 0 1 260px;
 }
 
 .home-feature-card {
   position: relative;
   background: var(--bg-card);
-  border: 1px solid var(--border);
+  border: 1.5px solid var(--border);
   border-radius: 16px;
   padding: 28px 22px;
   cursor: pointer;
   text-align: left;
-  transition: all 0.22s ease;
+  transition: all 0.2s ease;
   display: flex;
   flex-direction: column;
   gap: 12px;
   overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
 .home-feature-card::before {
@@ -399,13 +414,17 @@
 }
 
 .home-feature-card:hover {
-  border-color: var(--border-light);
+  border-color: #6366f1;
   transform: translateY(-4px);
-  box-shadow: 0 16px 40px rgba(0,0,0,0.12);
+  box-shadow: 0 16px 40px rgba(99,102,241,0.18);
 }
 
 .home-feature-card:hover::before {
   opacity: 1;
+}
+
+.home-feature-card:active {
+  transform: translateY(-2px);
 }
 
 .home-feature-icon {
@@ -434,15 +453,25 @@
 }
 
 .home-feature-arrow {
-  font-size: 18px;
-  color: var(--text-muted, #63637a);
+  font-size: 13px;
+  font-weight: 600;
+  color: #6366f1;
+  background: rgba(99,102,241,0.1);
+  border-radius: 20px;
+  padding: 5px 14px;
+  align-self: flex-start;
   transition: all 0.2s ease;
-  align-self: flex-end;
+  letter-spacing: 0.01em;
+}
+
+.home-feature-arrow::before {
+  content: 'Open →';
 }
 
 .home-feature-card:hover .home-feature-arrow {
-  color: var(--accent, #6366f1);
-  transform: translateX(4px);
+  background: #6366f1;
+  color: #fff;
+  transform: translateX(2px);
 }
 
 /* ─── Recent sessions ─── */
@@ -580,7 +609,7 @@
 @media (max-width: 700px) {
   .home-topnav { padding: 16px 24px; }
   .home-topnav-links { display: none; }
-  .home-hero { padding: 48px 24px 64px; }
+  .home-hero { padding: 48px 24px 32px; }
   .home-hero-title { font-size: 40px; letter-spacing: -1.5px; }
   .home-features { padding: 0 24px 60px; }
   .home-sessions-section { padding: 0 24px 40px; }

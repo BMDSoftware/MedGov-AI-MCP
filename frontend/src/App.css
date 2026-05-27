@@ -546,6 +546,15 @@ body {
   padding: 28px 40px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.header-main {
+  display: flex;
+  flex-direction: column;
 }
 
 .header h1 {
@@ -558,6 +567,30 @@ body {
 .header p {
   font-size: 14px;
   color: var(--text-secondary);
+}
+
+.header-reset-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.header-reset-btn:hover:not(:disabled) {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.header-reset-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Chat */

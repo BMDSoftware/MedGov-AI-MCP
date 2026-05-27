@@ -622,6 +622,32 @@ function App() {
     }
   };
 
+  const handleResetConversation = async () => {
+    const oldSessionId = currentSessionId;
+    try {
+      const res = await apiFetch(getApiUrl('/api/reset-session'), { method: 'POST' });
+      const data = await res.json();
+      setCurrentSessionId(data.session_id);
+    } catch {
+      // non-fatal — clear local state regardless
+    }
+    if (oldSessionId) localStorage.removeItem(`messages_${oldSessionId}`);
+    setMessages([WELCOME_MESSAGE]);
+    setUploadedFiles([]);
+    setUploadedDirs([]);
+    setUploadingFiles([]);
+    setSessionContext({ fileUploaded: false, analysisComplete: false, lastAnalysis: null, modality: null, bodyPart: null, selectedPatient: null, patientContext: null });
+    setPendingTool(null);
+    setRunningTool(null);
+    setShowUseCaseSuggestions(false);
+    setExpandedUseCase(null);
+    setActiveUseCase(null);
+    pendingReportRef.current = null;
+    setPendingReportPrompt(null);
+    reportPromptSentRef.current = false;
+    setPendingUseCaseReturn(false);
+  };
+
   // --- Render ---
   // ── Unauthenticated views (no hooks after this point) ──────────────────────
   if (!authToken) {
@@ -726,18 +752,29 @@ function App() {
 
         {page !== 'home' && page !== 'about' && (
         <header className="header">
-          <h1>MedGov-AI</h1>
-          {selectedPatient ? (
-            <p>Healthcare Agent for <strong>{selectedPatient.name}</strong> ({selectedPatient.gender}, Born: {selectedPatient.birthDate})</p>
-          ) : (
-            <p>AI Orchestrator for Healthcare</p>
-          )}
-
-          {runningTaskCount > 0 && (
-            <div className="header-task-indicator">
-              <span className="header-task-dot" />
-              {runningTaskCount} task{runningTaskCount > 1 ? 's' : ''} running in background
-            </div>
+          <div className="header-main">
+            <h1>MedGov-AI</h1>
+            {selectedPatient ? (
+              <p>Healthcare Agent for <strong>{selectedPatient.name}</strong> ({selectedPatient.gender}, Born: {selectedPatient.birthDate})</p>
+            ) : (
+              <p>AI Orchestrator for Healthcare</p>
+            )}
+            {runningTaskCount > 0 && (
+              <div className="header-task-indicator">
+                <span className="header-task-dot" />
+                {runningTaskCount} task{runningTaskCount > 1 ? 's' : ''} running in background
+              </div>
+            )}
+          </div>
+          {page === 'analysis' && (
+            <button
+              className="header-reset-btn"
+              onClick={handleResetConversation}
+              disabled={isProcessing}
+              title="Clear conversation, uploaded files, and session context"
+            >
+              New Conversation
+            </button>
           )}
         </header>
         )}

@@ -18,18 +18,6 @@ const FEATURES = [
     ),
   },
   {
-    page: 'autonomous',
-    title: 'Autonomous',
-    desc: 'Let the AI agent run continuously, watching workspaces and processing new files automatically.',
-    iconBg: 'rgba(6,182,212,0.15)',
-    iconColor: '#06b6d4',
-    icon: (
-      <svg width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
-      </svg>
-    ),
-  },
-  {
     page: 'workspaces',
     title: 'Workspaces',
     desc: 'Watch directories for new DICOM files and trigger automatic AI analysis pipelines.',
@@ -97,7 +85,6 @@ function HomePage({ onNavigate, onSignIn, onSignOut, currentSessionId, runningTa
         </div>
         <div className="home-topnav-links">
           <button onClick={() => onNavigate('analysis')}>Analysis</button>
-          <button onClick={() => onNavigate('autonomous')}>Autonomous</button>
           <button onClick={() => onNavigate('workspaces')}>Workspaces</button>
           <div className="home-topnav-divider" />
           <button onClick={() => onNavigate('results')}>

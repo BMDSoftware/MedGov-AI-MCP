@@ -85,6 +85,8 @@ function App() {
   const selectedUseCaseRef = useRef(null);
   const reportPromptSentRef = useRef(false);
   const [showUseCaseSuggestions, setShowUseCaseSuggestions] = useState(false);
+  const [pendingUseCaseReturn, setPendingUseCaseReturn] = useState(false);
+  const knownDoneTaskIdsRef = useRef(new Set());
   const textareaRef = useRef(null);
   const [expandedUseCase, setExpandedUseCase] = useState(null);
   const [activeUseCase, setActiveUseCase] = useState(null);
@@ -338,6 +340,7 @@ function App() {
         triggerReportButton();
       } else if (reportPromptSentRef.current) {
         reportPromptSentRef.current = false;
+        setPendingUseCaseReturn(false);
         setActiveUseCase(null);
         setExpandedUseCase(null);
         setShowUseCaseSuggestions(true);
@@ -367,6 +370,34 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingReportPrompt, currentSessionId, authToken]);
 
+  // Polling fallback for the second task_done (report generation complete → show use cases).
+  // Looks for a done task whose ID was not present when Generate Report was clicked.
+  useEffect(() => {
+    if (!pendingUseCaseReturn || !currentSessionId || !authToken) return;
+
+    const poll = () => {
+      if (!reportPromptSentRef.current) return;
+      apiFetch(getApiUrl(`/api/tasks?session_id=${currentSessionId}`))
+        .then(r => r.json())
+        .then(d => {
+          const hasNewDone = (d.tasks || []).some(
+            t => t.status === 'done' && !knownDoneTaskIdsRef.current.has(t.id)
+          );
+          if (hasNewDone) {
+            reportPromptSentRef.current = false;
+            setPendingUseCaseReturn(false);
+            setActiveUseCase(null);
+            setExpandedUseCase(null);
+            setShowUseCaseSuggestions(true);
+          }
+        })
+        .catch(() => {});
+    };
+
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingUseCaseReturn, currentSessionId, authToken]);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -459,6 +490,13 @@ function App() {
   const handleAction = async (actionId, extra = {}) => {
     if (actionId === 'send_report') {
       reportPromptSentRef.current = true;
+      apiFetch(getApiUrl(`/api/tasks?session_id=${currentSessionId}`))
+        .then(r => r.json())
+        .then(d => {
+          knownDoneTaskIdsRef.current = new Set((d.tasks || []).filter(t => t.status === 'done').map(t => t.id));
+          setPendingUseCaseReturn(true);
+        })
+        .catch(() => setPendingUseCaseReturn(true));
       setUserQuery(extra.query);
       setTimeout(() => textareaRef.current?.form?.requestSubmit(), 0);
       return;
@@ -574,6 +612,7 @@ function App() {
     addMessage({ type: 'user', content: `Denied: ${pendingTool.tool_name}` });
     setPendingTool(null);
     reportPromptSentRef.current = false;
+    setPendingUseCaseReturn(false);
     try {
       const response = await apiFetch(getApiUrl('/api/deny-tool'), { method: 'POST' });
       const data = await safeJson(response);

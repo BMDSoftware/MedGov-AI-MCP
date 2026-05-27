@@ -700,7 +700,6 @@ function App() {
               { page: 'settings',   label: 'Settings',   icon: <MdSettings />,  onClick: () => setPage('settings') },
               ...(appMode === 'debug' ? [
                 { divider: true },
-                { page: 'autonomous', label: 'Autonomous', icon: <MdSmartToy />,  onClick: () => setPage('autonomous') },
                 { page: 'history', label: 'Sessions', icon: <MdHistory />,     onClick: () => setPage('history') },
                 { page: 'test',    label: 'Test',     icon: <MdScience />,     onClick: () => setPage('test') },
                 { page: 'report',  label: 'Report',   icon: <MdDescription />, onClick: () => setPage('report') },

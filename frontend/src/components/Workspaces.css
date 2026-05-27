@@ -280,12 +280,19 @@
 
 .prompt-icon { color: #4f46e5; flex-shrink: 0; opacity: 0.7; }
 
-/* Action buttons row */
+/* Action buttons */
 .dir-card-actions {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 5px;
   flex-shrink: 0;
+  align-items: flex-end;
+}
+
+.dir-card-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 /* ── Badges ── */
@@ -333,6 +340,92 @@
   color: #f87171;
   border: 1px solid #dc262644;
 }
+
+.badge-sample {
+  background: #7c3aed18;
+  color: #a78bfa;
+  border: 1px solid #7c3aed44;
+}
+
+/* ── Files browser ── */
+.btn-action-files {
+  background: var(--bg-card);
+  border-color: var(--border, #2a2a3c);
+  color: var(--text-primary);
+}
+.btn-action-files:hover,
+.btn-action-files.active {
+  background: #0ea5e918;
+  border-color: #0ea5e944;
+  color: #7dd3fc;
+}
+
+.ws-files {
+  background: var(--bg-input);
+  border: 1px solid #38bdf833;
+  border-radius: 10px;
+  margin-top: 6px;
+  padding: 10px 14px 12px;
+  font-size: 0.78rem;
+}
+.ws-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.ws-files-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-bright);
+}
+.ws-files-refresh {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-bright);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.ws-files-refresh:hover { color: #7dd3fc; }
+.ws-files-refresh:disabled { opacity: 0.4; cursor: default; }
+.ws-files-loading { color: var(--text-bright); font-size: 0.75rem; padding: 4px 0; }
+.ws-files-empty { color: var(--text-bright); margin: 0; font-size: 0.75rem; }
+
+.ws-files-group { margin-bottom: 8px; }
+.ws-files-group:last-child { margin-bottom: 0; }
+
+.ws-files-folder {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #7dd3fc;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.ws-files-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0 3px 16px;
+  color: var(--text-primary);
+  border-bottom: 1px solid #ffffff10;
+}
+.ws-files-row:last-child { border-bottom: none; }
+.ws-files-file-icon { color: #93c5fd; flex-shrink: 0; }
+.ws-files-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-files-size { color: var(--text-bright); font-size: 0.68rem; flex-shrink: 0; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinning { animation: spin 0.7s linear infinite; }
 
 /* ── Console ── */
 .console-panel {

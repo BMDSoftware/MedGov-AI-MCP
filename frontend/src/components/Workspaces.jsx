@@ -23,6 +23,8 @@ import {
   MdCreateNewFolder,
   MdCheck,
   MdUploadFile,
+  MdRefresh,
+  MdInsertDriveFile,
 } from 'react-icons/md';
 import './Workspaces.css';
 
@@ -562,12 +564,76 @@ function StatusBadge({ dir }) {
   return <span className="badge badge-stopped">Stopped</span>;
 }
 
+// ─── Workspace Files ──────────────────────────────────────────────────────────
+
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function WorkspaceFiles({ dir }) {
+  const [files, setFiles] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  function load() {
+    setLoading(true);
+    apiFetch(getApiUrl(`/api/watched-directories/${dir.id}/files`))
+      .then(r => r.json())
+      .then(data => { setFiles(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }
+
+  useEffect(() => { load(); }, [dir.id]);
+
+  if (loading && files === null) return <div className="ws-files-loading">Loading…</div>;
+
+  const grouped = {};
+  (files || []).forEach(f => {
+    const key = f.folder || '(root)';
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(f);
+  });
+  const folders = Object.keys(grouped).sort();
+
+  return (
+    <div className="ws-files">
+      <div className="ws-files-header">
+        <span className="ws-files-title">Files</span>
+        <button className="ws-files-refresh" onClick={load} title="Refresh" disabled={loading}>
+          <MdRefresh size={14} className={loading ? 'spinning' : ''} />
+        </button>
+      </div>
+      {folders.length === 0 ? (
+        <p className="ws-files-empty">No files yet.</p>
+      ) : (
+        folders.map(folder => (
+          <div key={folder} className="ws-files-group">
+            <div className="ws-files-folder">
+              <MdFolderOpen size={13} />
+              <span>{folder}</span>
+            </div>
+            {grouped[folder].map(f => (
+              <div key={f.name} className="ws-files-row">
+                <MdInsertDriveFile size={12} className="ws-files-file-icon" />
+                <span className="ws-files-name">{f.name}</span>
+                <span className="ws-files-size">{formatSize(f.size)}</span>
+              </div>
+            ))}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 // ─── Workspace Card (draggable) ───────────────────────────────────────────────
 
 function WorkspaceCard({ dir, onToggle, onEdit, onDelete, openConsoleId, setOpenConsole, appMode, onImportFiles }) {
   const controls = useDragControls();
   const consoleOpen = openConsoleId === dir.id;
   const folderInputRef = useRef(null);
+  const [filesOpen, setFilesOpen] = useState(false);
 
   return (
     <Reorder.Item
@@ -610,6 +676,9 @@ function WorkspaceCard({ dir, onToggle, onEdit, onDelete, openConsoleId, setOpen
           <div className="dir-card-info">
             <div className="dir-card-top">
               <span className="dir-card-title">{dir.name}</span>
+              {['roi', 'cellpose'].includes(dir.name.toLowerCase()) && (
+                <span className="badge badge-sample">Sample</span>
+              )}
               <StatusBadge dir={dir} />
             </div>
             <span className="dir-card-path">{dir.path}</span>
@@ -623,67 +692,76 @@ function WorkspaceCard({ dir, onToggle, onEdit, onDelete, openConsoleId, setOpen
 
           {/* Actions */}
           <div className="dir-card-actions">
-            <button
-              className={`btn-action ${dir.enabled ? 'btn-action-warn' : 'btn-action-success'}`}
-              onClick={() => onToggle(dir)}
-              title={dir.enabled ? 'Pause' : 'Start'}
-            >
-              {dir.enabled ? <MdPause size={15} /> : <MdPlayArrow size={15} />}
-              <span>{dir.enabled ? 'Pause' : 'Start'}</span>
-            </button>
-            <button
-              className="btn-action btn-action-neutral"
-              onClick={() => onEdit(dir)}
-              title="Edit"
-            >
-              <MdEdit size={14} />
-              <span>Edit</span>
-            </button>
-            <button
-              className={`btn-action btn-action-console ${consoleOpen ? 'active' : ''}`}
-              onClick={() => setOpenConsole(consoleOpen ? null : dir)}
-              title="Console"
-            >
-              <MdTerminal size={14} />
-              <span>Console</span>
-            </button>
-            {appMode === 'debug' && (
-              <>
-                <button
-                  className="btn-action btn-action-debug"
-                  onClick={() => folderInputRef.current?.click()}
-                  title="Import folder into workspace"
-                >
-                  <MdUploadFile size={14} />
-                  <span>Import</span>
-                </button>
-                <input
-                  ref={folderInputRef}
-                  type="file"
-                  multiple
-                  webkitdirectory=""
-                  directory=""
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    if (e.target.files?.length) {
-                      onImportFiles(dir, Array.from(e.target.files));
-                      e.target.value = '';
-                    }
-                  }}
-                />
-              </>
-            )}
-            <button
-              className="btn-action btn-action-danger btn-icon-only"
-              onClick={() => onDelete(dir)}
-              title="Remove"
-            >
-              <MdDeleteOutline size={16} />
-            </button>
+            <div className="dir-card-actions-row">
+              <button
+                className={`btn-action ${dir.enabled ? 'btn-action-warn' : 'btn-action-success'}`}
+                onClick={() => onToggle(dir)}
+                title={dir.enabled ? 'Pause' : 'Start'}
+              >
+                {dir.enabled ? <MdPause size={15} /> : <MdPlayArrow size={15} />}
+                <span>{dir.enabled ? 'Pause' : 'Start'}</span>
+              </button>
+              <button
+                className="btn-action btn-action-neutral"
+                onClick={() => onEdit(dir)}
+                title="Edit"
+              >
+                <MdEdit size={14} />
+                <span>Edit</span>
+              </button>
+              <button
+                className={`btn-action btn-action-console ${consoleOpen ? 'active' : ''}`}
+                onClick={() => setOpenConsole(consoleOpen ? null : dir)}
+                title="Console"
+              >
+                <MdTerminal size={14} />
+                <span>Console</span>
+              </button>
+              <button
+                className={`btn-action btn-action-files ${filesOpen ? 'active' : ''}`}
+                onClick={() => setFilesOpen(o => !o)}
+                title="Browse files"
+              >
+                <MdFolderOpen size={14} />
+                <span>Files</span>
+              </button>
+            </div>
+            <div className="dir-card-actions-row">
+              <button
+                className="btn-action btn-action-debug"
+                onClick={() => folderInputRef.current?.click()}
+                title="Import folder into workspace"
+              >
+                <MdUploadFile size={14} />
+                <span>Import</span>
+              </button>
+              <input
+                ref={folderInputRef}
+                type="file"
+                multiple
+                webkitdirectory=""
+                directory=""
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  if (e.target.files?.length) {
+                    onImportFiles(dir, Array.from(e.target.files));
+                    e.target.value = '';
+                  }
+                }}
+              />
+              <button
+                className="btn-action btn-action-danger btn-icon-only"
+                onClick={() => onDelete(dir)}
+                title="Remove"
+              >
+                <MdDeleteOutline size={16} />
+              </button>
+            </div>
           </div>
 
         </div>
       </BorderGlow>
+      {filesOpen && <WorkspaceFiles dir={dir} />}
     </Reorder.Item>
   );
 }

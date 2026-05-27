@@ -401,6 +401,9 @@ async def register(data: dict = Body(...)):
         raise HTTPException(409, "Email already registered")
     hashed = auth.hash_password(password)
     user_id = db.create_user(username, email, hashed)
+    db.create_default_workspaces(user_id, username, WORKSPACES_ROOT)
+    for wd in db.list_watched_directories(user_id=user_id):
+        watcher_service.start_watching(wd["id"], wd["path"], wd["name"])
     token = auth.create_access_token(user_id, username)
     return {"access_token": token, "token_type": "bearer", "user_id": user_id, "username": username}
 
@@ -600,6 +603,29 @@ async def update_watched_directory(dir_id: str, data: dict = Body(...), current_
             watcher_service.stop_watching(dir_id)
     wd["watching"] = watcher_service.is_watching(dir_id)
     return wd
+
+
+@app.get("/api/watched-directories/{dir_id}/files", tags=["system"], summary="List files inside a workspace directory")
+async def list_workspace_files(dir_id: str, current_user: dict = Depends(get_current_user)):
+    wd = db.get_watched_directory(dir_id)
+    if not wd or wd.get("user_id") != current_user["user_id"]:
+        raise HTTPException(status_code=404, detail="Not found")
+    workspace_path = wd.get("workspace_path")
+    if not workspace_path or not os.path.isdir(workspace_path):
+        return []
+    result = []
+    for root, dirs, files in os.walk(workspace_path):
+        dirs.sort()
+        rel_folder = os.path.relpath(root, workspace_path)
+        rel_folder = "" if rel_folder == "." else rel_folder
+        for filename in sorted(files):
+            full_path = os.path.join(root, filename)
+            try:
+                size = os.path.getsize(full_path)
+            except OSError:
+                size = 0
+            result.append({"folder": rel_folder, "name": filename, "size": size})
+    return result
 
 
 @app.delete("/api/watched-directories/{dir_id}", tags=["system"], summary="Remove a watched directory")

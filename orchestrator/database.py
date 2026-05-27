@@ -534,6 +534,38 @@ def create_watched_directory(name: str, path: str, custom_prompt: Optional[str] 
     return dir_id
 
 
+def create_default_workspaces(user_id: str, username: str, workspaces_root: str) -> None:
+    """Create the ROI and CELLPOSE sample workspaces for a newly registered user."""
+    cellpose_workspace = os.path.join(workspaces_root, username, "cellpose")
+    cellpose_incoming = os.path.join(cellpose_workspace, "incoming")
+    os.makedirs(cellpose_incoming, exist_ok=True)
+    create_watched_directory(
+        name="CELLPOSE",
+        path=cellpose_incoming,
+        workspace_path=cellpose_workspace,
+        custom_prompt="Do nothing, just a placeholder for images.",
+        user_id=user_id,
+    )
+
+    roi_workspace = os.path.join(workspaces_root, username, "roi")
+    roi_incoming = os.path.join(roi_workspace, "incoming")
+    os.makedirs(roi_incoming, exist_ok=True)
+    roi_prompt = (
+        f"When a new file arrives, check whether it is a pathology ROI image. "
+        f"If it is, run Cellpose cell segmentation and count the cells. "
+        f"If the cell count exceeds 2000, copy the segmentation mask to the output folder at "
+        f"{cellpose_workspace} and log the result. "
+        f"If the file is not a valid ROI image, move it to the uncertain folder."
+    )
+    create_watched_directory(
+        name="ROI",
+        path=roi_incoming,
+        workspace_path=roi_workspace,
+        custom_prompt=roi_prompt,
+        user_id=user_id,
+    )
+
+
 def list_watched_directories(user_id: Optional[str] = None) -> List[Dict]:
     """List watched directories, filtered by user_id when provided."""
     conn = _get_conn()

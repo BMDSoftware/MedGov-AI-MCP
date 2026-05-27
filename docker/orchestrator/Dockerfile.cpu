@@ -68,8 +68,12 @@ COPY orchestrator/ orchestrator/
 # mcp-config.json is gitignored (machine-specific); use the example as the in-image default
 RUN cp orchestrator/mcp-config.json.example orchestrator/mcp-config.json
 
+COPY docker/orchestrator/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 ENV APP_ROOT=/app
 
 EXPOSE 5001
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["orchestrator/venv/bin/python", "orchestrator/backend.py"]

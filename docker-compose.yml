@@ -10,6 +10,7 @@ services:
       - ./orchestrator/logs:/app/orchestrator/logs         # agent debug logs persist
       - ./mcp-monai/bundles:/app/mcp-monai/bundles         # model bundles persist
       - ./orchestrator/workspaces:/app/workspaces            # analysis results (read-write)
+      - sample_data:/app/orchestrator/sample_data/exams    # TCIA sample CT data persist
       # User filesystem: mounted read-only so the workspace directory picker
       # can browse the user's files but the orchestrator cannot modify them.
       # /Users for macOS, /home for Linux.
@@ -37,3 +38,6 @@ services:
     depends_on:
       orchestrator:
         condition: service_healthy
+
+volumes:
+  sample_data:

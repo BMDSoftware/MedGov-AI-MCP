@@ -319,18 +319,23 @@ function App() {
     textareaRef.current?.focus();
   };
 
+  const triggerReportButton = () => {
+    const prompt = pendingReportRef.current;
+    if (!prompt) return;
+    pendingReportRef.current = null;
+    setPendingReportPrompt(null);
+    addMessage({
+      type: 'bot',
+      content: 'Background task completed. Ready to generate the report.',
+      actions: [{ id: 'send_report', label: 'Generate Report', query: prompt }]
+    });
+  };
+
   useEffect(() => {
     if (!taskRefreshSignal) return;
     if (taskRefreshSignal.type === 'task_done') {
       if (pendingReportRef.current) {
-        const prompt = pendingReportRef.current;
-        pendingReportRef.current = null;
-        setPendingReportPrompt(null);
-        addMessage({
-          type: 'bot',
-          content: 'Background task completed. Ready to generate the report.',
-          actions: [{ id: 'send_report', label: 'Generate Report', query: prompt }]
-        });
+        triggerReportButton();
       } else if (reportPromptSentRef.current) {
         reportPromptSentRef.current = false;
         setActiveUseCase(null);
@@ -340,6 +345,27 @@ function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskRefreshSignal]);
+
+  // Polling fallback: when waiting for a background task, poll /api/tasks so
+  // the Generate Report button appears even when the SSE connection is unreliable.
+  useEffect(() => {
+    if (!pendingReportPrompt || !currentSessionId || !authToken) return;
+
+    const poll = () => {
+      if (!pendingReportRef.current) return; // SSE already handled it
+      apiFetch(getApiUrl(`/api/tasks?session_id=${currentSessionId}`))
+        .then(r => r.json())
+        .then(d => {
+          const hasDone = (d.tasks || []).some(t => t.status === 'done');
+          if (hasDone) triggerReportButton();
+        })
+        .catch(() => {});
+    };
+
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingReportPrompt, currentSessionId, authToken]);
 
 
   const handleDrag = (e) => {

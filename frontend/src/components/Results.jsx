@@ -106,6 +106,7 @@ function Results({ refreshSignal, currentSessionId }) {
           <option value="cellpose">Cellpose</option>
           <option value="report">Report</option>
           <option value="markdown_report">File Reports</option>
+          <option value="fhir">FHIR</option>
         </select>
         <select
           className="filter-select"
@@ -368,6 +369,44 @@ function TaskResult({ task }) {
 
   if (task.task_type === 'markdown_report') {
     return <MarkdownReportResult result={result} />;
+  }
+
+  if (task.task_type === 'fhir') {
+    const { resource_type, resource_id, fhir_url, created_at } = result || {};
+    const patientUrl = resource_type === 'Observation' && result?.subject_ref
+      ? `https://hapi.fhir.org/baseR4/${result.subject_ref}`
+      : null;
+    return (
+      <div className="task-result-report">
+        <div className="report-template-header">
+          <span className="report-template-title">FHIR {resource_type} - {resource_id}</span>
+        </div>
+        <div className="markdown-report-body" style={{ padding: '8px 0' }}>
+          <p style={{ margin: '4px 0' }}>
+            <strong>Resource:</strong> {resource_type}/{resource_id}
+          </p>
+          {created_at && (
+            <p style={{ margin: '4px 0', fontSize: '0.8rem', color: 'var(--text-bright)' }}>
+              Created: {new Date(created_at).toLocaleString()}
+            </p>
+          )}
+          {fhir_url && (
+            <p style={{ margin: '8px 0 4px' }}>
+              <a href={fhir_url} target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>
+                View {resource_type} on HAPI FHIR
+              </a>
+            </p>
+          )}
+          {patientUrl && (
+            <p style={{ margin: '4px 0' }}>
+              <a href={patientUrl} target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>
+                View linked Patient on HAPI FHIR
+              </a>
+            </p>
+          )}
+        </div>
+      </div>
+    );
   }
 
   // Generic fallback

@@ -14,6 +14,7 @@ from .builtin_tools import (
     handle_inference_as_task,
     save_radlex_report,
     save_markdown_report,
+    save_fhir_record,
 )
 
 
@@ -641,6 +642,7 @@ class ExecutionMixin:
 
                 save_radlex_report(session_id, tool_name, result, arguments)
                 save_markdown_report(session_id, tool_name, arguments)
+                save_fhir_record(session_id, tool_name, result, arguments)
                 turn_results.append((tool_name, result))
 
             elif result and is_error:

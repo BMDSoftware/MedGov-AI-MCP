@@ -265,17 +265,6 @@ async def _watcher_execute(dir_id: str, files: list):
             "Do NOT call analyze_image or run_inference. Classification and organization is the only goal."
         )
 
-    # Snapshot other workspaces so we can detect cross-workspace file moves after the AI runs
-    other_wds = [
-        w for w in db.list_watched_directories_all()
-        if w["id"] != dir_id and w.get("enabled") and w.get("workspace_path")
-        and os.path.isdir(w["workspace_path"])
-    ]
-    snapshots = {
-        w["id"]: {str(p) for p in Path(w["workspace_path"]).rglob("*") if p.is_file()}
-        for w in other_wds
-    }
-
     watcher_service.push_console(dir_id, "[AI] Starting autonomous analysis...")
     agent.set_agent_type(True)
     original_require_confirmation = agent.require_confirmation
@@ -290,6 +279,10 @@ async def _watcher_execute(dir_id: str, files: list):
     # agent can't act on results (e.g. routing by cell count). Force direct tool calls.
     agent.agent_tools.discard("queue_task")
     agent._refresh_agent_components()
+    # Isolate session context: each workspace trigger runs with a clean context
+    # so tool history from other workspaces or chat doesn't inflate the prompt.
+    saved_context_entries = list(agent.session_context.entries)
+    agent.session_context.clear()
     try:
         # Do NOT pass fileList — workspace files are text/DICOM, not vision inputs.
         # The agent must use read_file / parse_dicom tools via the paths in the goal prompt.
@@ -307,17 +300,10 @@ async def _watcher_execute(dir_id: str, files: list):
         agent.require_confirmation = original_require_confirmation
         agent.agent_tools = original_agent_tools
         agent._refresh_agent_components()
+        agent.session_context.entries = saved_context_entries
     if result and result.get("answer"):
         watcher_service.push_console(dir_id, f"[AI] {result['answer']}")
     watcher_service.push_console(dir_id, "[AI] Analysis complete.")
-
-    # Trigger any workspace that received new files as a result of this task
-    for w in other_wds:
-        current = {str(p) for p in Path(w["workspace_path"]).rglob("*") if p.is_file()}
-        new_files = sorted(current - snapshots.get(w["id"], set()))
-        if new_files:
-            watcher_service.push_console(w["id"], f"[INFO] {len(new_files)} file(s) received from '{wd['name']}', triggering AI...")
-            asyncio.create_task(_watcher_execute(w["id"], new_files))
 
 
 @asynccontextmanager

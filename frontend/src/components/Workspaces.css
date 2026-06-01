@@ -367,6 +367,8 @@
   margin-top: 6px;
   padding: 10px 14px 12px;
   font-size: 0.78rem;
+  max-height: 320px;
+  overflow-y: auto;
 }
 .ws-files-header {
   display: flex;

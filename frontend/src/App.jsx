@@ -79,7 +79,7 @@ function App() {
   const [taskRefreshSignal, setTaskRefreshSignal] = useState(null);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
   const [unreadTaskCount, setUnreadTaskCount] = useState(0);
-  const [appMode, setAppMode] = useState('debug'); // 'normal' | 'debug'
+  const [appMode, setAppMode] = useState('normal'); // 'normal' | 'debug'
   const [pendingReportPrompt, setPendingReportPrompt] = useState(null);
   const pendingReportRef = useRef(null);
   const selectedUseCaseRef = useRef(null);

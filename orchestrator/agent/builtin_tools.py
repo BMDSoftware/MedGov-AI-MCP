@@ -221,3 +221,26 @@ def save_radlex_report(session_id: Optional[str], tool_name: str, result: Any, a
     rtid = db.create_task(session_id, "report", "Radlex Template Report", arguments)
     db.update_task(rtid, "done", result=report_wrap)
     print(f"[agent] Saved radlex report to DB as task {rtid[:8]}")
+
+
+def save_fhir_record(session_id: Optional[str], tool_name: str, result: Any, arguments: Dict) -> None:
+    """Persist a FHIR create result to the DB so it appears in the Results tab."""
+    if not session_id or not tool_name.startswith("fhir."):
+        return
+    if not isinstance(result, dict):
+        return
+    resource_type = result.get("resourceType")
+    resource_id = result.get("id")
+    if not resource_type or not resource_id or resource_type in ("Bundle", "OperationOutcome"):
+        return
+    fhir_base = "https://hapi.fhir.org/baseR4"
+    subject_ref = result.get("subject", {}).get("reference") if isinstance(result.get("subject"), dict) else None
+    tid = db.create_task(session_id, "fhir", f"FHIR {resource_type} created", arguments)
+    db.update_task(tid, "done", result={
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "fhir_url": f"{fhir_base}/{resource_type}/{resource_id}",
+        "subject_ref": subject_ref,
+        "created_at": datetime.now().isoformat(),
+    })
+    print(f"[agent] Saved FHIR {resource_type}/{resource_id} to DB as task {tid[:8]}")

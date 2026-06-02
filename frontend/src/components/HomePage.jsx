@@ -8,7 +8,7 @@ const FEATURES = [
   {
     page: 'analysis',
     title: 'Analysis',
-    desc: 'Chat with the AI agent to upload scans, extract metadata, and orchestrate inference workflows.',
+    desc: 'Chat with the AI agent to connect health data sources, run specialized tools, and orchestrate end-to-end clinical workflows.',
     iconBg: 'rgba(99,102,241,0.15)',
     iconColor: '#818cf8',
     icon: (
@@ -20,7 +20,7 @@ const FEATURES = [
   {
     page: 'workspaces',
     title: 'Workspaces',
-    desc: 'Watch directories for new DICOM files and trigger automatic AI analysis pipelines.',
+    desc: 'Monitor health data sources and automatically trigger AI-powered clinical analysis pipelines.',
     iconBg: 'rgba(245,158,11,0.15)',
     iconColor: '#fbbf24',
     icon: (
@@ -114,12 +114,12 @@ function HomePage({ onNavigate, onSignIn, onSignOut, currentSessionId, runningTa
       <section className="home-hero">
         <div className="home-hero-inner">
           <h1 className="home-hero-title">
-            AI-Powered Medical<br />
-            <span className="home-hero-title-accent">Imaging Analysis</span>
+            Agentic Health<br />
+            <span className="home-hero-title-accent">Integrator</span>
           </h1>
 
           <p className="home-hero-subtitle">
-            Upload DICOM scans, run MONAI segmentation and Cellpose cell detection models, and generate structured clinical reports — all through a conversational AI agent.
+            Connect health data sources, automate clinical workflows, and coordinate specialized health tools — all orchestrated through an AI agent designed for healthcare professionals.
           </p>
 
 </div>

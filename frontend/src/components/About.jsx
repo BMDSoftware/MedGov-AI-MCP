@@ -18,10 +18,10 @@ function About({ onNavigate }) {
         <div className="about-hero">
           <h1 className="about-title">About MedGov-AI</h1>
           <p className="about-lead">
-            MedGov-AI is a platform designed to help clinical professionals optimize their work through AI-powered automation.
-            It serves as a tool for research, organization, and clinical workflow automation, connecting a reasoning AI agent
-            to medical tools so that routine analysis tasks can be handled autonomously, freeing clinicians to focus
-            on complex cases and direct patient care.
+            MedGov-AI is an agentic health integrator designed to help clinical professionals connect health data sources
+            and automate complex workflows through AI. It acts as an intelligent orchestrator that integrates specialized
+            health tools — from imaging analysis to terminology services and structured reporting — so that routine tasks
+            are handled autonomously, freeing clinicians to focus on complex cases and direct patient care.
           </p>
         </div>
 

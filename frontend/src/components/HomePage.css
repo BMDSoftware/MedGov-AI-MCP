@@ -586,6 +586,14 @@
   color: var(--text-muted, #63637a);
 }
 
+.home-footer-ack-sep {
+  width: 1px;
+  height: 32px;
+  background: var(--border, rgba(255,255,255,0.15));
+  flex-shrink: 0;
+  margin: 0 12px;
+}
+
 .home-footer-settings {
   background: transparent;
   border: none;

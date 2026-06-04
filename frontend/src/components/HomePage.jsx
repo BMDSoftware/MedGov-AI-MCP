@@ -159,11 +159,15 @@ function HomePage({ onNavigate, onSignIn, onSignOut, currentSessionId, runningTa
           <img
             src="https://www.healthfromportugal.pt/static/site/images/sponsors/footer-hfp.svg"
             alt="Health from Portugal"
-            className="home-footer-ack-logo"
+            className="home-footer-ack-logo home-footer-ack-logo-hfp"
           />
           <span className="home-footer-ack-text">
             Supported by Health from Portugal - PRR grant No C644937233-00000047
           </span>
+          <span className="home-footer-ack-sep" />
+          <img src="Marca-UA-Complementar-PRETO.png" alt="Universidade de Aveiro" className="home-footer-ack-logo home-footer-logo-ua" style={{height: '42px', width: 'auto'}} />
+          <img src="https://www.ieeta.pt/wp-content/uploads/2022/10/cropped-logo-ieeta-wordpress2-1.png" alt="IEETA" className="home-footer-ack-logo home-footer-logo-ieeta" style={{height: '28px', width: 'auto'}}/>
+          <img src="https://www.bmd-software.com/wp-content/themes/pursuit/assets/images/logo.svg" alt="BMD Software" className="home-footer-ack-logo home-footer-logo-bmd" style={{height: '22px', width: 'auto'}} />
         </div>
         <button className="home-footer-settings" onClick={() => onNavigate('settings')}>
           Settings

@@ -1,5 +1,18 @@
 \documentclass[preprint,12pt]{elsarticle}
 
+% Targets:
+% Journal of Biomedical Informatics
+% https://www.sciencedirect.com/journal/journal-of-biomedical-informatics
+% Template Elsevier
+%
+% Computer methods and programs in biomedicine
+% https://www.sciencedirect.com/journal/computer-methods-and-programs-in-biomedicine/publish/guide-for-authors
+% Template Elsevier
+%
+% Journal of imaging informatics in medicine
+% https://link.springer.com/journal/10278?srsltid=AfmBOoqkNdro6peThRxWn-1_kONFEDiY9bBHsKL5oLpz_fz5-N8aJ3Zu
+% Template Springer
+
 \usepackage[utf8]{inputenc}
 \usepackage{graphicx}
 \usepackage{hyperref}
@@ -16,8 +29,13 @@
 \title{MedGov-AI: An MCP-Based Agentic Framework for Clinical AI Integration and Medical Assistance}
 
 % TODO: add author names, affiliations, and emails
-\author{Author Name}
-\address{Institution, City, Country}
+\author[1]{Gabriel Santos}
+\author[1]{Henrique Ferreira}
+\author[2]{Martinho Tavares}
+\author[2]{Luis Basti\~ao Silva}
+\author[1]{José Luis Oliveira}
+\address[1]{University of Aveiro, Aveiro, Portugal}
+\address[2]{BMD Software, Ílhavo, Portugal}
 
 \begin{abstract}
 Clinical AI tools for medical imaging are increasingly capable but remain largely isolated from one another, requiring custom integration work that slows adoption and creates fragmented, difficult-to-maintain deployments. This paper presents MedGov-AI, an agentic AI system that addresses the integration and orchestration problem directly by using the Model Context Protocol (MCP) as a standardized interoperability layer. Rather than hardcoding workflow logic, MedGov-AI uses a large language model as an autonomous orchestrator that discovers and invokes clinical tools at runtime through a set of MCP servers covering DICOM parsing, CT segmentation (MONAI), whole-slide image cell segmentation (Cellpose), radiology report generation via the RadLex ontology, and digital pathology (iPath). Domain-specific workflow governance is provided through skill files, plain-text protocol documents that encode step-by-step clinical sequences and guard conditions without retraining the model. The system supports both interactive and event-driven operation: in workspace monitoring mode, files deposited into a configured directory trigger autonomous agent execution without any user input. Three end-to-end use cases were evaluated: DICOM-based CT analysis with structured report generation; interactive whole-slide pathology tumor detection via iPath with cell segmentation and structured pathology reporting; and autonomous workspace monitoring with Cellpose cell segmentation and cross-workspace file routing. Results show that API-hosted large language models complete multi-step clinical workflows reliably within a bounded iteration budget, while locally-hosted 7-8B parameter models do not, revealing a current tension between privacy and reliability in clinical deployment. Skill-guided execution prevented domain-incorrect tool selection in the pathology use case, confirming that skills are necessary at decision forks where plausible but clinically incorrect options exist. Assisted and autonomous modes produced identical tool sequences. Six MCP servers were integrated without any agent-side connector code, supporting the argument that MCP can reduce the integration overhead that currently limits clinical AI adoption. The system is publicly available at \url{https://medgovai.bmd-software.com/}.

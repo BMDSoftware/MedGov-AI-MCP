@@ -1,68 +1,146 @@
-[tools Documentation]
-
-# MCP Tools Documentation
+# Tools Reference
 
 ## Overview
 
-The agent interacts with various Model Context Protocol (MCP) servers to perform specialized tasks. Each MCP server provides specific capabilities that the agent can leverage to achieve its goals. The MCPs are designed to be modular and extensible, allowing for easy addition of new capabilities as needed.
+The agent interacts with specialized MCP (Model Context Protocol) servers over stdio or HTTP. Each server exposes a set of tools the agent can invoke. In addition to MCP tools, several built-in tools are always available directly to the agent.
 
-## Available MCPs
+Tool names are prefixed with the server name at runtime (e.g., `monai.run_inference`, `utils.write_file`).
 
-- **MCP Skills**: Provides access to agent skills that the agent can invoke as needed (e.g., text processing, workflow automation).
-- **MCP Monai**: Handles medical image analysis tasks, such as segmentation and detection, using MONAI models.
-- **MCP Utils**: Offers utility functions and services, such as DICOM parsing and data preprocessing, to support other MCPs and agent workflows.
-- **MCP Radlex**: Provides medical terminology and ontology services, such as filling structured report templates using RadLex terms.
+---
 
-## MCP Tools
+## MCP Servers
 
-### MCP MONAI
+### mcp-monai
 
-The MCP MONAI server provides a set of tools for medical image analysis using MONAI pre-trained models. The available tools include:
+Medical image analysis using MONAI pre-trained model bundles. Supports volumetric segmentation (CT, MRI) and detection tasks. GPU recommended; CPU fallback is automatic.
 
-- `get_monai_info()`: Returns MONAI and PyTorch version info, CUDA/GPU details, bundle directory, and loaded models.
-- `analyze_image(path: str)`: Analyzes a medical image to detect its type, modality, and characteristics. Returns metadata, statistics, and recommended models for the image.
-- `list_models(category=None, modality=None, body_part=None)`: Lists available pre-trained models from the MONAI Model Zoo, with optional filters for category, modality, or body part.
-- `download_model(model_name: str)`: Downloads a pre-trained model bundle from the MONAI Model Zoo. Must be called before running inference if the model is not already downloaded.
-- `run_inference(image_path: str, model_name: str)`: Runs real inference on a medical image using a selected MONAI pre-trained model. Handles 2D/3D images, performs preprocessing, and returns segmentation/detection results.
+| Tool | Description |
+|---|---|
+| `get_monai_info()` | Returns MONAI and PyTorch version, CUDA availability, GPU details, and loaded models |
+| `analyze_image(image_path)` | Detects image type, modality, and dimensions; recommends suitable models |
+| `list_models(category?, modality?, body_part?)` | Lists available MONAI Model Zoo bundles with optional filters |
+| `download_model(model_name)` | Downloads a model bundle from the MONAI Model Zoo |
+| `run_inference(image_path, model_name)` | Runs inference on a medical image; returns segmentation or detection results |
+| `list_transforms(category?)` | Lists available MONAI preprocessing transforms |
 
-### MCP Skills
+---
 
-The MCP Skills server provides a variety of skills that the agent can invoke to perform tasks such as text processing, workflow automation, and more. It has the following tools:
+### mcp-radlex
 
-- `list_skills()`: Lists all available skills with their descriptions and parameters.
-- `read_skill_file(skill_name: str)`: Reads the content of the `SKILL.md`file
-- `execute_script(skill_name: str, command: str)`: Executes the script associated with a skill, passing any required parameters.
-- `read_references(skill_name: str, file_path: str)`: Reads reference files associated with a skill, which can be used to provide additional context or information for the skill execution.
-- `read_asset(skill_name: str, asset_path: str)`: Reads asset files associated with a skill, which can include images, templates, or other resources needed for the skill execution.
+Structured radiology report generation using RSNA RadReport templates. Uses MCP sampling to call the LLM for narrative generation.
 
-### MCP Utils
+| Tool | Description |
+|---|---|
+| `list_subspecialties()` | Returns valid radiology specialty codes (NR, CH, CA, etc.) |
+| `find_templates(query?, specialty_code?)` | Searches RadReport templates by keyword or specialty |
+| `generate_radiology_report(template_id, output_path, findings?, inference_results?, patient_context?, specialty?)` | Fills a RadReport template via LLM sampling; saves HTML report to disk |
 
-The MCP Utils server provides utility functions and services that support other MCPs and agent workflows. The available tools include:
+`specialty` options: `general`, `oncology`, `cardiology`, `emergency`, `neuroradiology`, `musculoskeletal`.
 
-- `parse_dicom(file_path: str)`: Parses a DICOM file and extracts relevant metadata and image data.
-- `parse_dicom_directory(directory_path: str)`: Parses a directory of DICOM files, extracting metadata and image data for each file.
+---
 
-### MCP Radlex
+### mcp-cellpose
 
-The MCP Radlex server provides medical terminology and ontology services, such as filling structured report templates using RadLex terms. The available tools include:
+Cell and nucleus segmentation for 2D/3D microscopy images using Cellpose v4 (cpsam/SAM models). GPU is auto-detected; falls back to CPU if unavailable.
 
-- `list_subspecialties()`: Lists all available subspecialties in the RadLex ontology.
-- `find_templates(query: str, specialty_code: str)`: Finds structured report templates based on a query and specialty code. 
-- `get_template_schema(template_id: str)`: Retrieves the schema for a specific structured report template, including required fields and their types.
-- `generate_report(template_id: str, findings: Dict, report_title: str)`: Generates a structured report based on a template and provided findings, returning the filled report in a structured format.
+| Tool | Description |
+|---|---|
+| `segment_cells_2d(image_path, model_type?, diameter?, ...)` | Segments cells in a 2D microscopy image |
+| `segment_cells_3d(image_path, model_type?, ...)` | Segments cells in a 3D volumetric image |
+| `segment_cells_batch(input_dir, output_dir, ...)` | Batch segmentation across multiple images |
+| `denoise_image(image_path, ...)` | Denoises a microscopy image using Cellpose restoration models |
+| `deblur_image(image_path, ...)` | Deblurs a microscopy image |
+| `upsample_image(image_path, ...)` | Upsamples a low-resolution microscopy image |
+| `restore_and_segment(image_path, ...)` | Restores and then segments in one pass |
+| `train_segmentation_model(...)` | Fine-tunes a Cellpose model on custom data |
+| `list_available_models()` | Lists all available Cellpose model types |
+| `estimate_cell_diameter(image_path, ...)` | Estimates the typical cell diameter in an image |
+| `save_masks(masks, output_path, ...)` | Saves segmentation masks to disk |
+| `load_image_info(image_path)` | Returns image shape, dtype, and channel count |
+| `save_overlay(image_path, masks_path, output_path, ...)` | Renders a visual overlay of masks on the source image |
 
-## Built In Tools
+Default `model_type` is `cpsam` (Cellpose SAM). Other options: `cyto`, `cyto2`, `cyto3`, `nuclei`.
 
-In addition to the MCP tools, there are also built-in tools that the agent can use for file management and other basic operations. These include:
+---
 
-### Background Task Management (Built-in Tools)
+### mcp-ipath
 
-The following built-in tools are available for managing long-running or background operations, such as MONAI inference or report generation:
+Whole-slide image (WSI) retrieval from the iPath telepathology platform (Dicoogle/DICOMweb).
 
-- `queue_task`: Queue a long-running operation as a background task. Use this instead of calling a tool directly whenever the operation may take more than a few seconds (e.g., MONAI inference, report generation, bulk analysis). The function returns immediately so you can keep talking to the user. The user will receive a notification when the task finishes.
-  - **Parameters:**
-    - `task_type` (string): Category of the task. Use 'inference' for MONAI model runs, 'report' for report generation, or any descriptive string for other tasks.
-    - `description` (string): Human-readable label shown in the Results tab, e.g. 'WholeBody segmentation on PANCREAS_0001'.
-    - `input_data` (object): Task-specific inputs as a JSON object. For 'inference': {image_path, model_name}. For 'report': {task_ids, patient_context}.
+| Tool | Description |
+|---|---|
+| `fetch_thumbnail(slide_uid, output_path, width?, height?)` | Downloads a scaled thumbnail of a whole-slide image |
+| `get_slide_dimensions(slide_uid)` | Returns the full pixel dimensions of a whole-slide image |
+| `scale_roi_to_slide(thumb_x, thumb_y, thumb_w, thumb_h, thumb_img_w, thumb_img_h, slide_w, slide_h)` | Scales a bounding box from thumbnail to full-slide coordinates. **Max 30px for thumb_w and thumb_h.** |
+| `fetch_roi(slide_uid, x, y, width, height, output_path)` | Fetches a high-resolution ROI from a whole-slide image. Width and height are capped at 2700px. |
+| `get_series_instances(series_uid)` | Lists all pyramid-level instances in a WSI series |
+| `fetch_dicom_instance(study_uid, series_uid, instance_uid, output_path)` | Downloads a DICOM instance file from the DICOMweb server |
 
-- `list_tasks`: List all background tasks for the current session and their status. Use this when the user asks whether their inference or report tasks have finished, or to check how many tasks are still running.
+---
+
+### mcp-utils
+
+General-purpose file and DICOM utilities.
+
+| Tool | Description |
+|---|---|
+| `parse_dicom(file_path)` | Parses a DICOM file and extracts metadata (modality, body part, dimensions, patient info) |
+| `parse_dicom_directory(dir_path)` | Parses all DICOM files in a directory, grouped by series |
+| `create_directory(path)` | Creates a directory and any missing parent directories |
+| `move_file(src, dst)` | Moves a file or directory |
+| `copy_file(src, dst)` | Copies a file |
+| `delete_file(path)` | Deletes a file (not directories) |
+| `write_file(path, content)` | Writes text content to a file, creating parent directories if needed |
+| `read_file(path)` | Reads text content from a file |
+| `write_json(path, data)` | Writes a JSON object to a file |
+| `list_directory(path)` | Lists files and subdirectories with name, type, size, and modification time |
+| `get_file_metadata(path)` | Returns size, creation/modification time, and extension for a file or directory |
+| `find_files(directory, pattern, recursive?)` | Finds files matching a glob pattern within a directory |
+
+---
+
+### mcp-skills
+
+Loads and executes skill workflows from the `orchestrator/skills/` directory. See [skills.md](skills.md) for the skill format and available skills.
+
+| Tool | Description |
+|---|---|
+| `read_skill_file(skill_name)` | Reads the `SKILL.md` for a skill; returns the workflow instructions |
+| `read_references(skill_name, file_path)` | Reads a reference file from the skill's `references/` directory |
+| `execute_script(skill_name, command)` | Executes a command within the skill's directory (5-minute timeout) |
+| `read_asset(skill_name, asset_path)` | Reads a static asset (template, data file) from the skill's `assets/` directory |
+
+---
+
+### fhir (optional)
+
+Connects to a FHIR R4 server over HTTP MCP. Used to write clinical findings as structured FHIR resources. This server is optional and can be added via the UI Settings page without restarting the backend.
+
+Default URL: `http://localhost:8000/mcp`
+
+Typical usage: create an anonymous `Patient` resource, then create a linked `Observation` recording a clinical finding.
+
+---
+
+## Built-in Tools
+
+These tools are always available to the agent regardless of which MCP servers are connected.
+
+### Task Management
+
+| Tool | Description |
+|---|---|
+| `queue_task(task_type, description, input_data)` | Queues a long-running operation as a background task and returns immediately. Use for MONAI inference (`task_type: "inference"`) or report generation (`task_type: "report"`). The user is notified when the task finishes. |
+| `list_tasks()` | Lists all background tasks for the current session and their status (`queued`, `running`, `completed`, `failed`) |
+| `goal_achieved(summary)` | Signals that the agent has completed its goal. Terminates the execution loop and returns the summary to the user. |
+
+### Short-Term Memory (stateless mode only)
+
+These tools are only available when the backend is configured in stateless LLM mode (`/api/llm-mode`). In the default stateful mode they are not present.
+
+| Tool | Description |
+|---|---|
+| `update_agent_notes(key, value)` | Persists a key/value fact across iterations (e.g., a file path, a count, a constraint discovered during execution) |
+| `set_next_objective(objective)` | Declares the agent's next working step, included in the prompt context on the following iteration |
+
+> **Note:** Stateless mode with STM is functional but experimental. The default stateful mode produces better results for most workflows.

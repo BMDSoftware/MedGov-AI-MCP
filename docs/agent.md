@@ -1,222 +1,175 @@
-[Agent Documentation]
+# Agent
 
-## Purpose & Role
+## Purpose
 
-The agent is an orchestrator agent, with the LLM (more precisely gemini), acting as the core orchestrator responsible for executing tasks, making decisions, and using tools. It acts autonomously or collaboratively, depending on the selected mode.
+The agent is the core orchestrator of MedGov-AI. It uses an LLM (Gemini or Ollama) as its reasoning engine, deciding which tools to call and in what order to fulfil a clinical goal. It does not spawn sub-agents — all decisions are made by a single `AgenticAgent` instance.
 
-## Agent Architecture
+---
 
-![Agent Architecture](assets/agent-architecture.png)
+## Architecture
 
-### Overview
+![Agent Architecture](images/AgenticArchitecture.png)
 
-The agent architecture is designed for modularity, extensibility, and robust orchestration of tasks using an LLM at its core. The main components and their interactions are as follows:
+The agent is composed of focused mixins assembled into a single class in [`orchestrator/agent/core.py`](../orchestrator/agent/core.py):
 
-#### 1. AgenticAgent
+| Mixin | Responsibility |
+|---|---|
+| `ToolManagementMixin` | Dynamic tool discovery and enable/disable |
+| `SessionMixin` | Patient context and session persistence |
+| `SkillsMixin` | Skill metadata loading at startup |
+| `ConfirmationMixin` | User approval flow in debug mode |
+| `ExecutionMixin` | Core agentic loop (`execute_task`) |
+| `ResultFormattingMixin` | Human-readable response formatting |
+| `STMMixin` | Short-term memory state for stateless LLM mode |
 
-The [AgenticAgent](../orchestrator/agentic_agent.py) is the central controller. It is responsible for:
+---
 
-- Managing the agent workflow and iterative decision-making loop.
-- Registering and selecting tools dynamically.
-- Maintaining session context and history for continuity.
-- Interfacing with the LLM (Large Language Model) for reasoning and orchestration.
-- Communicating with MCPs (Model Context Protocol servers) and the Skills MCP for external capabilities.
+## Agent modes
 
-#### 2. LLM (Large Language Model)
+### Analysis Agent (default)
 
-The current implementation uses the Gemini LLM as the reasoning engine of the agent. It processes the goal and make informed decisions about which tools to use and what actions to take next. The LLM operates in a session mode, retaining access to the full session context across all steps.
+The user sends a natural language query, optionally with uploaded files. The agent selects tools, executes them iteratively, and returns a response. This is the interactive, chatbot-style mode.
 
-#### 3. Tool Registry
+### Autonomous Agent
 
-Tools are registered and discovered dynamically via the [tool_registry.py](../orchestrator/tool_registry.py) module. This allows the agent to flexibly add or remove capabilities without changing core logic. The registry is also responsible for executing tools and maintaining their connections.
+The agent executes a full workflow without user interaction. It can be triggered in two ways: via workspace monitoring when new files arrive in a watched directory, or directly by switching to autonomous mode via the UI or `/api/change-agent-type` and submitting a goal. In both cases the agent selects and executes tools on its own until the goal is achieved.
 
-#### 4. MCPs
+---
 
-The available MCPs are the following:
-- MCP Skills: Provides access to agent skills that the agent can invoke as needed (e.g., text processing, workflow automation).
-- MCP Monai: Handles medical image analysis tasks, such as segmentation and detection, using MONAI models.
-- MCP Utils: Offers utility functions and services, such as DICOM parsing and data preprocessing, to support other MCPs and agent workflows.
-- MCP Radlex: Provides medical terminology and ontology services, such as filling structured report templates using RadLex terms.
+## Execution loop
 
-All tools available are detailed in [Tools](tools.md).
+The agent workflow is an iterative loop, up to 20 iterations by default:
 
-#### 5. Database
-
-The agent uses a SQLite database to store session context, tool call history and files. [TODO]
-
-#### 6. Task Runner
-
-The Task Runner is responsible for managing long-running or background operations, such as MONAI inference or report generation. It ensures that these tasks are executed efficiently and that their results are properly integrated back into the agent's workflow.
-
-There are some hardcoded tasks that go into the task runner, such as MONAI inference and report generation, but the task runner is designed to be extensible to support additional long-running tasks as needed. The agent can also decide to use the task runner for any task that it deems necessary, even if it's not hardcoded, by simply calling the task runner tool and providing the necessary parameters.
-
-## Agent Modes
-
-- Analysis Agent: Acts as a chatbot assistant where the user can ask questions and the agent will use tools to answer them.
-- Autonomous Agent: Receives files/folders as input and performs a series of tasks, the agent will decide which tools to use and in which order, and will perform the tasks without user intervention The goal is predefined and the agent will decide how to achieve it.
-
-## Agent Capabilities
-
-- Tool Usage: Can use registered tools for tasks like image analysis, report generation, data parsing
-- Skill Invocation: Can invoke skills
-
-## Interaction Scenarios
-
-The orchestrator supports three interaction scenarios:
-
-### Scenario 1 — Assisted Analysis
-
-User query + uploaded files → Agent
-
-Input:
-
-- User text
-- Uploaded files
-- System prompt
-
-Output:
-
-- Analysis referencing uploaded data
-
-### Scenario 2 — Autonomous Processing
-
-File/folder submission → Agent
-
-Input:
-
-- File paths
-- Predefined goal
-- System prompt
-
-Output (what should do, now is not functioning correctly, just started working on):
-
-- Analysis results
-- Generated reports
-
-### Scenario 3 — Interactive Analysis
-
-User → Agent query
-
-Input:
-
-- User text
-- Session context
-- System prompt
-
-Output:
-
-- Agent response
-
-## Agent Triggers
-
-The orchestrator activates the agent when one of the following events occurs:
-
-- user query submitted via the interface
-- file or folder upload also via the interface
-
-Currently, external applications cannot trigger the agent through structured events (e.g., notifications from health systems). This may be added in future versions.
-
-## Agent Workflow
-
-The agent workflow is an iterative loop orchestrated by the LLM:
-
-1. A goal is set—either predefined (autonomous mode) or provided by the user (chatbot mode).
-2. The agent sends the goal and the current session context (if in database, see [Session](#session) section) to the LLM, which determines the next action and selects the appropriate tool to use.
-3. The agent executes the tool as instructed by the LLM and collects the result.
-4. The result is returned to the LLM, which evaluates progress toward the goal and decides the next step.
-5. This loop continues until the LLM determines the goal is achieved, at which point the workflow ends.
+1. A goal is set — by the user (analysis mode) or by the workspace watcher (autonomous mode).
+2. The agent sends the goal and session context to the LLM, which selects the next tool to call.
+3. The tool executes via `ToolRegistry` and returns a result.
+4. The result is fed back to the LLM, which evaluates progress and decides the next step.
+5. The loop ends when the agent calls `goal_achieved` or the iteration limit is reached.
 
 ![Agent Workflow](assets/agent-workflow.png)
-## Session
 
-The LLM operates in session mode (statefull mode), maintaining access to the session context across all steps. This means context is preserved between actions—no information is lost, and only the tool result needs to be sent after each step.
+---
 
-**Advantages:**
+## Session and context
 
-- The LLM can make more informed decisions by leveraging the full session history.
-- Conversation flow and context are maintained, improving continuity and accuracy.
+The agent operates in one of two LLM modes:
 
-**Trade-offs:**
+**Stateful (default):** The full conversation history is maintained in the LLM's chat session. Context is preserved automatically across all iterations — no information is lost between tool calls. Token usage grows with session length.
 
-- Retaining all previous interactions can increase token usage and operational costs.
-- Very long sessions may introduce confusion or hallucinations if irrelevant context accumulates.
+**Stateless:** Each LLM call is independent. The agent uses the STM subsystem (see below) to pass state explicitly between iterations via injected prompt context. Stateless mode is only supported with Gemini — Ollama always runs in stateful mode.
 
+When a user returns to a previous session, the history of tool calls and their summarised results is restored from the database. Only summaries are restored, not the raw tool outputs.
 
-## Agent Context
+---
 
-The agent does not maintain persistent memory across sessions, but it does retain session context during an active session. When returning to a previous conversation, only the history of tool calls and their summarized results are restored. This session context is stored in a SQLite database.
+## Short-term memory (STM)
 
-The session context, like explained before, is all in gemini once the session starts, each message sent to gemini will have access to the full session context, which includes all previous information during the session.
+The STM subsystem is used in stateless mode only. It manages an `AgentState` object that is injected into the prompt on each iteration, giving the stateless LLM continuity between calls.
+
+**Files:** `orchestrator/agent/stm/mixin.py`, `manager.py`, `state.py`, `tools.py`
+
+**AgentState structure:**
+- `task` — the original goal
+- `completed_steps` — summaries of steps taken so far
+- `current_objective` — the declared next working step
+- `artifacts` — file paths discovered during execution
+- `important_facts` — key/value facts the agent has persisted
+
+**STM tools** (available only in stateless mode):
+- `update_agent_notes(key, value)` — persists a fact across iterations
+- `set_next_objective(objective)` — declares the next working step
+
+> Stateless mode with STM is functional but experimental. It does not always fulfil the objective — the agent may lose track of progress across iterations. Stateful mode (the default) produces better results for most workflows.
+
+---
+
+## Debug / confirmation mode
+
+When `require_confirmation` is enabled, the agent pauses before executing each tool call and waits for explicit user approval. The pending call is exposed via `/api/pending-tool`; the user confirms via `/api/confirm-tool` or cancels via `/api/deny-tool`.
+
+This mode is useful for auditing the agent's decisions step by step during development or in sensitive clinical workflows.
+
+---
+
+## Database
+
+The agent uses a SQLite database with WAL journaling stored in `orchestrator/data/`.
+
+| Table | Purpose |
+|---|---|
+| `users` | User accounts (username, email, password hash) |
+| `sessions` | Session metadata and patient context |
+| `session_context` | Summarised tool results per session, restored on session reload |
+| `conversation_messages` | Full chat history per session |
+| `uploaded_files` | Files uploaded by users with stored paths and metadata |
+| `background_tasks` | Long-running task queue with status tracking (`queued → running → completed/failed`) |
+| `watched_directories` | Filesystem directories registered for autonomous monitoring |
+| `user_tool_settings` | Per-user tool enable/disable flags |
+
+---
+
+## Watcher service
+
+The watcher service polls registered workspace directories at a fixed interval and triggers the autonomous agent when new files appear. Each watched directory has a configured prompt (the goal) and an output path. When a file arrives, the watcher submits it to the agent exactly as if the user had uploaded it in autonomous mode. Multiple workspaces can run concurrently, each with its own goal and agent instance.
+
+Workspaces are managed via the UI Settings page or the `/api/watched-directories` endpoints.
+
+---
+
+## Tool settings per user
+
+Each user has their own set of enabled/disabled tools, persisted in the `user_tool_settings` table. Disabling a tool removes it from the agent's context entirely — the LLM will not see it and cannot call it. Settings are applied at session start and can be changed via the UI or `/api/enable-tool` / `/api/disable-tool`.
+
+---
+
+## Task runner
+
+Long-running operations (MONAI inference, report generation) are offloaded to a thread pool rather than blocking the API response. The agent calls `queue_task` to submit a job; the task runner executes it in the background and streams progress to the UI via SSE. Maximum concurrent workers is configurable via `TASK_MAX_WORKERS` (default: CPU count + 4, max 32).
+
+---
 
 ## System prompt
 
-The agent uses a system prompt that is defined in [gemini_client.py](../orchestrator/gemini_client.py) to guide the LLM's behavior and decision-making process. The system prompt provides instructions, guidelines, and constraints for how the LLM should operate within the agent's workflow. The system prompt explains the agent's capabilities, the tools available, and how to use them effectively to achieve the goals set by the user or predefined for autonomous operation. Also explains the skill progressive disclosure, so agent knows how to interact with the skills MCP to access the skills when needed.
+The system prompt is defined in [`orchestrator/agent/prompts.py`](../orchestrator/agent/prompts.py). It describes the agent's capabilities, the available tools, how to invoke skills progressively, and the expected output format. Separate prompts are used for analysis and autonomous modes.
 
-For autonomous agent, the system prompt maybe needs changes due to different focus, does not have human in the loop, so it needs to be more focused on how to achieve the goal using the tools and skills available, and less focused on how to interact with the user.
+---
 
-## Tool Registry & Skill Management
+## Extensibility — adding MCP servers
 
-Tools are dynamically registered and discovered via the [tool_registry.py](../orchestrator/tool_registry.py) module.
+New MCP servers can be added via the UI Settings page (no restart required) or by editing `orchestrator/mcp-config.json` and reloading via `/api/refresh-config`.
 
-Skills are access by the skills MCP server.
-
-For details of each MCP, see each MCP README.
-
-## Extensibility (adding MCPS)
-
-The agent is designed to be extensible, allowing new tools and skills to be added with minimal changes to the core logic.
-
-### Adding MCPS
-
-To add a new MCP, the mcp configuration needs to be in the [mcp-config.json](../orchestrator/mcp-config.json) file. After having it configured in the json file. Can be reloaded via interface or by restarting the application the mcp should be available to the agent. The configuration of the mcp should follow this structure:
-
-If the mcp is of type http, it should follow this structure:
-
-```json
-
-{
-  "mcp-name": {
-    "url": "http://mcp-url",
-    "type": "http",
-  }
-}
-```
-
-if the mcp is of type stdio, it should follow this structure:
-
+**stdio server:**
 ```json
 {
-  "mcp-name": {
-    "command": "command to start the mcp",
-    "args": ["arg1", "arg2"],
-    "type": "stdio"
-  }
-}
-```
-
-if the mcp has any env variables, it should follow this structure:
-
-```json
-{
-  "mcp-name": {
-    "url": "http://mcp-url",
-    "type": "http",
-    "env": {
-        "ENV_VAR_NAME": "value"
+  "mcpServers": {
+    "my-server": {
+      "command": "${APP_ROOT}/my-server/venv/bin/python",
+      "args": ["${APP_ROOT}/my-server/server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
     }
   }
 }
 ```
 
+**HTTP server:**
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "transport": "http",
+      "url": "http://localhost:9000/mcp"
+    }
+  }
+}
+```
+
+`${APP_ROOT}` is expanded at runtime from the `APP_ROOT` environment variable.
+
+---
 
 ## Logging
 
-For debugging purposes, the agent maintains detailed logs of its interactions, including:
-
-- whats being sent to the LLM
-- whats being received from the LLM
-- what tools are being used
-- the results of the tools
-
-They are per session, and are stored in [logs](../orchestrator/logs) folder.
-
+Per-session logs are written to `orchestrator/logs/` and include LLM inputs and outputs, tool calls, and tool results. Startup logs are written to `orchestrator/logs/startup.log`.

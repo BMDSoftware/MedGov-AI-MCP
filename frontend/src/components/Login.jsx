@@ -97,7 +97,7 @@ export default function Login({ onLogin, onBack }) {
                   <button
                     type="button"
                     className="sl-demo-link"
-                    onClick={() => { setUsername('demo'); setPassword('demodemo'); setError(''); }}
+                    onClick={() => { setUsername('demo'); setPassword('demodemo'); setError(''); }} /* pre-fills demo account credentials */
                   >
                     Use demo credentials
                   </button>

@@ -1,5 +1,7 @@
 # MedGov-AI
 
+![Home page](docs/images/home-page.png)
+
 An agentic AI platform for clinical imaging orchestration. MedGov-AI connects a reasoning agent to medical AI tools via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), enabling autonomous multi-step clinical workflows from a natural language interface.
 
 ## What it does
@@ -36,6 +38,8 @@ The script sets up all virtual environments, installs dependencies, and starts t
 - API: http://localhost:5001
 - API docs: http://localhost:5001/docs
 
+Open the UI and register an account — no default account is created automatically.
+
 See [RUN.md](RUN.md) for manual setup, Docker deployment, and configuration details.
 
 ## MCP Servers
@@ -55,6 +59,10 @@ See [RUN.md](RUN.md) for manual setup, Docker deployment, and configuration deta
 - [Agent](docs/agent.md) — architecture, execution loop, modes, session, database
 - [Tools](docs/tools.md) — all MCP servers and built-in tools
 - [Skills](docs/skills.md) — workflow protocols and how to write your own
+
+## Demo
+
+[![Demo video](https://img.youtube.com/vi/PEgMOrTM5D4/0.jpg)](https://youtu.be/PEgMOrTM5D4)
 
 ## Acknowledgements
 

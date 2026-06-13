@@ -25,6 +25,7 @@ Edit `orchestrator/.env` and fill in:
 | `OLLAMA_URL` | Ollama base URL, e.g. `http://localhost:11434` |
 | `OLLAMA_MODEL` | Ollama model name, e.g. `llama3.1:8b` |
 | `APP_ROOT` | Absolute path to the repo root, e.g. `/home/user/AgenticHealthMCP` |
+| `WORKSPACES_ROOT` | Absolute path to the workspaces directory for local dev, e.g. `/home/user/AgenticHealthMCP/orchestrator/workspaces` (Docker defaults to `/app/workspaces`) |
 
 ---
 
@@ -66,7 +67,7 @@ Once running:
 
 Useful if you want to iterate quickly without rebuilding containers.
 
-**Requirements:** Python 3.11+, Node.js 18+
+**Requirements:** Python 3.12, Node.js 18+
 
 The quickest way is:
 
@@ -75,6 +76,8 @@ The quickest way is:
 ```
 
 The script creates virtual environments for each MCP server and the orchestrator, installs all dependencies, and starts both the backend and frontend.
+
+Once running, open http://localhost:5173 and register an account via the UI. All API endpoints require authentication — no default account is created automatically.
 
 Or manually:
 

@@ -38,7 +38,7 @@ The agent executes a full workflow without user interaction. It can be triggered
 
 ## Execution loop
 
-The agent workflow is an iterative loop, up to 20 iterations by default:
+The agent workflow is an iterative loop — up to 20 iterations in analysis mode, 10 in autonomous mode:
 
 1. A goal is set — by the user (analysis mode) or by the workspace watcher (autonomous mode).
 2. The agent sends the goal and session context to the LLM, which selects the next tool to call.

@@ -229,5 +229,21 @@ def write_json(
         return {"success": False, "error": str(e)}
 
 
+@mcp.tool()
+def bash(
+    command: Annotated[str, Field(description="Shell command to execute.")],
+) -> Dict[str, Any]:
+    """Execute a shell command and return stdout, stderr, and exit code. Timeout: 60 seconds."""
+    import subprocess
+    log(f"Running bash command: {command}")
+    try:
+        proc = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60)
+        return {"stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode}
+    except subprocess.TimeoutExpired:
+        return {"error": "Command timed out after 60 seconds", "is_error": True}
+    except Exception as e:
+        return {"error": str(e), "is_error": True}
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

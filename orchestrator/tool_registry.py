@@ -121,7 +121,7 @@ class ToolRegistry:
     async def execute_tool(self, tool_name: str, arguments: dict, logs: bool = False) -> dict:
         tool_info = self.available_tools.get(tool_name)
         if not tool_info:
-            raise Exception(f"Tool not found: {tool_name}")
+            return {"error": f"Tool '{tool_name}' does not exist. Check the tool name and try again.", "is_error": True}
         
         server = tool_info["server"]
         session_tuple = self.sessions.get(server)

@@ -36,4 +36,7 @@ class SkillsMixin:
                 except Exception as e:
                     print(f"Error loading skill {skill_folder.name}: {e}")
 
-        return "\n".join(skills_text) if skills_text else "No skills available"
+        if not skills_text:
+            return "No skills available"
+        header = f"Skills directory: `{SKILL_DIR_PATH}`\n"
+        return header + "\n".join(skills_text)

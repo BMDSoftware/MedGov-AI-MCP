@@ -22,10 +22,11 @@ You are currently focused on a specific patient:
 
 All tool calls and analysis should be in the context of this patient. If any tool returns data for a different patient, flag it immediately.
 
-1. **DISCOVERY (Current State):** You can see the "Available Skills" list above. If a user asks "What can you do?", explain these skills based on their descriptions. Do NOT call a tool just to list them.
-2. **READ SKILL:** When a task matches a skill in the list above, read it first with `skills.read_skill_file(skill_name)` before using any domain tools.
-3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
-4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
+SKILLS USE RULES:
+1. **DISCOVERY:** Skills are listed in the main system prompt. Each entry includes the skill name and its directory path. If a user asks "What can you do?", explain the skills — do NOT call a tool just to list them.
+2. **READ SKILL:** When a task matches a skill, read its instructions first using `utils.read_file` with the path `<skill_dir>/SKILL.md`.
+3. **EXPLORE REFERENCES:** Use `utils.read_file` to read any reference files inside the skill directory (e.g., `<skill_dir>/references/<file>`).
+
 
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
 
@@ -94,10 +95,10 @@ All tool calls and analysis should be in the context of this patient. If any too
 ##Available Skills##
 {available_skills}
 SKILLS USE RULES:
-1. **DISCOVERY (Current State):** You can see the "Available Skills" list above.
-2. **READ SKILL:** When a task matches a skill in the list above, read it first with `skills.read_skill_file(skill_name)` before using any domain tools.
-3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
-4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
+1. **DISCOVERY:** Skills are listed above. Each entry shows the skill name and its directory path in backticks.
+2. **READ SKILL:** When a task matches a skill, read its instructions first using `utils.read_file` with the path `<skill_dir>/SKILL.md`.
+3. **EXPLORE REFERENCES:** Use `utils.read_file` to read any reference files inside the skill directory (e.g., `<skill_dir>/references/<file>`).
+
 
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
 
@@ -134,10 +135,10 @@ All tool calls and analysis should be in the context of this patient. If any too
 ##Available Skills##
 {available_skills}
 SKILLS USE RULES:
-1. **DISCOVERY (Current State):** You can see the "Available Skills" list above. If a user asks "What can you do?", explain these skills based on their descriptions. Do NOT call a tool just to list them.
-2. **READ SKILL:** When a task matches a skill in the list above, read it first with `skills.read_skill_file(skill_name)` before using any domain tools.
-3. **EXPLORE REFERENCES:** If you need deeper technical details or schemas mentioned in the SKILL.md, then use `skills.read_references(skill_name, file_path)` to read specific reference files.
-4. **EXECUTE:** After reading the skill instructions, proceed to use the specific domain tools (e.g., `monai.*`, `fhir.*`). If the skill has executable scripts, use `skills.execute_script(skill_name, script_name, parameters)`.
+1. **DISCOVERY:** Skills are listed above. Each entry shows the skill name and its directory path in backticks. If a user asks "What can you do?", explain these skills based on their descriptions — do NOT call a tool just to list them.
+2. **READ SKILL:** When a task matches a skill, read its instructions first using `utils.read_file` with the path `<skill_dir>/SKILL.md`.
+3. **EXPLORE REFERENCES:** Use `utils.read_file` to read any reference files inside the skill directory (e.g., `<skill_dir>/references/<file>`).
+
 
 You have access to MCP tools that you can call directly. The tools are already registered and available to you - use them when the user requests an action.
 

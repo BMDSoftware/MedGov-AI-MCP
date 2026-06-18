@@ -207,7 +207,7 @@ reliable tool calling at the 7--8B parameter scale currently available
 for local inference on ordinary hardware.
 
 \subsubsection*{MCP Server Layer}
-The tool layer consists of six MCP servers, each running as an
+The tool layer consists of six MCP servers: five developed for this system and one community FHIR server for patient record retrieval. Each server runs as an
 independent process in its own Python virtual environment.
 Isolation at the process level is a deliberate design choice: it
 prevents dependency conflicts between servers with incompatible
@@ -218,11 +218,11 @@ environment).
 Tool names are automatically prefixed with the server name by the tool registry
 (e.g., \texttt{monai.run\_inference}, \texttt{radlex.generate\_report}),
 providing unambiguous namespacing across servers regardless of what any individual server declares.
-Servers communicate over stdio or HTTP transport, configured per server; all six servers in the current deployment use stdio. The available servers and their
+Servers communicate over stdio or HTTP transport, configured per server; all five core servers in the current deployment use stdio. The available servers and their
 clinical functions are listed in Table~\ref{tab:mcp-servers}.
 
 \begin{table*}[t]
-  \caption{MCP Servers and Clinical Functions. The six core servers are used in the evaluated workflows; the FHIR server is an optional integration demonstrating interoperability with community servers via HTTP.}
+  \caption{MCP Servers and Clinical Functions. The five core servers are used in the evaluated workflows; the FHIR server is a community integration demonstrating interoperability with third-party servers via HTTP.}
   \label{tab:mcp-servers}
   \centering
   \begin{tabular}{lll}
@@ -231,8 +231,7 @@ clinical functions are listed in Table~\ref{tab:mcp-servers}.
     \midrule
     mcp-monai    & stdio & Medical image segmentation and detection \\
     mcp-radlex   & stdio & RadLex terminology and report templates \\
-    mcp-utils    & stdio & DICOM parsing and filesystem operations \\
-    mcp-skills   & stdio & Skill workflow loading and execution \\
+    mcp-utils    & stdio & DICOM parsing, filesystem operations, and skill file access \\
     mcp-ipath    & stdio & iPath telepathology integration \\
     mcp-cellpose & stdio & 2D/3D cell segmentation (Cellpose) \\
     fhir-mcp     & http  & Patient record retrieval via FHIR \\
@@ -292,7 +291,9 @@ metadata of a DICOM file, including modality, body part, patient
 identifiers, acquisition parameters, and pixel data statistics, and can
 apply the same extraction across an entire directory. On the filesystem side, the
 server supports reading, writing, moving, copying, and deleting files,
-listing directory contents, and searching by pattern.
+listing directory contents, and searching by pattern. The same
+\texttt{read\_file} operation is used by the agent to load skill bodies
+on demand from the filesystem.
 
 \textbf{Mcp-cellpose} provides cell segmentation for pathology
 workflows using the Cellpose v4 universal model (cpsam).
@@ -327,11 +328,6 @@ coordinate mapping, and region-of-interest extraction at arbitrary
 resolution levels without downloading the full WSI, as well as access
 to individual DICOM frames and series.
 
-\textbf{Mcp-skills} exposes the skill system to the agent as callable
-tools, allowing it to load a skill's entry point and its associated
-reference documents and assets, and to execute predefined scripts
-associated with a skill. The skills system is described in detail in
-Section~\ref{sec:skills}.
 
 
 % tihs part is very nice, but also since you were more in debt into this i cant critique it as much
@@ -369,7 +365,7 @@ surfaced to the agent at startup through a short name and natural
 language description kept permanently in the system prompt, while the
 full skill body remains unloaded until needed. When a request arrives,
 the agent reasons over these descriptions to identify the applicable
-skill, then loads its body on demand as operating instructions for that
+skill, then loads its body on demand from the filesystem as operating instructions for that
 task. This enables progressive disclosure: the context window carries
 only a lightweight index at rest, expanding to include full domain
 detail only for the domain currently in use.

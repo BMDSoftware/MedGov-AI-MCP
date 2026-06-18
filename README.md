@@ -51,7 +51,6 @@ See [RUN.md](RUN.md) for manual setup, Docker deployment, and configuration deta
 | `mcp-cellpose` | Cell detection and counting on pathology ROI images |
 | `mcp-ipath` | Whole-slide image retrieval from iPath telepathology platform |
 | `mcp-utils` | DICOM parsing, metadata extraction, file utilities |
-| `mcp-skills` | Skill file loading for domain-specific workflow guidance |
 | `fhir-mcp-server` | FHIR resource creation via HTTP MCP (optional) |
 
 ## Documentation

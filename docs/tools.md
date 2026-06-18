@@ -99,19 +99,6 @@ General-purpose file and DICOM utilities.
 
 ---
 
-### mcp-skills
-
-Loads and executes skill workflows from the `orchestrator/skills/` directory. See [skills.md](skills.md) for the skill format and available skills.
-
-| Tool | Description |
-|---|---|
-| `read_skill_file(skill_name)` | Reads the `SKILL.md` for a skill; returns the workflow instructions |
-| `read_references(skill_name, file_path)` | Reads a reference file from the skill's `references/` directory |
-| `execute_script(skill_name, command)` | Executes a command within the skill's directory (5-minute timeout) |
-| `read_asset(skill_name, asset_path)` | Reads a static asset (template, data file) from the skill's `assets/` directory |
-
----
-
 ### fhir (optional)
 
 Connects to a FHIR R4 server over HTTP MCP. Used to write clinical findings as structured FHIR resources. This server is optional and can be added via the UI Settings page without restarting the backend.

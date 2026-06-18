@@ -101,8 +101,6 @@ cd mcp-ipath && python3 -m venv venv && source venv/bin/activate && pip install 
 # DICOM utilities server
 cd mcp-utils && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt && deactivate && cd ..
 
-# Skills server
-cd mcp-skills && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt && deactivate && cd ..
 ```
 
 ### 2. Set up the orchestrator

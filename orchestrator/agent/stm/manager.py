@@ -13,11 +13,9 @@ class AgentStateManager:
     """
 
     NOTE_BUDGET_TOKENS: int = 1000
-    SKILL_TTL: int = 2
 
     def __init__(self) -> None:
         self.state: Optional[AgentState] = None
-        self.active_skills: Dict[str, Dict] = {}
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                            #
@@ -34,7 +32,6 @@ class AgentStateManager:
             important_facts={"task_constraints": constraints, "agent_notes": {}},
             status="in_progress",
         )
-        self.active_skills = {}
         return self.state
 
     # ------------------------------------------------------------------ #
@@ -45,16 +42,6 @@ class AgentStateManager:
         if self.state is None:
             return ""
         parts = ["## AGENT STATE\n", self.state.to_json()]
-        for name, entry in self.active_skills.items():
-            content = entry.get("content", {})
-            content_str = json.dumps(content, indent=2) if isinstance(content, dict) else str(content)
-            parts.append(
-                f"\n[ACTIVE SKILL REFERENCE — {name}]\n"
-                f"Use these instructions to complete the task. "
-                f"This is reference material, not a completed deliverable.\n"
-                f"{content_str}\n"
-                f"[END SKILL REFERENCE — {name}]"
-            )
         return "\n".join(parts)
 
     def render_state_text(self) -> str:
@@ -92,18 +79,6 @@ class AgentStateManager:
                 lines.append(f"- {key}: {value}")
         else:
             lines.append("- (none yet)")
-
-        for name, entry in self.active_skills.items():
-            lines.append(f"\n[ACTIVE SKILL REFERENCE - {name}]")
-            lines.append("Use these instructions to complete the task.")
-            lines.append("This is reference material, not a completed deliverable.")
-            content = entry.get("content", {})
-            if isinstance(content, dict):
-                for key, value in content.items():
-                    lines.append(f"- {key}: {value}")
-            else:
-                lines.append(str(content))
-            lines.append(f"[END SKILL REFERENCE - {name}]")
 
         return "\n".join(lines)
 
@@ -162,16 +137,3 @@ class AgentStateManager:
             oldest_key = next(iter(notes))
             del notes[oldest_key]
 
-    # ------------------------------------------------------------------ #
-    # Skill TTL                                                            #
-    # ------------------------------------------------------------------ #
-
-    def register_skill(self, skill_name: str, content: Any) -> None:
-        self.active_skills[skill_name] = {"content": content, "ttl": self.SKILL_TTL}
-
-    def tick_skill_ttls(self) -> None:
-        expired = [n for n, e in self.active_skills.items() if e["ttl"] <= 1]
-        for name in expired:
-            del self.active_skills[name]
-        for entry in self.active_skills.values():
-            entry["ttl"] -= 1

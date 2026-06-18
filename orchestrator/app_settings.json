@@ -1,5 +1,5 @@
 {
-  "mode": "normal",
+  "mode": "debug",
   "llm_mode": "stateful",
-  "confirmation": false
+  "confirmation": true
 }

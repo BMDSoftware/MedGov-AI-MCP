@@ -1,6 +1,6 @@
 # MedGov-AI
 
-![Home page](docs/images/home-page.png)
+![Home page](docs/assets/home-page.png)
 
 An agentic AI platform for clinical imaging orchestration. MedGov-AI connects a reasoning agent to medical AI tools via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), enabling autonomous multi-step clinical workflows from a natural language interface.
 
@@ -17,7 +17,7 @@ An agentic AI platform for clinical imaging orchestration. MedGov-AI connects a 
 
 ## Architecture
 
-![Architecture](docs/images/AgenticArchitecture.png)
+![Architecture](docs/assets/AgenticArchitecture.png)
 
 ## Quick start
 

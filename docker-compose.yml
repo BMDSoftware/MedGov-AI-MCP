@@ -34,7 +34,7 @@ services:
       context: .
       dockerfile: docker/frontend/Dockerfile
     ports:
-      - "80:80"
+      - "${FRONTEND_HOST_PORT:-80}:80"
     depends_on:
       orchestrator:
         condition: service_healthy

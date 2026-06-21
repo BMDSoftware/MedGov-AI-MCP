@@ -392,6 +392,7 @@ async def _run_sampling_and_fill(
         "applied_fields": applied_fields,
         "preserved_defaults_count": max(total_fields - len(applied_fields), 0),
         "validation": validation_result["validation"],
+        "html_report": fill_result["html_report"],
     }
     if fill_result.get("missing_controls"):
         result["missing_controls"] = fill_result["missing_controls"]

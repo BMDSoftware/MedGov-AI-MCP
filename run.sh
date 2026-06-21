@@ -55,7 +55,6 @@ fi
 setup_venv "mcp-monai"
 setup_venv "mcp-radlex"
 setup_venv "mcp-utils"
-setup_venv "mcp-skills"
 setup_venv "mcp-cellpose"
 setup_venv "mcp-ipath"
 setup_venv "orchestrator"

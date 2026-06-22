@@ -1,2 +1,3 @@
-cellpose-mcp
+cellpose-mcp==0.1.3
+cellpose==4.1.1
 fastmcp>=2.10.3,<3.0.0

@@ -223,45 +223,15 @@ async def fetch_template_html(template_id: str) -> Dict[str, Any]:
         }
 
 
-_GROUNDING_RULE = (
-    " Only use measurements and findings explicitly present in the provided inference results — "
+_SYSTEM_PROMPT = (
+    "You are a board-certified radiologist. Map the provided AI inference results to "
+    "the given template fields. "
+    "Only use measurements and findings explicitly present in the provided inference results — "
     "do not invent structures, values, or findings that are not in the data. "
     "You may apply established clinical reference knowledge (normal ranges, grading criteria, "
     "clinical significance thresholds) to interpret the given measurements and populate "
     "assessment, impression, and recommendation fields accordingly."
 )
-
-SPECIALTY_SYSTEM_PROMPTS = {
-    "general": (
-        "You are a board-certified radiologist. Map the provided AI inference results to "
-        "the given template fields." + _GROUNDING_RULE
-    ),
-    "oncology": (
-        "You are a board-certified radiologist subspecialised in oncologic imaging. "
-        "Prioritize lesion size, enhancement pattern, TNM staging, and treatment response (RECIST 1.1). "
-        "Use formal ACR RADS language." + _GROUNDING_RULE
-    ),
-    "cardiology": (
-        "You are a board-certified radiologist subspecialised in cardiac imaging. "
-        "Prioritize ejection fraction, wall motion, pericardial effusion, and valve morphology. "
-        "Use AHA/ACC terminology." + _GROUNDING_RULE
-    ),
-    "emergency": (
-        "You are a board-certified emergency radiologist. "
-        "Lead with time-critical findings (pneumothorax, hemorrhage, PE, dissection). "
-        "Be concise. Use STAT-level conventions." + _GROUNDING_RULE
-    ),
-    "neuroradiology": (
-        "You are a board-certified neuroradiologist. "
-        "Prioritize lesion location, signal characteristics, mass effect, midline shift, "
-        "and enhancement pattern. Use ACR brain reporting guidelines." + _GROUNDING_RULE
-    ),
-    "musculoskeletal": (
-        "You are a board-certified musculoskeletal radiologist. "
-        "Prioritize joint space, cortical integrity, bone marrow signal, and tendon/ligament continuity."
-        + _GROUNDING_RULE
-    ),
-}
 
 
 # --- MCP Tool Definitions ---
@@ -310,17 +280,19 @@ async def find_templates(
 
 
 
+
 @mcp.tool()
 async def generate_radiology_report(
     template_id: Annotated[str, Field(description="RadReport template ID (from find_templates)")],
     output_path: Annotated[str, Field(description="File path to save the HTML report. The report is not returned inline — it must be saved to disk.")],
     ctx: Context,
-    findings: Annotated[Optional[Dict[str, Any]], Field(description="Pre-mapped field key/value dict (legacy path). Exact template keys required.")] = None,
-    inference_results: Annotated[Optional[List[Dict]], Field(description="Raw inference results list, each with 'description', 'model', 'structures' keys (structures have 'name', 'volume_cm3', 'voxel_count').")] = None,
+    inference_results: Annotated[List[Dict], Field(description="Raw inference results list, each with 'description', 'model', 'structures' keys (structures have 'name', 'volume_cm3', 'voxel_count').")],
     patient_context: Annotated[Optional[Dict], Field(description="Optional patient demographics / clinical context dict")] = None,
-    specialty: Annotated[str, Field(description="Reporting specialty for the sampling prompt. One of: general, oncology, cardiology, emergency, neuroradiology, musculoskeletal.")] = "general",
 ) -> Dict[str, Any]:
-    """Fill a RadReport template using MCP sampling. Provide inference_results for LLM-driven narrative generation, or findings for legacy rigid mapping. At least one must be supplied."""
+    """Fill a RadReport template using MCP sampling. Sends the full HTML template to the LLM for context-aware field mapping. All reports are grounded in the provided inference_results."""
+    if not inference_results:
+        return {"error": "inference_results must not be empty.", "error_type": "missing_input"}
+
     template_payload = await fetch_template_html(template_id)
     if "error" in template_payload:
         return template_payload
@@ -333,75 +305,72 @@ async def generate_radiology_report(
     if "error" in schema:
         return schema
 
+    user_message = (
+        f"Template: {schema['title']}\n\n"
+        f"Full HTML template:\n{template_payload['html_template']}\n\n"
+        f"Patient context: {json.dumps(patient_context) if patient_context else 'Not provided'}\n\n"
+        f"Raw inference results:\n{json.dumps(inference_results, indent=2)}\n\n"
+        "Read the HTML template above to understand each form field (use the id or name attribute as the field key). "
+        "Map each relevant inference finding to the most appropriate field.\n"
+        "IMPORTANT: For select/radio fields, the value MUST be one of the exact option values present in the HTML.\n"
+        "Respond with valid JSON only, with exactly these keys:\n"
+        '{"field_mappings": {"<id_or_name>": "<value>", ...}, '
+        '"findings_narrative": "<string>", "impression": "<string>", "recommendations": "<string>"}'
+    )
+    return await _run_sampling_and_fill(ctx, user_message, template_payload, schema, output_path)
+
+
+async def _run_sampling_and_fill(
+    ctx: Context,
+    user_message: str,
+    template_payload: Dict[str, Any],
+    schema: Dict[str, Any],
+    output_path: str,
+) -> Dict[str, Any]:
     mapped_findings: Dict[str, Any] = {}
     sampling_narrative: Optional[Dict] = None
 
-    if inference_results is not None:
-        system_prompt = SPECIALTY_SYSTEM_PROMPTS.get(specialty, SPECIALTY_SYSTEM_PROMPTS["general"])
-        field_descriptions = []
-        for key, f in schema["all_fields"].items():
-            ctrl = f.get("control_type", "text")
-            desc = (
-                f"{key} (type={ctrl}, "
-                f"section={f.get('section', '')}, aliases={f.get('aliases', [])})"
-            )
-            if ctrl in {"select", "radio"} and f.get("options"):
-                opts = ", ".join(
-                    f'"{o["value"]}" ({o["label"]})'
-                    for o in f["options"]
-                    if o.get("value") is not None
+    try:
+        sample_result = await ctx.session.create_message(
+            messages=[
+                mcp_types.SamplingMessage(
+                    role="user",
+                    content=mcp_types.TextContent(type="text", text=user_message),
                 )
-                desc += f" — allowed values: {opts}"
-            field_descriptions.append(desc)
-        user_message = (
-            f"Template: {schema['title']}\n\n"
-            f"Available template fields:\n"
-            + "\n".join(f"  - {d}" for d in field_descriptions)
-            + f"\n\nPatient context: {json.dumps(patient_context) if patient_context else 'Not provided'}\n\n"
-            f"Raw inference results:\n{json.dumps(inference_results, indent=2)}\n\n"
-            "Map each relevant inference finding to the most appropriate template field key "
-            "from the list above. Use exact key names.\n"
-            "IMPORTANT: For select/radio fields, the value MUST be the exact quoted value string "
-            "listed after 'allowed values' — do not use labels, grades, or free text.\n"
-            "Respond with valid JSON only, with exactly these keys:\n"
-            '{"field_mappings": {"<field_key>": "<value>", ...}, '
-            '"findings_narrative": "<string>", "impression": "<string>", "recommendations": "<string>"}'
+            ],
+            system_prompt=_SYSTEM_PROMPT,
+            max_tokens=4096,
         )
-        try:
-            sample_result = await ctx.session.create_message(
-                messages=[
-                    mcp_types.SamplingMessage(
-                        role="user",
-                        content=mcp_types.TextContent(type="text", text=user_message),
-                    )
-                ],
-                system_prompt=system_prompt,
-                max_tokens=1024,
-            )
-            raw_text = ""
-            if hasattr(sample_result.content, "text"):
-                raw_text = sample_result.content.text
-            elif isinstance(sample_result.content, list):
-                for block in sample_result.content:
-                    if hasattr(block, "text"):
-                        raw_text += block.text
+        raw_text = ""
+        if hasattr(sample_result.content, "text"):
+            raw_text = sample_result.content.text
+        elif isinstance(sample_result.content, list):
+            for block in sample_result.content:
+                if hasattr(block, "text"):
+                    raw_text += block.text
 
-            match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-            if match:
-                parsed = json.loads(match.group())
-                mapped_findings = parsed.get("field_mappings") or {}
-                sampling_narrative = {
-                    "findings_narrative": parsed.get("findings_narrative"),
-                    "impression": parsed.get("impression"),
-                    "recommendations": parsed.get("recommendations"),
-                }
-        except Exception as exc:
-            return {"error": f"Sampling failed: {exc}", "error_type": "sampling_error"}
-
-    elif findings is not None:
-        mapped_findings = findings
-    else:
-        return {"error": "Either 'findings' or 'inference_results' must be provided.", "error_type": "missing_input"}
+        match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        if not match:
+            return {
+                "error": "Sampling response contained no parseable JSON.",
+                "error_type": "sampling_parse_error",
+                "raw_response": raw_text[:500],
+            }
+        parsed = json.loads(match.group())
+        mapped_findings = parsed.get("field_mappings") or {}
+        if not mapped_findings:
+            return {
+                "error": "Sampling response contained no field mappings.",
+                "error_type": "sampling_parse_error",
+                "raw_response": raw_text[:500],
+            }
+        sampling_narrative = {
+            "findings_narrative": parsed.get("findings_narrative"),
+            "impression": parsed.get("impression"),
+            "recommendations": parsed.get("recommendations"),
+        }
+    except Exception as exc:
+        return {"error": f"Sampling failed: {exc}", "error_type": "sampling_error"}
 
     validation_result = validate_findings(findings=mapped_findings, all_fields=schema["all_fields"])
     if "error" in validation_result:
@@ -412,22 +381,21 @@ async def generate_radiology_report(
         all_fields=schema["all_fields"],
         normalized_findings=validation_result["normalized"],
     )
-    if "error" in fill_result:
-        return fill_result
 
     applied_fields = validation_result["applied_fields"]
     total_fields = len(schema["all_fields"])
 
     result: Dict[str, Any] = {
         "status": "Finalized",
-        "template_id": template_id,
+        "template_id": template_payload["template_id"],
         "template_title": schema["title"],
-        "html_report": fill_result["html_report"],
         "applied_fields": applied_fields,
         "preserved_defaults_count": max(total_fields - len(applied_fields), 0),
         "validation": validation_result["validation"],
-        "specialty": specialty,
+        "html_report": fill_result["html_report"],
     }
+    if fill_result.get("missing_controls"):
+        result["missing_controls"] = fill_result["missing_controls"]
     if sampling_narrative:
         result["narrative"] = sampling_narrative
 
@@ -436,7 +404,6 @@ async def generate_radiology_report(
             import os as _os
             from datetime import datetime as _dt
             resolved = Path(output_path)
-            # In local dev APP_ROOT differs from the Docker /app mount; remap if needed.
             app_root = _os.getenv("APP_ROOT", "")
             if app_root and str(resolved).startswith("/app/"):
                 resolved = Path(app_root) / str(resolved)[len("/app/"):]

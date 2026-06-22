@@ -20,7 +20,7 @@ jobs:
         run: pip install ruff
 
       - name: Run ruff
-        run: ruff check orchestrator/ mcp-monai/ mcp-radlex/ mcp-utils/ mcp-skills/
+        run: ruff check orchestrator/ mcp-monai/ mcp-radlex/ mcp-utils/
 
   frontend-lint:
     if: github.repository == 'BMDSoftware/MedGov-AI-MCP'

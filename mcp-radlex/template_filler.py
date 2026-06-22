@@ -351,18 +351,6 @@ def validate_findings(findings: Dict[str, Any], all_fields: Dict[str, Dict[str, 
             continue
         field_values[field_key] = raw_value
 
-    if unknown_keys or ambiguous_keys or conflicting_values:
-        return _error(
-            "unknown_fields",
-            "Unknown or ambiguous findings keys provided.",
-            {
-                "unknown_keys": sorted(set(unknown_keys)),
-                "ambiguous_keys": ambiguous_keys,
-                "conflicting_values": conflicting_values,
-                "allowed_keys": sorted(alias_index.keys()),
-            },
-        )
-
     normalized: Dict[str, Dict[str, Any]] = {}
     invalid_choices: List[Dict[str, Any]] = []
 
@@ -394,13 +382,6 @@ def validate_findings(findings: Dict[str, Any], all_fields: Dict[str, Dict[str, 
             "value": "" if raw_value is None else str(raw_value),
         }
 
-    if invalid_choices:
-        return _error(
-            "invalid_choice",
-            "Invalid select/radio value provided.",
-            {"invalid_choices": invalid_choices},
-        )
-
     applied_fields = sorted(normalized.keys())
     return {
         "normalized": normalized,
@@ -409,8 +390,10 @@ def validate_findings(findings: Dict[str, Any], all_fields: Dict[str, Dict[str, 
             "total_fields": len(all_fields),
             "provided_keys": len(findings),
             "applied_count": len(applied_fields),
-            "unknown_keys": [],
-            "invalid_choices": [],
+            "skipped_unknown_keys": sorted(set(unknown_keys)),
+            "skipped_ambiguous_keys": sorted(ambiguous_keys.keys()),
+            "skipped_conflicting_keys": [c["input_key"] for c in conflicting_values],
+            "skipped_invalid_choices": [c["field_key"] for c in invalid_choices] if invalid_choices else [],
         },
     }
 
@@ -570,11 +553,4 @@ def fill_template_html(
         # Covers text/number/hidden/date/... input-like controls.
         control["value"] = text_value
 
-    if missing_controls:
-        return _error(
-            "template_parse_error",
-            "Template controls could not be updated reliably.",
-            {"missing_controls": sorted(set(missing_controls))},
-        )
-
-    return {"html_report": str(soup)}
+    return {"html_report": str(soup), "missing_controls": sorted(set(missing_controls))}

@@ -1,5 +1,7 @@
 # MedGov-AI
 
+![Home page](docs/assets/home-page.png)
+
 An agentic AI platform for clinical imaging orchestration. MedGov-AI connects a reasoning agent to medical AI tools via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), enabling autonomous multi-step clinical workflows from a natural language interface.
 
 ## What it does
@@ -11,31 +13,15 @@ An agentic AI platform for clinical imaging orchestration. MedGov-AI connects a 
 - **Skills** - Plain-text workflow protocols that guide the agent through domain-specific clinical sequences, improving reliability and reducing incorrect tool use.
 - **Background tasks** - Inference jobs run in the background with real-time progress streamed to the UI via SSE.
 - **iPath integration** - Connects to the iPath telepathology platform for whole-slide image retrieval and ROI analysis.
+- **FHIR integration** - Writes clinical findings as FHIR resources (Patient, Observation) to a connected FHIR server.
 
 ## Architecture
 
-```
-┌──────────────────────────────────┐
-│           React Frontend         │
-│  (Upload · Analysis · Results ·  │
-│   Reports · Workspaces)          │
-└────────────────┬─────────────────┘
-                 │ REST + SSE
-┌────────────────▼─────────────────┐
-│        FastAPI Orchestrator      │
-│  Agent (Gemini / Ollama) ·       │
-│  Task runner · Watcher service   │
-└──┬───────┬──────┬────┬───────┬───┘
-   │       │      │    │       │   MCP (stdio/HTTP)
-┌──▼──┐ ┌──▼──┐ ┌─▼─┐ ┌▼────┐ ┌▼──────┐
-│monai│ │radlex│ │cell│ │ipath│ │skills │
-│     │ │      │ │pose│ │     │ │+utils │
-└─────┘ └──────┘ └───┘ └─────┘ └───────┘
-```
+![Architecture](docs/assets/AgenticArchitecture.png)
 
 ## Quick start
 
-**Requirements:** Python 3.11+, Node.js 18+, a Gemini API key or local Ollama instance. GPU recommended for inference.
+**Requirements:** Python 3.12, Node.js 18+, a Gemini API key or local Ollama instance. GPU recommended for inference.
 
 ```bash
 # 1. Copy and fill in your credentials
@@ -52,6 +38,8 @@ The script sets up all virtual environments, installs dependencies, and starts t
 - API: http://localhost:5001
 - API docs: http://localhost:5001/docs
 
+Open the UI and register an account — no default account is created automatically.
+
 See [RUN.md](RUN.md) for manual setup, Docker deployment, and configuration details.
 
 ## MCP Servers
@@ -63,7 +51,17 @@ See [RUN.md](RUN.md) for manual setup, Docker deployment, and configuration deta
 | `mcp-cellpose` | Cell detection and counting on pathology ROI images |
 | `mcp-ipath` | Whole-slide image retrieval from iPath telepathology platform |
 | `mcp-utils` | DICOM parsing, metadata extraction, file utilities |
-| `mcp-skills` | Skill file loading for domain-specific workflow guidance |
+| `fhir-mcp-server` | FHIR resource creation via HTTP MCP (optional) |
+
+## Documentation
+
+- [Agent](docs/agent.md) — architecture, execution loop, modes, session, database
+- [Tools](docs/tools.md) — all MCP servers and built-in tools
+- [Skills](docs/skills.md) — workflow protocols and how to write your own
+
+## Demo
+
+[![Demo video](https://img.youtube.com/vi/PEgMOrTM5D4/0.jpg)](https://youtu.be/PEgMOrTM5D4)
 
 ## Acknowledgements
 

@@ -16,7 +16,6 @@ WORKDIR /app
 COPY mcp-monai/requirements.txt mcp-monai/requirements.txt
 COPY mcp-radlex/requirements.txt mcp-radlex/requirements.txt
 COPY mcp-utils/requirements.txt mcp-utils/requirements.txt
-COPY mcp-skills/requirements.txt mcp-skills/requirements.txt
 COPY mcp-ipath/requirements.txt mcp-ipath/requirements.txt
 COPY mcp-cellpose/requirements.txt mcp-cellpose/requirements.txt
 COPY orchestrator/requirements.txt orchestrator/requirements.txt
@@ -34,10 +33,6 @@ RUN python -m venv mcp-radlex/venv \
 RUN python -m venv mcp-utils/venv \
     && mcp-utils/venv/bin/pip install --upgrade pip \
     && mcp-utils/venv/bin/pip install -r mcp-utils/requirements.txt
-
-RUN python -m venv mcp-skills/venv \
-    && mcp-skills/venv/bin/pip install --upgrade pip \
-    && mcp-skills/venv/bin/pip install -r mcp-skills/requirements.txt
 
 RUN python -m venv mcp-ipath/venv \
     && mcp-ipath/venv/bin/pip install --upgrade pip \
@@ -60,7 +55,6 @@ RUN python -m venv orchestrator/venv \
 COPY mcp-monai/ mcp-monai/
 COPY mcp-radlex/ mcp-radlex/
 COPY mcp-utils/ mcp-utils/
-COPY mcp-skills/ mcp-skills/
 COPY mcp-ipath/ mcp-ipath/
 COPY mcp-cellpose/ mcp-cellpose/
 COPY orchestrator/ orchestrator/

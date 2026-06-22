@@ -140,7 +140,7 @@ def cellpose_diagnostics(model_type: str = "cpsam") -> dict:
     t = time.time()
     try:
         img = np.random.randint(0, 255, (64, 64), dtype=np.uint8)
-        out = model.eval(img, diameter=30, channels=None)
+        model.eval(img, diameter=30, channels=None)
         results["inference_ok"] = True
     except Exception as e:
         results["inference_ok"] = False

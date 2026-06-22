@@ -23,7 +23,7 @@ setup_venv() {
 }
 
 # ── checks ────────────────────────────────────────────────────────────────────
-command -v python3 >/dev/null 2>&1 || error "python3 not found. Install Python 3.11+."
+command -v python3 >/dev/null 2>&1 || error "python3 not found. Install Python 3.12."
 command -v node    >/dev/null 2>&1 || error "node not found. Install Node.js 18+."
 command -v npm     >/dev/null 2>&1 || error "npm not found."
 
@@ -55,7 +55,8 @@ fi
 setup_venv "mcp-monai"
 setup_venv "mcp-radlex"
 setup_venv "mcp-utils"
-setup_venv "mcp-skills"
+setup_venv "mcp-cellpose"
+setup_venv "mcp-ipath"
 setup_venv "orchestrator"
 
 # ── Frontend deps ─────────────────────────────────────────────────────────────

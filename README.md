@@ -2,71 +2,149 @@
 
 ![Home page](docs/assets/home-page.png)
 
-An agentic AI platform for clinical imaging orchestration. MedGov-AI connects a reasoning agent to medical AI tools via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), enabling autonomous multi-step clinical workflows from a natural language interface.
+**MedGov-AI** is an agentic AI platform for healthcare. Describe a clinical goal in plain language and the agent plans and executes the full workflow on its own — from medical image analysis and cell segmentation to structured clinical reports and FHIR resource creation.
 
-## What it does
-
-- **Autonomous analysis** - Upload DICOM series or pathology images and describe what you want. The agent selects tools, runs inference, and produces a structured clinical report without manual intervention.
-- **Segmentation and cell detection** - MONAI models for volumetric organ segmentation on CT/MRI; Cellpose v4 for cell detection and counting on pathology ROI images.
-- **Structured report generation** - RadLex/RadReport templates for radiology; pathology-specific templates for whole-slide image analysis.
-- **Workspace monitoring** - Register a directory as a workspace. When files arrive (e.g. from a PACS or scanner), the agent automatically analyses them and writes results to the configured output folder.
-- **Skills** - Plain-text workflow protocols that guide the agent through domain-specific clinical sequences, improving reliability and reducing incorrect tool use.
-- **Background tasks** - Inference jobs run in the background with real-time progress streamed to the UI via SSE.
-- **iPath integration** - Connects to the iPath telepathology platform for whole-slide image retrieval and ROI analysis.
-- **FHIR integration** - Writes clinical findings as FHIR resources (Patient, Observation) to a connected FHIR server.
-
-## Architecture
-
-![Architecture](docs/assets/AgenticArchitecture.png)
-
-## Quick start
-
-**Requirements:** Python 3.12, Node.js 18+, a Gemini API key or local Ollama instance. GPU recommended for inference.
-
-```bash
-# 1. Copy and fill in your credentials
-cp orchestrator/.env.example orchestrator/.env
-# edit orchestrator/.env: set LLM_BACKEND, GEMINI_API_KEY, APP_ROOT
-
-# 2. Run everything
-./run.sh
-```
-
-The script sets up all virtual environments, installs dependencies, and starts the backend and frontend.
-
-- UI: http://localhost:5173
-- API: http://localhost:5001
-- API docs: http://localhost:5001/docs
-
-Open the UI and register an account — no default account is created automatically.
-
-See [RUN.md](RUN.md) for manual setup, Docker deployment, and configuration details.
-
-## MCP Servers
-
-| Server | Function |
-|---|---|
-| `mcp-monai` | Volumetric segmentation and organ analysis via MONAI |
-| `mcp-radlex` | Structured radiology report generation using RadLex templates |
-| `mcp-cellpose` | Cell detection and counting on pathology ROI images |
-| `mcp-ipath` | Whole-slide image retrieval from iPath telepathology platform |
-| `mcp-utils` | DICOM parsing, metadata extraction, file utilities |
-| `fhir-mcp-server` | FHIR resource creation via HTTP MCP (optional) |
-
-## Documentation
-
-- [Agent](docs/agent.md) — architecture, execution loop, modes, session, database
-- [Tools](docs/tools.md) — all MCP servers and built-in tools
-- [Skills](docs/skills.md) — workflow protocols and how to write your own
+The agent connects to specialised medical AI tools through **[MCP (Model Context Protocol)](https://modelcontextprotocol.io)**, an open standard for linking AI agents to external services. Each capability runs in its own isolated server; the orchestrator decides which tools to call and in what order.
 
 ## Demo
 
 [![Demo video](https://img.youtube.com/vi/PEgMOrTM5D4/0.jpg)](https://youtu.be/PEgMOrTM5D4)
 
+---
+
+## Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Quick start](#quick-start)
+- [Documentation](#documentation)
+- [Tech stack](#tech-stack)
+- [Acknowledgements](#acknowledgements)
+
+---
+
+## Features
+
+- **Autonomous analysis** — describe a clinical goal; the agent selects tools, runs inference, and delivers a structured report without manual configuration
+- **Radiology** — volumetric organ segmentation on CT/MRI via MONAI pre-trained model bundles; structured RadLex/RadReport reports
+- **Pathology** — cell detection and counting on whole-slide image ROIs via Cellpose v4
+- **Workspace monitoring** — register a directory; when DICOM files arrive the agent analyses them automatically
+- **Skills** — plain-text clinical workflow protocols that guide the agent through domain-specific sequences (DICOM analysis, WSI tumour detection, clinical reports)
+- **iPath integration** — WSI thumbnail fetch, high-resolution ROI extraction, and DICOM retrieval from iPath/Dicoogle
+- **FHIR integration** — write clinical findings as FHIR R4 resources (Patient, Observation) to a connected FHIR server
+- **Background tasks** — long-running inference jobs run in the background with real-time progress streamed to the UI via SSE
+- **Debug / confirmation mode** — step through each tool call with explicit user approval before execution
+- **Per-user tool settings** — enable or disable any tool per user account via the UI
+
+---
+
+## Architecture
+
+![Architecture](docs/assets/AgenticArchitecture.png)
+
+The system has three layers:
+
+| Layer | Technology | Port |
+|---|---|---|
+| Frontend | React 18 + Vite | 5173 (dev) / 80 (Docker) |
+| Orchestrator (backend) | FastAPI + Python 3.12 | 5001 |
+| MCP servers | Isolated Python services (stdio) | — |
+
+---
+
+## Prerequisites
+
+### Docker deployment
+
+| Requirement | Version | Notes |
+|---|---|---|
+| Docker | 24+ | [Install Docker](https://docs.docker.com/get-docker/) |
+| Docker Compose | v2 (plugin) | Included with Docker Desktop |
+| Gemini API key | — | Free at [aistudio.google.com](https://aistudio.google.com/app/apikey) — **or** a local Ollama instance |
+| NVIDIA GPU + Container Toolkit | — | Optional; CPU fallback is automatic. See [RUN.md](RUN.md) for GPU setup. |
+
+### Local development
+
+| Requirement | Version | Notes |
+|---|---|---|
+| Python | 3.12 (exactly) | `python3 --version` to check |
+| Node.js | 18+ | `node --version` to check |
+| Gemini API key or Ollama | — | See above |
+
+---
+
+## Quick start
+
+**Requirements:** Docker and Docker Compose — or Python 3.12 and Node.js 18+ for local development. A Gemini API key (free at [aistudio.google.com](https://aistudio.google.com/app/apikey)) or a local Ollama instance.
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/BMDSoftware/MedGov-AI-MCP.git
+cd MedGov-AI-MCP
+```
+
+**2. Configure the environment**
+
+```bash
+cp orchestrator/.env.example orchestrator/.env
+```
+
+Open `orchestrator/.env` and fill in the required values: `JWT_SECRET_KEY`, `GEMINI_API_KEY`, and `LLM_BACKEND`. For local development also set `APP_ROOT` to the absolute path of the repo root.
+
+**3. Run**
+
+```bash
+# Docker — CPU (recommended, works on any machine)
+docker compose up --build
+
+# Local development (sets up all venvs and starts backend + frontend)
+./run.sh
+```
+
+**4. Open the app and register an account**
+
+No default account is created. Open the UI and click **Register**.
+
+| Service | Docker | Local dev |
+|---|---|---|
+| UI | http://localhost | http://localhost:5173 |
+| API | http://localhost:5001 | http://localhost:5001 |
+| API docs | http://localhost:5001/docs | http://localhost:5001/docs |
+
+For GPU Docker setup, manual installation, and all configuration options see [RUN.md](RUN.md).
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/agent.md](docs/agent.md) | Agent architecture, execution loop, session modes, STM, debug mode, database schema, adding MCP servers |
+| [docs/tools.md](docs/tools.md) | Full tool reference for every MCP server and built-in tool |
+| [docs/skills.md](docs/skills.md) | What skills are, how they work, built-in skills, and how to write your own |
+| [RUN.md](RUN.md) | Manual local setup, Docker GPU deployment, and full environment variable reference |
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, Vite |
+| Backend | FastAPI, Python 3.12, SQLite (WAL journaling) |
+| Agent LLM | Gemini 2.5 Flash (cloud) or Ollama (local) |
+| Tool protocol | Model Context Protocol — stdio and HTTP transports |
+| Medical imaging | MONAI, pydicom |
+| Cell segmentation | Cellpose v4 (cpsam / SAM models) |
+| Radiology reporting | RSNA RadReport templates (RadLex) |
+| Authentication | JWT |
+| Containerisation | Docker Compose (CPU and GPU profiles) |
+
+---
+
 ## Acknowledgements
 
 This work has received support from the "Health from Portugal - Agenda Mobilizadora para a Inovação Empresarial" project, funded by Plano de Recuperação e Resiliência português under grant agreement No C644937233-00000047.
 
-## License
-
-TBD

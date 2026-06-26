@@ -78,6 +78,60 @@ class GeminiClient:
         )
         print("New chat session started.")
 
+    def serialize_history(self) -> list:
+        """Serialize the current chat history to a JSON-serializable list."""
+        if not self.chat_session:
+            return []
+        import json
+
+        def _safe_dict(obj):
+            try:
+                return json.loads(json.dumps(obj))
+            except Exception:
+                try:
+                    return json.loads(json.dumps(dict(obj), default=str))
+                except Exception:
+                    return {}
+
+        result = []
+        for content in self.chat_session.get_history():
+            parts = []
+            for part in content.parts:
+                if part.text is not None:
+                    parts.append({"type": "text", "text": part.text})
+                elif part.function_call is not None:
+                    fc = part.function_call
+                    parts.append({"type": "function_call", "id": fc.id, "name": fc.name, "args": _safe_dict(fc.args)})
+                elif part.function_response is not None:
+                    fr = part.function_response
+                    parts.append({"type": "function_response", "id": fr.id, "name": fr.name, "response": _safe_dict(fr.response)})
+            if parts:
+                result.append({"role": content.role, "parts": parts})
+        return result
+
+    def restore_history(self, history_data: list):
+        """Restore a chat session from serialized history data."""
+        if not history_data:
+            self.start_chat()
+            return
+        history = []
+        for item in history_data:
+            parts = []
+            for p in item.get("parts", []):
+                if p["type"] == "text":
+                    parts.append(types.Part(text=p["text"]))
+                elif p["type"] == "function_call":
+                    parts.append(types.Part(
+                        function_call=types.FunctionCall(id=p.get("id"), name=p["name"], args=p["args"])
+                    ))
+                elif p["type"] == "function_response":
+                    parts.append(types.Part(
+                        function_response=types.FunctionResponse(id=p.get("id"), name=p["name"], response=p["response"])
+                    ))
+            if parts:
+                history.append(types.Content(role=item["role"], parts=parts))
+        self.start_chat(history=history)
+
     def update_tools(self, available_tools: Dict[str, Any]):
         """Update Gemini's available tools dynamically.
         Will apply to the VERY NEXT message sent in the chat."""

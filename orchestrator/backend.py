@@ -902,10 +902,23 @@ async def process_query(query: str = Body(..., media_type="text/plain"), current
             db.save_message(state.current_session_id, "user", query)
             if isinstance(result, dict):
                 agent_text = result.get("answer") or result.get("response") or result.get("error") or ""
+                if not agent_text and result.get("type") == "confirmation_required":
+                    tool_name = result.get("tool_name", "")
+                    args = result.get("arguments", {})
+                    agent_text = f"I want to execute: **{tool_name}**\n\nWith parameters:\n```json\n{json.dumps(args, indent=2)}\n```"
+                    db.save_message(state.current_session_id, "assistant", agent_text, metadata={
+                        "type": "confirmation_required",
+                        "tool_name": tool_name,
+                        "arguments": args,
+                    })
+                    agent_text = None  # already saved with metadata, skip generic save below
             else:
-                agent_text = str(result)
+                agent_text = str(result) if result is not None else ""
             if agent_text:
                 db.save_message(state.current_session_id, "assistant", agent_text)
+
+            if state.current_session_id and agent.llm_client:
+                db.save_gemini_history(state.current_session_id, agent.llm_client.serialize_history())
 
             yield json.dumps({"result": result}) + "\n"
 
@@ -1182,13 +1195,62 @@ async def confirm_tool(current_user: dict = Depends(get_current_user)):
     uid = current_user["user_id"]
     agent = await get_or_create_agent(uid)
     state = _get_user_state(uid)
-    return _stream_agent_coro(agent.confirm_tool_execution(session_id=state.current_session_id))
+    sid = state.current_session_id
+
+    async def _gen():
+        try:
+            task = asyncio.ensure_future(agent.confirm_tool_execution(session_id=sid))
+            while not task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+            result = task.result()
+            if sid:
+                if isinstance(result, dict):
+                    agent_text = result.get("answer") or result.get("response") or result.get("error") or ""
+                    if not agent_text and result.get("type") == "confirmation_required":
+                        tool_name = result.get("tool_name", "")
+                        args = result.get("arguments", {})
+                        agent_text = f"I want to execute: **{tool_name}**\n\nWith parameters:\n```json\n{json.dumps(args, indent=2)}\n```"
+                        db.save_message(sid, "assistant", agent_text, metadata={
+                            "type": "confirmation_required",
+                            "tool_name": tool_name,
+                            "arguments": args,
+                        })
+                        agent_text = None
+                else:
+                    agent_text = str(result) if result is not None else ""
+                if agent_text and agent_text != "None":
+                    db.save_message(sid, "assistant", agent_text)
+            if sid and agent.llm_client:
+                db.save_gemini_history(sid, agent.llm_client.serialize_history())
+            yield json.dumps({"result": result}) + "\n"
+        except Exception as e:
+            yield json.dumps({"result": {"error": str(e)}}) + "\n"
+
+    return StreamingResponse(_gen(), media_type="application/x-ndjson", headers={"X-Accel-Buffering": "no"})
 
 
 @app.post("/api/deny-tool", tags=["agent"], summary="Cancel the pending tool call")
 async def deny_tool(current_user: dict = Depends(get_current_user)):
-    agent = await get_or_create_agent(current_user["user_id"])
+    uid = current_user["user_id"]
+    agent = await get_or_create_agent(uid)
+    state = _get_user_state(uid)
+    sid = state.current_session_id
+
+    # Capture tool name before denial clears it
+    pending = agent.get_pending_tool()
+    tool_name = pending["tool_name"] if pending else None
+
     result = agent.deny_tool_execution()
+
+    if sid and tool_name:
+        db.save_message(sid, "user", f"Denied: {tool_name}")
+        answer = result.get("answer", "") if isinstance(result, dict) else ""
+        if answer:
+            db.save_message(sid, "assistant", answer)
+
     return {"result": result}
 
 
@@ -1301,15 +1363,19 @@ async def load_session(data: dict = Body(...), current_user: dict = Depends(get_
     agent.load_context_from_db(session_id)
 
     saved_messages = db.get_messages(session_id)
-    if agent.llm_client and saved_messages:
-        from google.genai import types as genai_types
-        history = []
-        for msg in saved_messages:
-            role = "user" if msg["role"] == "user" else "model"
-            history.append(genai_types.Content(role=role, parts=[genai_types.Part(text=msg["content"])]))
-        agent.llm_client.start_chat(history=history)
-    elif agent.llm_client:
-        agent.llm_client.start_chat()
+    if agent.llm_client:
+        gemini_history = db.get_gemini_history(session_id)
+        if gemini_history:
+            agent.llm_client.restore_history(gemini_history)
+        elif saved_messages:
+            from google.genai import types as genai_types
+            history = []
+            for msg in saved_messages:
+                role = "user" if msg["role"] == "user" else "model"
+                history.append(genai_types.Content(role=role, parts=[genai_types.Part(text=msg["content"])]))
+            agent.llm_client.start_chat(history=history)
+        else:
+            agent.llm_client.start_chat()
 
     if session.get("patient_id") and session.get("patient_name"):
         agent.set_patient_focus(session["patient_id"], session["patient_name"])

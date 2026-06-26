@@ -67,7 +67,8 @@ def init_db():
             session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
-            timestamp TEXT NOT NULL
+            timestamp TEXT NOT NULL,
+            metadata TEXT
         );
 
         CREATE TABLE IF NOT EXISTS background_tasks (
@@ -125,6 +126,8 @@ def init_db():
         ("watched_directories", "workspace_path TEXT"),
         ("sessions", "user_id TEXT"),
         ("background_tasks", "message TEXT"),
+        ("conversation_messages", "metadata TEXT"),
+        ("sessions", "gemini_history TEXT"),
     ]:
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
@@ -294,6 +297,30 @@ def update_session(session_id: str, name: Optional[str] = None, persisted: Optio
     conn.close()
 
 
+def save_gemini_history(session_id: str, history: list):
+    """Persist serialized Gemini chat history for a session."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE sessions SET gemini_history = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(history), datetime.now().isoformat(), session_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_gemini_history(session_id: str) -> list:
+    """Return the serialized Gemini chat history for a session, or []."""
+    conn = _get_conn()
+    row = conn.execute("SELECT gemini_history FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    conn.close()
+    if row and row["gemini_history"]:
+        try:
+            return json.loads(row["gemini_history"])
+        except Exception:
+            return []
+    return []
+
+
 def delete_session(session_id: str):
     """Delete a session and all related data. Files on disk are also removed."""
     conn = _get_conn()
@@ -360,12 +387,13 @@ def clear_session_context(session_id: str):
 
 # --- Conversation Messages ---
 
-def save_message(session_id: str, role: str, content: str):
+def save_message(session_id: str, role: str, content: str, metadata: dict = None):
     """Save a conversation message (role: 'user' or 'assistant')."""
     conn = _get_conn()
+    meta_json = json.dumps(metadata) if metadata else None
     conn.execute(
-        "INSERT INTO conversation_messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
-        (session_id, role, content, datetime.now().isoformat())
+        "INSERT INTO conversation_messages (session_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?)",
+        (session_id, role, content, datetime.now().isoformat(), meta_json)
     )
     conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (datetime.now().isoformat(), session_id))
     conn.commit()
@@ -376,11 +404,20 @@ def get_messages(session_id: str) -> List[Dict]:
     """Load all conversation messages for a session in order."""
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT role, content, timestamp FROM conversation_messages WHERE session_id = ? ORDER BY id",
+        "SELECT role, content, timestamp, metadata FROM conversation_messages WHERE session_id = ? ORDER BY id",
         (session_id,)
     ).fetchall()
     conn.close()
-    return [{"role": row["role"], "content": row["content"], "timestamp": row["timestamp"]} for row in rows]
+    result = []
+    for row in rows:
+        msg = {"role": row["role"], "content": row["content"], "timestamp": row["timestamp"]}
+        if row["metadata"]:
+            try:
+                msg["metadata"] = json.loads(row["metadata"])
+            except Exception:
+                pass
+        result.append(msg)
+    return result
 
 
 def clear_messages(session_id: str):

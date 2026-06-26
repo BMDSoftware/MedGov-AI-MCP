@@ -168,14 +168,112 @@ function App() {
     }
   }, [page]);
 
-  // Fetch initial session ID on mount (auth required)
+  const restoreAnalysisPage = (sid) => {
+    if (!sid) return;
+    const USE_CASE_TASK_TYPES = ['inference', 'cellpose'];
+    Promise.all([
+      apiFetch(getApiUrl(`/api/messages?session_id=${sid}`)).then(r => r.json()),
+      apiFetch(getApiUrl(`/api/tasks?session_id=${sid}`)).then(r => r.json()).catch(() => ({ tasks: [] })),
+    ]).then(([msgData, taskData]) => {
+      const dbMsgs = msgData.messages || [];
+      const hasBot = dbMsgs.some(m => m.role !== 'user');
+
+      if (!hasBot) {
+        try {
+          const saved = localStorage.getItem(`messages_${sid}`);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed.length > 0) { setMessages(parsed); return; }
+          }
+        } catch { /* ignore corrupt data */ }
+        if (dbMsgs.length > 0) {
+          setMessages(dbMsgs.map(m => ({ type: m.role === 'user' ? 'user' : 'bot', content: m.content, actions: [] })));
+        }
+        return;
+      }
+
+      const lastMsg = dbMsgs[dbMsgs.length - 1];
+      const pendingMeta = lastMsg?.metadata?.type === 'confirmation_required' ? lastMsg.metadata : null;
+      const uiMsgs = dbMsgs.map((m, i) => ({
+        type: m.role === 'user' ? 'user' : 'bot',
+        content: m.content,
+        actions: [],
+        ...(pendingMeta && i === dbMsgs.length - 1 ? { isConfirmation: true } : {}),
+      }));
+
+      const hasDoneUseCaseTask = (taskData.tasks || []).some(
+        t => t.status === 'done' && USE_CASE_TASK_TYPES.includes(t.task_type)
+      );
+      const reportSent = dbMsgs.some(
+        m => m.role === 'user' && m.content.includes('Make a report with the findings.')
+      );
+      if (hasDoneUseCaseTask && !reportSent) {
+        uiMsgs.push({
+          type: 'bot',
+          content: 'Background task completed. Ready to generate the report.',
+          actions: [{ id: 'send_report', label: 'Generate Report', query: 'Make a report with the findings.' }],
+        });
+      }
+
+      setMessages(uiMsgs);
+
+      if (pendingMeta) {
+        apiFetch(getApiUrl('/api/pending-tool'))
+          .then(r => r.json())
+          .then(p => {
+            const tool = p.pending
+              ? { tool_name: p.tool_name, arguments: p.arguments }
+              : { tool_name: pendingMeta.tool_name, arguments: pendingMeta.arguments };
+            setPendingTool(tool);
+          })
+          .catch(() => {});
+      }
+    }).catch(() => {});
+  };
+
+  // On login: fetch session ID then restore analysis page state
   useEffect(() => {
     if (!authToken) return;
     apiFetch(getApiUrl('/api/sessions'))
       .then(r => r.json())
-      .then(d => setCurrentSessionId(d.current_session_id))
+      .then(d => {
+        const sid = d.current_session_id;
+        setCurrentSessionId(sid);
+        restoreAnalysisPage(sid);
+      })
       .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken]);
+
+  // Re-restore analysis page state when navigating to it
+  useEffect(() => {
+    if (page !== 'analysis' || !authToken || !currentSessionId || isProcessing) return;
+    if (messages.length === 0) {
+      restoreAnalysisPage(currentSessionId);
+      return;
+    }
+    // Messages already loaded — only check if Generate Report button needs to appear
+    const USE_CASE_TASK_TYPES = ['inference', 'cellpose'];
+    const alreadyHasReportButton = messages.some(m => m.actions?.some(a => a.id === 'send_report'));
+    const reportSent = messages.some(m => m.type === 'user' && m.content?.includes('Make a report with the findings.'));
+    if (alreadyHasReportButton || reportSent) return;
+    apiFetch(getApiUrl(`/api/tasks?session_id=${currentSessionId}`))
+      .then(r => r.json())
+      .then(d => {
+        const hasDoneUseCaseTask = (d.tasks || []).some(
+          t => t.status === 'done' && USE_CASE_TASK_TYPES.includes(t.task_type)
+        );
+        if (hasDoneUseCaseTask) {
+          addMessage({
+            type: 'bot',
+            content: 'Background task completed. Ready to generate the report.',
+            actions: [{ id: 'send_report', label: 'Generate Report', query: 'Make a report with the findings.' }],
+          });
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   // Load app mode on mount (auth required)
   useEffect(() => {
@@ -206,20 +304,6 @@ function App() {
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken]);
-
-  // Restore messages from localStorage when session is loaded
-  useEffect(() => {
-    if (!currentSessionId) return;
-    const saved = localStorage.getItem(`messages_${currentSessionId}`);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.length > 0) setMessages(parsed);
-      } catch {
-        // ignore corrupt data
-      }
-    }
-  }, [currentSessionId]);
 
   // Persist messages to localStorage whenever they change (filter out transient states)
   useEffect(() => {

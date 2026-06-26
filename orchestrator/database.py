@@ -110,6 +110,13 @@ def init_db():
             enabled INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (user_id, tool_name)
         );
+
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id TEXT PRIMARY KEY,
+            mode TEXT NOT NULL DEFAULT 'normal',
+            llm_mode TEXT NOT NULL DEFAULT 'stateful',
+            confirmation INTEGER NOT NULL DEFAULT 1
+        );
     """)
     # Migrations: add columns to existing databases
     for table, col_def in [
@@ -185,6 +192,36 @@ def get_disabled_tools_for_user(user_id: str) -> List[str]:
     ).fetchall()
     conn.close()
     return [row["tool_name"] for row in rows]
+
+
+# --- User Settings ---
+
+_USER_SETTINGS_DEFAULTS = {"mode": "normal", "llm_mode": "stateful", "confirmation": True}
+
+def get_user_settings(user_id: str) -> dict:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    if not row:
+        return dict(_USER_SETTINGS_DEFAULTS)
+    return {
+        "mode": row["mode"],
+        "llm_mode": row["llm_mode"],
+        "confirmation": bool(row["confirmation"]),
+    }
+
+
+def upsert_user_settings(user_id: str, **kwargs) -> dict:
+    current = get_user_settings(user_id)
+    current.update(kwargs)
+    conn = _get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO user_settings (user_id, mode, llm_mode, confirmation) VALUES (?, ?, ?, ?)",
+        (user_id, current["mode"], current["llm_mode"], 1 if current["confirmation"] else 0)
+    )
+    conn.commit()
+    conn.close()
+    return current
 
 
 # --- Sessions ---

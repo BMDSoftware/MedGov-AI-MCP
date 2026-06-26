@@ -104,7 +104,9 @@ async def get_or_create_agent(user_id: str) -> AgenticAgent:
     """Return the existing agent for this user, or lazily create and initialise one."""
     async with _agents_lock:
         if user_id not in _agents:
+            settings = db.get_user_settings(user_id)
             agent = AgenticAgent()
+            agent._llm_mode = settings["llm_mode"]
             await agent._initialize_components()
             # Apply this user's disabled tools from DB, then system-level defaults
             disabled = db.get_disabled_tools_for_user(user_id)
@@ -113,10 +115,11 @@ async def get_or_create_agent(user_id: str) -> AgenticAgent:
             for t in _DEFAULT_DISABLED_TOOLS:
                 agent.agent_tools.discard(t)
             agent._refresh_agent_components()
-            agent.set_mode(_app_settings.get("mode", "normal"))
-            # Re-apply saved confirmation override (set_mode resets it to mode default)
-            if "confirmation" in _app_settings:
-                agent.require_confirmation = _app_settings["confirmation"]
+            # Reset mode sentinel so set_mode's change-guard doesn't skip applying the LLM extension
+            agent.mode = ''
+            agent.set_mode(settings["mode"])
+            # Re-apply confirmation override (set_mode resets it to mode default)
+            agent.require_confirmation = settings["confirmation"]
             _agents[user_id] = agent
         return _agents[user_id]
 
@@ -130,25 +133,6 @@ def _push_notification(event_type: str, message: str):
     })
     if len(_mcp_notifications) > 100:
         _mcp_notifications.pop(0)
-
-# --- App settings (persisted to disk) ---
-_SETTINGS_FILE = Path(__file__).parent / "app_settings.json"
-
-def _load_settings() -> dict:
-    if _SETTINGS_FILE.exists():
-        try:
-            return json.loads(_SETTINGS_FILE.read_text())
-        except Exception:
-            pass
-    return {"mode": "debug"}
-
-def _save_settings(settings: dict):
-    try:
-        _SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
-    except Exception as e:
-        print(f"[settings] Failed to save: {e}")
-
-_app_settings = _load_settings()
 
 
 async def _poll_mcp_tools(interval: int = 300):
@@ -423,60 +407,61 @@ async def set_metadata(data: dict = Body(...), current_user: dict = Depends(get_
 
 @app.get("/api/mode", tags=["system"], summary="Get current UI mode (debug or normal)")
 async def get_mode(current_user: dict = Depends(get_current_user)):
-    return {"mode": _app_settings.get("mode", "normal")}
+    settings = db.get_user_settings(current_user["user_id"])
+    return {"mode": settings["mode"]}
 
 @app.post("/api/mode", tags=["system"], summary="Set UI mode — 'debug' shows tool calls, 'normal' uses clinical language")
 async def set_mode(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    mode = data.get("mode", "debug")
+    user_id = current_user["user_id"]
+    mode = data.get("mode", "normal")
     if mode not in ("debug", "normal"):
         raise HTTPException(status_code=400, detail="mode must be 'debug' or 'normal'")
-    if mode == _app_settings.get("mode"):
-        return {"mode": mode}
-    _app_settings["mode"] = mode
-    # Reset confirmation to mode default when switching modes
-    if mode == "debug":
-        _app_settings["confirmation"] = True
-    else:
-        _app_settings["confirmation"] = False
-    _save_settings(_app_settings)
+    confirmation = mode == "debug"
+    db.upsert_user_settings(user_id, mode=mode, confirmation=confirmation)
     async with _agents_lock:
-        for agent in _agents.values():
+        agent = _agents.get(user_id)
+        if agent:
             agent.set_mode(mode)
     return {"mode": mode}
 
 @app.get("/api/confirmation", tags=["system"], summary="Get whether tool confirmation is required")
 async def get_confirmation(current_user: dict = Depends(get_current_user)):
-    return {"confirmation": _app_settings.get("confirmation", True)}
+    settings = db.get_user_settings(current_user["user_id"])
+    return {"confirmation": settings["confirmation"]}
 
 @app.post("/api/confirmation", tags=["system"], summary="Set tool confirmation (only effective in normal mode)")
 async def set_confirmation(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    if _app_settings.get("mode", "normal") == "debug":
+    user_id = current_user["user_id"]
+    settings = db.get_user_settings(user_id)
+    if settings["mode"] == "debug":
         return {"confirmation": True}
     enabled = bool(data.get("confirmation", False))
-    _app_settings["confirmation"] = enabled
-    _save_settings(_app_settings)
+    db.upsert_user_settings(user_id, confirmation=enabled)
     async with _agents_lock:
-        for agent in _agents.values():
+        agent = _agents.get(user_id)
+        if agent:
             agent.require_confirmation = enabled
     return {"confirmation": enabled}
 
 
 @app.get("/api/llm-mode", tags=["system"], summary="Get current LLM mode (stateful or stateless)")
 async def get_llm_mode(current_user: dict = Depends(get_current_user)):
-    return {"llm_mode": _app_settings.get("llm_mode", "stateful")}
+    settings = db.get_user_settings(current_user["user_id"])
+    return {"llm_mode": settings["llm_mode"]}
 
 @app.post("/api/llm-mode", tags=["system"], summary="Set LLM mode — 'stateful' keeps history, 'stateless' sends each query fresh")
 async def set_llm_mode(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    user_id = current_user["user_id"]
     llm_mode = data.get("llm_mode", "stateful")
     if llm_mode not in ("stateful", "stateless"):
         raise HTTPException(status_code=400, detail="llm_mode must be 'stateful' or 'stateless'")
-    _app_settings["llm_mode"] = llm_mode
-    _save_settings(_app_settings)
+    db.upsert_user_settings(user_id, llm_mode=llm_mode)
 
-    # Refresh active agents so STM built-ins are only exposed in stateless mode.
     stm_tool_names = set(STM_BUILTIN_TOOLS.keys())
     async with _agents_lock:
-        for agent in _agents.values():
+        agent = _agents.get(user_id)
+        if agent:
+            agent.set_llm_mode(llm_mode)
             if llm_mode == "stateless":
                 agent.available_tools.update(STM_BUILTIN_TOOLS)
                 agent.agent_tools.update(stm_tool_names)

@@ -17,7 +17,7 @@ This document explains how Short-Term Memory (STM) is used in the orchestrator a
 STM is exposed only when LLM mode is `stateless`.
 
 - LLM mode check in agent initialization: [orchestrator/agent/core.py](../orchestrator/agent/core.py)
-- Settings source for this decision: [orchestrator/app_settings.json](../orchestrator/app_settings.json)
+- Settings source for this decision: per-user `user_settings` table in SQLite (`llm_mode` column)
 
 Initialization flow:
 

@@ -13,7 +13,7 @@ load_dotenv()
 class GeminiClient:
     """Handles Gemini AI client setup, tool schema conversion, and stateful chat generation"""
 
-    def __init__(self, available_tools: Dict[str, Any], skills):
+    def __init__(self, available_tools: Dict[str, Any], skills, llm_mode: str = "stateful"):
         self.genai_client = None
         self.chat_session = None  # Tracks the stateful conversation history
         self.available_tools = available_tools
@@ -23,6 +23,7 @@ class GeminiClient:
         self.custom_system_prompt = None  # Store custom system prompt
         self.mode_extension = ""  # Appended to system prompt in normal mode
         self.skills = skills  # Reference to skills manager for dynamic prompt generation
+        self._llm_mode = llm_mode
 
         self._initialize_gemini()
         self.start_chat() # Initialize the chat session immediately
@@ -47,20 +48,12 @@ class GeminiClient:
         self.start_chat()
         print("System prompt updated for patient conversation")
 
-    def _get_llm_mode(self) -> str:
-        """Read llm_mode from app_settings.json dynamically (supports runtime changes via frontend)."""
-        import json
-        from pathlib import Path
-        try:
-            settings_path = Path(__file__).parent / "app_settings.json"
-            with open(settings_path) as f:
-                return json.load(f).get("llm_mode", "stateful")
-        except Exception:
-            return "stateful"
+    def set_llm_mode(self, llm_mode: str):
+        self._llm_mode = llm_mode
 
     @property
     def is_stateless_mode(self) -> bool:
-        return self._get_llm_mode() == "stateless"
+        return self._llm_mode == "stateless"
 
     def set_model(self, model_id: str):
         """Switch to a different model, preserving the current chat history."""

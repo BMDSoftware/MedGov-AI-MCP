@@ -1,7 +1,5 @@
 import asyncio
-import json
 import logging
-from pathlib import Path
 from typing import Set
 
 from tool_registry import ToolRegistry
@@ -39,7 +37,8 @@ class AgenticAgent(
         self.callback = callback
         self.llm_client = None
         self.session_context = SessionContext()
-        self.mode = 'debug'
+        self.mode = 'normal'
+        self._llm_mode = 'stateful'
         self.is_agent_autonomous = False
         self.require_confirmation = True
         self.pending_tool_call = None
@@ -70,16 +69,15 @@ class AgenticAgent(
         else:
             print("Using Gemini (API) for orchestration")
             from gemini_client import GeminiClient
-            self.llm_client = GeminiClient(enabled_tools, skills)
+            self.llm_client = GeminiClient(enabled_tools, skills, llm_mode=self._llm_mode)
 
     def _is_stateless_llm_mode(self) -> bool:
-        """Read llm_mode from app settings to decide whether STM tools should be exposed."""
-        settings_path = Path(__file__).resolve().parents[1] / "app_settings.json"
-        try:
-            with open(settings_path) as f:
-                return json.load(f).get("llm_mode", "stateful") == "stateless"
-        except Exception:
-            return False
+        return self._llm_mode == "stateless"
+
+    def set_llm_mode(self, llm_mode: str):
+        self._llm_mode = llm_mode
+        if self.llm_client and hasattr(self.llm_client, 'set_llm_mode'):
+            self.llm_client.set_llm_mode(llm_mode)
 
     async def close(self):
         """Explicit async cleanup for tool registry resources."""

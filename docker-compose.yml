@@ -14,8 +14,8 @@ services:
       # User filesystem: mounted read-only so the workspace directory picker
       # can browse the user's files but the orchestrator cannot modify them.
       # /Users for macOS, /home for Linux.
-      - /Users:/Users:ro
-      - /home:/home:ro
+      - ${HOST_HOME_PATH_MACOS:-/Users}:/Users:ro
+      - ${HOST_HOME_PATH_LINUX:-/home}:/home:ro
     env_file: ./orchestrator/.env
     environment:
       - APP_ROOT=/app

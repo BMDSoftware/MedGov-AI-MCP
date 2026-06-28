@@ -25,10 +25,14 @@ import {
   MdUploadFile,
   MdRefresh,
   MdInsertDriveFile,
+  MdArrowForward,
+  MdScience,
+  MdPlayCircleOutline,
 } from 'react-icons/md';
 import './Workspaces.css';
 
 const ORDER_KEY = 'workspaces_order';
+const SAMPLE_NAMES = new Set(['roi', 'cellpose']);
 
 function classifyLine(msg) {
   if (msg.startsWith('[ERROR]')) return 'error';
@@ -766,6 +770,42 @@ function WorkspaceCard({ dir, onToggle, onEdit, onDelete, openConsoleId, setOpen
   );
 }
 
+// ─── Seed Sample Button ───────────────────────────────────────────────────────
+
+function SeedSampleButton({ dirId, onDone }) {
+  const [status, setStatus] = useState('idle'); // idle | loading | done | error
+
+  async function handleSeed() {
+    setStatus('loading');
+    try {
+      const res = await apiFetch(getApiUrl(`/api/watched-directories/${dirId}/seed-sample`), { method: 'POST' });
+      if (!res.ok) throw new Error();
+      setStatus('done');
+      onDone();
+      setTimeout(() => setStatus('idle'), 3000);
+    } catch {
+      setStatus('error');
+      setTimeout(() => setStatus('idle'), 3000);
+    }
+  }
+
+  return (
+    <div className="ws-tutorial-action">
+      <button
+        className="btn-seed-sample"
+        onClick={handleSeed}
+        disabled={status === 'loading' || status === 'done'}
+      >
+        <MdPlayCircleOutline size={16} />
+        {status === 'loading' && 'Uploading sample...'}
+        {status === 'done' && 'Sample uploaded - check the Console'}
+        {status === 'error' && 'Failed - try again'}
+        {status === 'idle' && 'Try it: upload sample ROI image'}
+      </button>
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Workspaces({ appMode }) {
@@ -790,9 +830,10 @@ export default function Workspaces({ appMode }) {
       .catch(() => {});
   }
 
-  function handleReorder(newDirs) {
-    setDirs(newDirs);
-    localStorage.setItem(ORDER_KEY, JSON.stringify(newDirs.map(d => d.id)));
+  function handleReorder(newCustomDirs) {
+    const sampleDirs = dirs.filter(d => SAMPLE_NAMES.has(d.name.toLowerCase()));
+    setDirs([...sampleDirs, ...newCustomDirs]);
+    localStorage.setItem(ORDER_KEY, JSON.stringify(newCustomDirs.map(d => d.id)));
   }
 
   useEffect(() => {
@@ -854,6 +895,21 @@ export default function Workspaces({ appMode }) {
     }
   }
 
+  const sampleDirs = dirs.filter(d => SAMPLE_NAMES.has(d.name.toLowerCase()));
+  const customDirs = dirs.filter(d => !SAMPLE_NAMES.has(d.name.toLowerCase()));
+
+  const cardProps = (dir) => ({
+    key: dir.id,
+    dir,
+    appMode,
+    onToggle: handleToggle,
+    onEdit: setEditTarget,
+    onDelete: handleDelete,
+    onImportFiles: handleImportFiles,
+    openConsoleId: openConsole?.id,
+    setOpenConsole,
+  });
+
   return (
     <div className="directories-page">
       {/* Subtle background */}
@@ -874,7 +930,69 @@ export default function Workspaces({ appMode }) {
         </button>
       </div>
 
-      {dirs.length === 0 ? (
+      {/* Sample workspaces */}
+      {sampleDirs.length > 0 && (
+        <div className="ws-section">
+          <div className="ws-section-label">
+            <MdScience size={15} />
+            <span>Sample Workspaces</span>
+          </div>
+
+          <div className="ws-tutorial-card">
+            <div className="ws-tutorial-steps">
+              <div className="ws-tutorial-step">
+                <span className="ws-tutorial-num">1</span>
+                <span>Upload a pathology image to the <strong>ROI</strong> workspace — use the button below or Import on the card.</span>
+              </div>
+              <MdArrowForward size={16} className="ws-tutorial-arrow" />
+              <div className="ws-tutorial-step">
+                <span className="ws-tutorial-num">2</span>
+                <span>The AI runs <strong>Cellpose</strong> segmentation automatically and counts the cells.</span>
+              </div>
+              <MdArrowForward size={16} className="ws-tutorial-arrow" />
+              <div className="ws-tutorial-step">
+                <span className="ws-tutorial-num">3</span>
+                <span>If more than 1,000 cells are detected, the mask is copied to the <strong>CELLPOSE</strong> workspace.</span>
+              </div>
+            </div>
+            {(() => {
+              const roiDir = sampleDirs.find(d => d.name.toLowerCase() === 'roi');
+              if (!roiDir) return null;
+              return (
+                <SeedSampleButton dirId={roiDir.id} onDone={load} />
+              );
+            })()}
+          </div>
+
+          <Reorder.Group
+            as="div"
+            axis="y"
+            values={sampleDirs}
+            onReorder={() => {}}
+            className="directories-list"
+          >
+            {sampleDirs.map(dir => (
+              <WorkspaceCard {...cardProps(dir)} key={dir.id} />
+            ))}
+          </Reorder.Group>
+        </div>
+      )}
+
+      {/* Divider + your workspaces */}
+      {sampleDirs.length > 0 && (
+        <div className="ws-section-divider">
+          <span>Your Workspaces</span>
+        </div>
+      )}
+
+      {customDirs.length === 0 && sampleDirs.length > 0 ? (
+        <div className="ws-custom-empty">
+          <p>No custom workspaces yet.</p>
+          <button className="btn-primary" onClick={() => setShowModal(true)}>
+            <MdAdd size={16} /> Add workspace
+          </button>
+        </div>
+      ) : customDirs.length === 0 ? (
         <div className="empty-state">
           <MdFolderSpecial size={48} className="empty-icon" />
           <strong>No workspaces yet</strong>
@@ -887,22 +1005,12 @@ export default function Workspaces({ appMode }) {
         <Reorder.Group
           as="div"
           axis="y"
-          values={dirs}
+          values={customDirs}
           onReorder={handleReorder}
           className="directories-list"
         >
-          {dirs.map(dir => (
-            <WorkspaceCard
-              key={dir.id}
-              dir={dir}
-              appMode={appMode}
-              onToggle={handleToggle}
-              onEdit={setEditTarget}
-              onDelete={handleDelete}
-              onImportFiles={handleImportFiles}
-              openConsoleId={openConsole?.id}
-              setOpenConsole={setOpenConsole}
-            />
+          {customDirs.map(dir => (
+            <WorkspaceCard {...cardProps(dir)} key={dir.id} />
           ))}
         </Reorder.Group>
       )}

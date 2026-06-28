@@ -58,6 +58,7 @@ COPY mcp-utils/ mcp-utils/
 COPY mcp-ipath/ mcp-ipath/
 COPY mcp-cellpose/ mcp-cellpose/
 COPY orchestrator/ orchestrator/
+COPY test_data/ROI_TEST_IMAGE.jpeg test_data/ROI_TEST_IMAGE.jpeg
 
 # mcp-config.json is gitignored (machine-specific); use the example as the in-image default
 RUN cp orchestrator/mcp-config.json.example orchestrator/mcp-config.json

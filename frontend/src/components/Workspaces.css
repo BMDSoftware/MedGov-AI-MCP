@@ -821,6 +821,153 @@
 
 .empty-state p { margin: 0; font-size: 0.88rem; }
 
+/* ── Section label (Sample / Your Workspaces) ── */
+.ws-section {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 8px;
+}
+
+.ws-section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #a78bfa;
+  margin-bottom: 12px;
+}
+
+.ws-section-divider {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 28px 0 18px;
+  color: var(--text-secondary, #9ca3af);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ws-section-divider::before,
+.ws-section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border, #2a2a3c);
+}
+
+/* ── Tutorial callout ── */
+.ws-tutorial-card {
+  position: relative;
+  z-index: 1;
+  background: #7c3aed0c;
+  border: 1px solid #7c3aed30;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.ws-tutorial-steps {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ws-tutorial-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 180px;
+  font-size: 0.83rem;
+  color: var(--text-secondary, #9ca3af);
+  line-height: 1.45;
+}
+
+.ws-tutorial-step strong {
+  color: var(--text-primary, #e5e7eb);
+}
+
+.ws-tutorial-num {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #7c3aed33;
+  border: 1px solid #7c3aed66;
+  color: #a78bfa;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.ws-tutorial-arrow {
+  flex-shrink: 0;
+  color: #7c3aed88;
+}
+
+.ws-tutorial-action {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #7c3aed22;
+}
+
+.btn-seed-sample {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: 1px solid #7c3aed55;
+  background: #7c3aed18;
+  color: #a78bfa;
+  font-size: 0.83rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-seed-sample:hover:not(:disabled) {
+  background: #7c3aed28;
+  border-color: #7c3aed88;
+}
+
+.btn-seed-sample:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+@media (max-width: 640px) {
+  .ws-tutorial-arrow { display: none; }
+  .ws-tutorial-step { min-width: 100%; }
+}
+
+/* ── Custom workspaces empty prompt ── */
+.ws-custom-empty {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  background: var(--bg-card, #1a1a2e);
+  border: 1px dashed var(--border, #2a2a3c);
+  border-radius: 12px;
+  color: var(--text-secondary, #9ca3af);
+  font-size: 0.88rem;
+}
+
+.ws-custom-empty p { margin: 0; flex: 1; }
+
 /* ── Tool Selector ── */
 .tool-selector {
   background: var(--bg-card);

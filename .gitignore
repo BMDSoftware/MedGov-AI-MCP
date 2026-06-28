@@ -67,6 +67,7 @@ orchestrator/mcp-config.json
 
 # Test data - large medical imaging files
 test_data/*.jpeg
+!test_data/ROI_TEST_IMAGE.jpeg
 test_data/*.jpg
 test_data/*.png
 test_data/*.deb

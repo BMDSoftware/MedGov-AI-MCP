@@ -805,7 +805,7 @@ function App() {
         </div>
       </aside>}
 
-      <main className={`main${page === 'about' ? ' main-fullpage' : ''}`}>
+      <main className={`main${['about', 'workspaces'].includes(page) ? ' main-fullpage' : ''}`}>
         {/* Running Tool Indicator */}
         {runningTool && (
           <div style={{

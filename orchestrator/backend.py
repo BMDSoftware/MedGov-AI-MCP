@@ -670,6 +670,29 @@ async def import_files_to_workspace(
     return {"status": "success", "file_count": saved_count, "total_size": total_size, "target_path": str(incoming_dir)}
 
 
+@app.post("/api/watched-directories/{dir_id}/seed-sample",
+          tags=["system"],
+          summary="Copy the built-in sample ROI image into a workspace's incoming directory")
+async def seed_sample_image(dir_id: str, current_user: dict = Depends(get_current_user)):
+    wd = db.get_watched_directory(dir_id)
+    if not wd or wd.get("user_id") != current_user["user_id"]:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    sample_path = Path(__file__).resolve().parents[1] / "test_data" / "ROI_TEST_IMAGE.jpeg"
+    if not sample_path.is_file():
+        raise HTTPException(status_code=404, detail="Sample image not found on server")
+
+    dest_dir = Path(wd["path"])
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_file = dest_dir / sample_path.name
+    shutil.copy2(str(sample_path), str(dest_file))
+
+    watcher_service.push_console(dir_id, f"[INFO] Sample image '{sample_path.name}' copied into workspace")
+    asyncio.create_task(_watcher_execute(dir_id, [dest_file]))
+
+    return {"status": "success", "filename": sample_path.name}
+
+
 @app.get("/api/browse-directory", tags=["system"], summary="Browse filesystem directories for the directory picker")
 async def browse_directory(path: str = "/", current_user: dict = Depends(get_current_user)):
     path = os.path.abspath(path)

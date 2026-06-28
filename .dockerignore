@@ -19,8 +19,9 @@ orchestrator/data/
 mcp-monai/bundles/
 mcp-monai/data/
 
-# Test data
+# Test data (exclude bulk files but keep sample ROI image)
 test_data/
+!test_data/ROI_TEST_IMAGE.jpeg
 
 # Weekly notes
 weekly/

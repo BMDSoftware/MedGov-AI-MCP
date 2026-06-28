@@ -627,7 +627,7 @@ def create_default_workspaces(user_id: str, username: str, workspaces_root: str)
     roi_prompt = (
         f"When a new file arrives, check whether it is a pathology ROI image. "
         f"If it is, run Cellpose cell segmentation and count the cells. "
-        f"If the cell count exceeds 2000, copy the segmentation mask to the output folder at "
+        f"If the cell count exceeds 1000, copy the segmentation mask to the output folder at "
         f"{cellpose_workspace} and log the result. "
         f"If the file is not a valid ROI image, move it to the uncertain folder."
     )

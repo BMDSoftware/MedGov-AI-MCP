@@ -5,6 +5,52 @@
   padding: 12px 0 20px;
 }
 
+.example-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.example-prompts-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.example-prompts-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.example-prompt-chip {
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.example-prompt-chip:hover:not(:disabled) {
+  background: var(--bg-card);
+  border-color: var(--accent, #6366f1);
+  color: var(--text-primary);
+}
+
+.example-prompt-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .use-case-suggestions-label {
   font-size: 11px;
   font-weight: 600;

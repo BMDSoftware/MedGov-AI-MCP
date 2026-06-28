@@ -19,6 +19,14 @@ import NavDock from './components/NavDock';
 import AgentLog from './components/AgentLog';
 import { MdHome, MdSmartToy, MdBiotech, MdBarChart, MdDescription, MdFolder, MdSettings, MdHistory, MdScience } from 'react-icons/md';
 
+const EXAMPLE_PROMPTS = [
+  'What can you do?',
+  'List all your available MCP tools',
+  'What MCP servers are you connected to?',
+  'Can you help me with a general health question?',
+  'What AI models are available for inference?',
+];
+
 const USE_CASES = [
   {
     id: 'dicom',
@@ -1052,9 +1060,28 @@ function App() {
                       </div>
                     ))}
                   </div>
+
                 </div>
               )}
               <div ref={messagesEndRef} />
+            </div>
+
+            <div className="example-prompts">
+              <div className="example-prompts-chips">
+                {EXAMPLE_PROMPTS.map(prompt => (
+                  <button
+                    key={prompt}
+                    className="example-prompt-chip"
+                    disabled={isProcessing}
+                    onClick={() => {
+                      setUserQuery(prompt);
+                      textareaRef.current?.focus();
+                    }}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="input-area">

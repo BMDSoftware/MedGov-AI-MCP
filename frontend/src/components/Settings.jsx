@@ -150,6 +150,8 @@ function Settings({ onModeChange, appMode }) {
       .catch(() => {});
   }, []);
 
+  const [showStatelessConfirm, setShowStatelessConfirm] = useState(false);
+
   const handleSetLlmMode = async (newMode) => {
     setLlmModeLoading(true);
     try {
@@ -161,6 +163,14 @@ function Settings({ onModeChange, appMode }) {
       setLlmMode(newMode);
     } catch (e) {}
     setLlmModeLoading(false);
+  };
+
+  const requestSetLlmMode = (newMode) => {
+    if (newMode === 'stateless' && llmMode !== 'stateless') {
+      setShowStatelessConfirm(true);
+      return;
+    }
+    handleSetLlmMode(newMode);
   };
 
   const handleSetMode = async (newMode) => {
@@ -569,7 +579,7 @@ Disk     : ${diagData.system.disk_free_gb} GB free / ${diagData.system.disk_tota
           </button>
           <button
             className={`settings-mode-btn${llmMode === 'stateless' ? ' active debug' : ''}`}
-            onClick={() => handleSetLlmMode('stateless')}
+            onClick={() => requestSetLlmMode('stateless')}
             disabled={llmModeLoading}
           >
             Stateless
@@ -735,6 +745,33 @@ Disk     : ${diagData.system.disk_free_gb} GB free / ${diagData.system.disk_tota
           ) : (
             <p className="settings-mode-desc">{statsLoading ? 'Loading...' : 'Could not load system stats.'}</p>
           )}
+        </div>
+      )}
+
+      {showStatelessConfirm && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowStatelessConfirm(false)}>
+          <div className="modal" style={{ width: 420 }}>
+            <div className="modal-header">
+              <h3>Enable Stateless Mode?</h3>
+              <button className="modal-close" onClick={() => setShowStatelessConfirm(false)}>&times;</button>
+            </div>
+            <div style={{ padding: '20px 24px 0' }}>
+              <p className="settings-mode-desc">
+                Stateless mode is experimental and may fail to complete some tasks.
+                Do you want to continue?
+              </p>
+            </div>
+            <div className="modal-actions" style={{ padding: '20px 24px 24px' }}>
+              <button type="button" className="btn-ghost" onClick={() => setShowStatelessConfirm(false)}>Cancel</button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => { setShowStatelessConfirm(false); handleSetLlmMode('stateless'); }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -99,9 +99,6 @@ class ExecutionMixin:
         while iterations < max_iterations:
             iterations += 1
             print(f"Iteration {iterations}/{max_iterations}")
-            # STM: expire outdated skill references
-            if is_stateless and hasattr(self, "stm_manager"):
-                self.stm_manager.tick_skill_ttls()
             try:
                 # Build prompt and get LLM response
                 if is_gemini and _resume_response is not None:

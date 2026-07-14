@@ -1,0 +1,58 @@
+{
+  "name": "@openpharma-org/codes-mcp-server",
+  "version": "0.1.2",
+  "description": "MCP server for clinical table search services - provides access to clinical coding systems and medical data tables",
+  "type": "module",
+  "main": "build/index.js",
+  "bin": {
+    "codes-mcp-server": "build/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node -r dotenv/config build/index.js",
+    "dev": "tsc --watch",
+    "clean": "rm -rf build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "server",
+    "clinical",
+    "medical",
+    "coding",
+    "icd",
+    "loinc",
+    "snomed",
+    "healthcare",
+    "terminology",
+    "fhir",
+    "ai",
+    "tools"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openpharma-org/codes-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/openpharma-org/codes-mcp-server/issues"
+  },
+  "homepage": "https://github.com/openpharma-org/codes-mcp-server#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "build",
+    "README.md",
+    "LICENSE"
+  ]
+}

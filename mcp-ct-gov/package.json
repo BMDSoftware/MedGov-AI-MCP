@@ -1,0 +1,49 @@
+{
+  "name": "@openpharma-org/ct.gov-mcp-server",
+  "version": "0.4.7",
+  "description": "Model Context Protocol (MCP) server for searching clinical trials from ClinicalTrials.gov with advanced filtering, complex queries, and comprehensive study information",
+  "type": "module",
+  "main": "build/index.js",
+  "bin": {
+    "ct-gov-mcp-server": "build/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node -r dotenv/config build/index.js",
+    "dev": "tsc --watch",
+    "clean": "rm -rf build",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "server",
+    "clinical-trials",
+    "ct.gov",
+    "clinicaltrials.gov",
+    "medical-research",
+    "healthcare",
+    "search",
+    "api",
+    "ai",
+    "tools"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "build",
+    "README.md",
+    "LICENSE"
+  ]
+}

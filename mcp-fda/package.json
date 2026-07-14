@@ -1,0 +1,67 @@
+{
+  "name": "@openpharma-org/fda-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for FDA drug information lookup and safety data. Provides access to FDA drug labels, adverse events, and regulatory information through the openFDA API.",
+  "main": "build/index.js",
+  "bin": {
+    "fda-mcp-server": "build/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:legacy": "esbuild src/index.js --bundle --platform=node --target=node18 --format=esm --outfile=dist/index.js --external:@modelcontextprotocol/sdk --external:axios",
+    "clean": "rm -rf build dist",
+    "dev": "tsx src/index.ts",
+    "dev:watch": "tsx watch src/index.ts",
+    "start": "npm run build && node build/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "fda",
+    "drug",
+    "medication",
+    "pharmacy",
+    "safety",
+    "adverse-events",
+    "openfda",
+    "healthcare",
+    "model-context-protocol"
+  ],
+  "author": "OpenPharma Contributors",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openpharma-org/fda-mcp-server.git"
+  },
+  "homepage": "https://github.com/openpharma-org/fda-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/openpharma-org/fda-mcp-server/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.1",
+    "adm-zip": "^0.5.16",
+    "axios": "^1.7.9",
+    "better-sqlite3": "^12.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.5",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.18.5",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "esbuild": "^0.25.5",
+    "eslint": "^9.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.2"
+  }
+}

@@ -1,0 +1,12 @@
+# Core MCP dependencies
+fastmcp>=2.0.0
+anyio>=3.0.0
+
+# HTTP client for API calls
+httpx>=0.24.0
+
+# JSON parsing and repair
+json-repair>=0.25.0
+
+# Standard library dependencies (included with Python)
+# datetime, typing, dataclasses, enum, pathlib, os, sys, subprocess, time, asyncio, json, re

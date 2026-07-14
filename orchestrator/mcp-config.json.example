@@ -47,6 +47,45 @@
       "env": {
         "PYTHONUNBUFFERED": "1"
       }
+    },
+    "pubmed": {
+      "command": "${APP_ROOT}/mcp-pubmed/venv/bin/python",
+      "args": ["${APP_ROOT}/mcp-pubmed/server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    "hpo": {
+      "command": "${APP_ROOT}/mcp-hpo/venv/bin/python",
+      "args": ["${APP_ROOT}/mcp-hpo/server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    "clinicaltrials": {
+      "command": "node",
+      "args": ["${APP_ROOT}/mcp-ct-gov/build/index.js"],
+      "transport": "stdio"
+    },
+    "fda": {
+      "command": "node",
+      "args": ["${APP_ROOT}/mcp-fda/build/index.js"],
+      "transport": "stdio"
+    },
+    "nlm-codes": {
+      "command": "node",
+      "args": ["${APP_ROOT}/mcp-nlm-codes/build/index.js"],
+      "transport": "stdio"
+    },
+    "calculator": {
+      "command": "${APP_ROOT}/mcp-calculator/venv/bin/python",
+      "args": ["${APP_ROOT}/mcp-calculator/api_server.py"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
     }
   }
 }

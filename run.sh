@@ -57,6 +57,9 @@ setup_venv "mcp-radlex"
 setup_venv "mcp-utils"
 setup_venv "mcp-cellpose"
 setup_venv "mcp-ipath"
+setup_venv "mcp-pubmed"
+setup_venv "mcp-hpo"
+setup_venv "mcp-calculator"
 setup_venv "orchestrator"
 
 # ── Frontend deps ─────────────────────────────────────────────────────────────
